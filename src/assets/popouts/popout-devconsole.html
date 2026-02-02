@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Dev Console</title>
+  <style>
+    /**
+     * Dev Console Styles
+     * 
+     * Three-tab debugging interface:
+     * 1. Logs - Unified log viewer from Host, MCP, and UI sources
+     * 2. Conversation - AI Agent conversation history viewer
+     * 3. System Prompt - Current system prompt viewer
+     *
+     * Uses the same CSS variables as globals.css for theme consistency.
+     */
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* Dark mode (default) - matching globals.css */
+    :root {
+      --background: #0D0D0B;
+      --foreground: #ABABAB;
+      --card: #1A1917;
+      --card-foreground: #ABABAB;
+      --muted: #1A1917;
+      --muted-foreground: #666666;
+      --border: #3A3836;
+      --destructive: #F85149;
+      --warning: #D29922;
+      --radius: 0.3rem;
+      --primary: #ABABAB;
+      
+      /* Log level colors */
+      --log-debug: #666666;
+      --log-info: #ABABAB;
+      --log-notice: #58A6FF;
+      --log-warning: #D29922;
+      --log-error: #F85149;
+      --log-critical: #F85149;
+      --log-alert: #F85149;
+      --log-emergency: #F85149;
+
+    }
+
+    /* Light mode */
+    :root.light {
+      --background: #EFEEEC;
+      --foreground: #1F1E1D;
+      --card: #EFEEEC;
+      --card-foreground: #1F1E1D;
+      --muted: #E5E4E2;
+      --muted-foreground: #6B6A68;
+      --border: #D4D3D1;
+      --destructive: #DC2626;
+      --warning: #CA8A04;
+      --primary: #1F1E1D;
+      
+      --log-debug: #6B6A68;
+      --log-info: #1F1E1D;
+      --log-notice: #2563EB;
+      --log-warning: #CA8A04;
+      --log-error: #DC2626;
+      --log-critical: #DC2626;
+      --log-alert: #DC2626;
+      --log-emergency: #DC2626;
+    }
+
+    @font-face {
+      font-family: "Sora";
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: local("Sora");
+    }
+
+    body {
+      font-family: "Sora", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* =========================================================
+       TAB BAR
+       ========================================================= */
+    .tab-bar {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card);
+      flex-shrink: 0;
+      gap: 0;
+    }
+
+    .tab {
+      padding: 10px 16px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted-foreground);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+
+    .tab:hover {
+      color: var(--foreground);
+    }
+
+    .tab.active {
+      color: var(--foreground);
+      border-bottom-color: var(--primary);
+    }
+
+    .tab-spacer {
+      flex: 1;
+    }
+
+    /* =========================================================
+       TAB CONTENT PANELS
+       ========================================================= */
+    .tab-content {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    /* =========================================================
+       TOOLBAR (shared by all tabs)
+       ========================================================= */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card);
+      flex-shrink: 0;
+    }
+
+    .toolbar-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toolbar-label {
+      color: var(--muted-foreground);
+      font-size: 12px;
+    }
+
+    .toolbar button {
+      background: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--foreground);
+      padding: 4px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .toolbar button:hover {
+      background: var(--border);
+    }
+
+    .toolbar button:active {
+      background: var(--muted-foreground);
+    }
+
+    /* Dropdown button */
+    .dropdown-container {
+      position: relative;
+    }
+
+    .dropdown-trigger {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-right: 8px;
+    }
+
+    .dropdown-trigger svg {
+      width: 10px;
+      height: 10px;
+      opacity: 0.7;
+    }
+
+    .dropdown-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-width: 100px;
+      z-index: 100;
+      overflow: hidden;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+    }
+
+    .dropdown-menu.open {
+      display: block;
+    }
+
+    .dropdown-menu .dropdown-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: none !important;
+      border-radius: 0 !important;
+      background: transparent;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: var(--foreground);
+      cursor: pointer;
+    }
+
+    .dropdown-menu .dropdown-item:not(:last-child) {
+      box-shadow: inset 0 -1px 0 var(--border);
+    }
+
+    .dropdown-menu .dropdown-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    :root.light .dropdown-menu .dropdown-item:hover {
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .toolbar-spacer {
+      flex: 1;
+    }
+
+    .auto-scroll-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .auto-scroll-toggle input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border: 1.5px solid var(--foreground);
+      border-radius: 3px;
+      cursor: pointer;
+      position: relative;
+      background: transparent;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .auto-scroll-toggle input[type="checkbox"]:hover {
+      border-color: var(--primary);
+    }
+
+    .auto-scroll-toggle input[type="checkbox"]:checked {
+      background: var(--foreground);
+      border-color: var(--foreground);
+    }
+
+    .auto-scroll-toggle input[type="checkbox"]:checked::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 1px;
+      width: 4px;
+      height: 8px;
+      border: solid var(--background);
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    /* =========================================================
+       LOG VIEWER (Tab 1)
+       ========================================================= */
+    .log-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+      font-size: 12px;
+    }
+
+    .log-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .log-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .log-container::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    .log-container::-webkit-scrollbar-thumb:hover {
+      background: var(--muted-foreground);
+    }
+
+    .log-entry {
+      display: flex;
+      padding: 2px 12px;
+      border-bottom: 1px solid transparent;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    .log-entry:hover {
+      background: var(--card);
+    }
+
+    .log-timestamp {
+      color: var(--muted-foreground);
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .log-level {
+      flex-shrink: 0;
+      text-transform: uppercase;
+      font-weight: 600;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .log-level.debug { color: var(--log-debug); }
+    .log-level.info { color: var(--log-info); }
+    .log-level.notice { color: var(--log-notice); }
+    .log-level.warning { color: var(--log-warning); }
+    .log-level.error { color: var(--log-error); }
+    .log-level.critical { color: var(--log-critical); }
+    .log-level.alert { color: var(--log-alert); }
+    .log-level.emergency { color: var(--log-emergency); }
+
+    .log-source {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .log-source.host {
+      color: #7EE787;
+    }
+
+    .log-message {
+      flex: 1;
+      min-width: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--foreground);
+    }
+
+    /* =========================================================
+       COLLAPSIBLE JSON (shared)
+       ========================================================= */
+    .json-container {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 2px;
+      max-width: 100%;
+    }
+
+    .json-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+      color: var(--muted-foreground);
+      background: transparent;
+      border-radius: 3px;
+      padding: 1px 6px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+
+    .json-toggle:hover {
+      background: var(--muted);
+    }
+
+    .json-toggle-arrow {
+      display: inline-block;
+      transition: transform 0.15s;
+    }
+
+    .json-toggle.expanded .json-toggle-arrow {
+      transform: rotate(90deg);
+    }
+
+    .json-copy {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      margin-left: 4px;
+      cursor: pointer;
+      color: var(--muted-foreground);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-size: 12px;
+      transition: background 0.15s, color 0.15s;
+      vertical-align: middle;
+    }
+
+    .json-copy:hover {
+      background: var(--muted);
+      color: var(--foreground);
+    }
+
+    .json-copy.copied {
+      color: #7EE787;
+      border-color: #7EE787;
+    }
+
+    .json-content {
+      display: none;
+      margin-top: 4px;
+      padding: 8px;
+      background: transparent;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      max-height: 300px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      width: 100%;
+      flex-basis: 100%;
+    }
+
+    .json-content.expanded {
+      display: block;
+    }
+
+    .json-content pre {
+      margin: 0;
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* JSON syntax highlighting */
+    .json-key { color: #79C0FF; }
+    .json-string { color: #A5D6FF; }
+    .json-number { color: #FFA657; }
+    .json-boolean { color: #FF7B72; }
+    .json-null { color: #8B949E; }
+
+    .log-message-text {
+      display: inline;
+    }
+
+    /* =========================================================
+       CONVERSATION VIEWER (Tab 2)
+       ========================================================= */
+    .conversation-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+
+    .conversation-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .conversation-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .conversation-container::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    .conversation-container::-webkit-scrollbar-thumb:hover {
+      background: var(--muted-foreground);
+    }
+
+    .message-entry {
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .message-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .message-header:hover {
+      background: var(--border);
+    }
+
+    .message-role {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: var(--foreground);
+      background: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .message-id {
+      font-size: 10px;
+      color: var(--muted-foreground);
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    }
+
+    .message-expand-icon {
+      margin-left: auto;
+      color: var(--muted-foreground);
+      transition: transform 0.15s;
+      transform: rotate(-90deg);
+      display: flex;
+      align-items: center;
+    }
+
+    .message-entry.expanded .message-expand-icon {
+      transform: rotate(0deg);
+    }
+
+    .message-body {
+      display: none;
+      padding: 12px;
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+      font-size: 11px;
+      background: var(--background);
+      border-top: 1px solid var(--border);
+    }
+
+    .message-entry.expanded .message-body {
+      display: block;
+    }
+
+    .message-body pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message-preview {
+      font-size: 12px;
+      color: var(--foreground);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 400px;
+    }
+
+    .message-tool-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted-foreground);
+      background: var(--muted);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 4px;
+    }
+
+    /* =========================================================
+       SYSTEM PROMPT VIEWER (Tab 3)
+       ========================================================= */
+    .prompt-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+
+    .prompt-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .prompt-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .prompt-container::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    .prompt-container::-webkit-scrollbar-thumb:hover {
+      background: var(--muted-foreground);
+    }
+
+    .prompt-content {
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--foreground);
+      background: transparent;
+      border: none;
+      padding: 16px;
+    }
+
+    /* Highlight dynamic sections in the prompt */
+    .prompt-dynamic {
+      background: rgba(88, 166, 255, 0.15);
+      border-radius: 2px;
+      padding: 0 2px;
+    }
+
+    /* =========================================================
+       EMPTY STATE & STATUS BAR
+       ========================================================= */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--muted-foreground);
+    }
+
+    .empty-state-icon {
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--card);
+      font-size: 11px;
+      color: var(--muted-foreground);
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <!-- Tab Bar -->
+  <div class="tab-bar">
+    <div class="tab active" data-tab="logs">Logs</div>
+    <div class="tab" data-tab="conversation">Conversation</div>
+    <div class="tab" data-tab="prompt">System Prompt</div>
+    <div class="tab-spacer"></div>
+  </div>
+
+  <!-- Tab 1: Logs -->
+  <div class="tab-content active" id="tab-logs">
+    <div class="toolbar">
+      <div class="toolbar-section">
+        <span class="toolbar-label">Source:</span>
+        <div class="dropdown-container">
+          <button id="filter-source-btn" class="dropdown-trigger">
+            <span id="filter-source-label">All</span>
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+          </button>
+          <div id="filter-source-dropdown" class="dropdown-menu">
+            <button class="dropdown-item" data-value="all">All</button>
+            <button class="dropdown-item" data-value="host">Host</button>
+            <button class="dropdown-item" data-value="mcp">MCP</button>
+            <button class="dropdown-item" data-value="ui">MCP UI</button>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-section">
+        <span class="toolbar-label">Level:</span>
+        <div class="dropdown-container">
+          <button id="filter-level-btn" class="dropdown-trigger">
+            <span id="filter-level-label">All</span>
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+          </button>
+          <div id="filter-level-dropdown" class="dropdown-menu">
+            <button class="dropdown-item" data-value="all">All</button>
+            <button class="dropdown-item" data-value="debug">Debug</button>
+            <button class="dropdown-item" data-value="info">Info</button>
+            <button class="dropdown-item" data-value="notice">Notice</button>
+            <button class="dropdown-item" data-value="warning">Warning</button>
+            <button class="dropdown-item" data-value="error">Error+</button>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <label class="auto-scroll-toggle">
+        <input type="checkbox" id="auto-scroll" checked />
+        <span>Auto-scroll</span>
+      </label>
+      <button id="btn-clear">Clear</button>
+      <div class="dropdown-container">
+        <button id="btn-copy-dropdown" class="dropdown-trigger">
+          <span>Copy</span>
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+        </button>
+        <div id="copy-dropdown" class="dropdown-menu">
+          <button class="dropdown-item" data-lines="50">Last 50</button>
+          <button class="dropdown-item" data-lines="100">Last 100</button>
+          <button class="dropdown-item" data-lines="all">All</button>
+        </div>
+      </div>
+    </div>
+    <div class="log-container" id="log-container">
+      <div class="empty-state" id="empty-state-logs">
+        <div class="empty-state-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256" fill="currentColor"><path d="M200,32H163.74a47.92,47.92,0,0,0-71.48,0H56A16,16,0,0,0,40,48V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V48A16,16,0,0,0,200,32Zm-72,0a32,32,0,0,1,32,32H96A32,32,0,0,1,128,32Zm72,184H56V48H82.75A47.93,47.93,0,0,0,80,64v8a8,8,0,0,0,8,8h80a8,8,0,0,0,8-8V64a47.93,47.93,0,0,0-2.75-16H200Z"/></svg>
+        </div>
+        <div>No logs yet</div>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span id="status-count">0 entries</span>
+      <span id="status-filtered"></span>
+    </div>
+  </div>
+
+  <!-- Tab 2: Conversation -->
+  <div class="tab-content" id="tab-conversation">
+    <div class="toolbar">
+      <div class="toolbar-spacer"></div>
+      <button id="btn-refresh-conversation">Refresh</button>
+      <div class="dropdown-container">
+        <button id="btn-copy-conversation" class="dropdown-trigger">
+          <span>Copy</span>
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+        </button>
+        <div id="conversation-copy-dropdown" class="dropdown-menu">
+          <button class="dropdown-item" data-messages="5">Last 5</button>
+          <button class="dropdown-item" data-messages="10">Last 10</button>
+          <button class="dropdown-item" data-messages="all">All</button>
+        </div>
+      </div>
+    </div>
+    <div class="conversation-container" id="conversation-container">
+      <div class="empty-state" id="empty-state-conversation">
+        <div class="empty-state-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256" fill="currentColor"><path d="M232,96a8,8,0,0,0-8,8v88a8,8,0,0,1-8,8H169.18a15.92,15.92,0,0,0-11.32,4.69l-29.17,29.17a8,8,0,0,1-11.32,0L88.2,204.69A15.92,15.92,0,0,0,76.88,200H40a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H96a8,8,0,0,0,0-16H40A24,24,0,0,0,16,64V192a24,24,0,0,0,24,24H76.88l29.17,29.17a24,24,0,0,0,33.94,0L169.18,216H216a24,24,0,0,0,24-24V104A8,8,0,0,0,232,96Z"/><path d="M200,32H168a8,8,0,0,0,0,16h32a8,8,0,0,0,0-16Z"/><path d="M184,72a8,8,0,0,0,8-8V32a8,8,0,0,0-16,0V64A8,8,0,0,0,184,72Z"/></svg>
+        </div>
+        <div>No conversation history</div>
+        <div style="margin-top: 8px; font-size: 11px;">Click "Refresh" to load the current conversation</div>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span id="conversation-status">0 messages</span>
+      <span></span>
+    </div>
+  </div>
+
+  <!-- Tab 3: System Prompt -->
+  <div class="tab-content" id="tab-prompt">
+    <div class="toolbar">
+      <div class="toolbar-spacer"></div>
+      <button id="btn-refresh-prompt">Refresh</button>
+      <div class="dropdown-container">
+        <button id="btn-copy-prompt" class="dropdown-trigger">
+          <span>Copy</span>
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+        </button>
+        <div id="prompt-copy-dropdown" class="dropdown-menu">
+          <button class="dropdown-item" data-format="plain">Plain text</button>
+          <button class="dropdown-item" data-format="markdown">As markdown</button>
+        </div>
+      </div>
+    </div>
+    <div class="prompt-container" id="prompt-container">
+      <div class="empty-state" id="empty-state-prompt">
+        <div class="empty-state-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256" fill="currentColor"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>
+        </div>
+        <div>No system prompt available</div>
+        <div style="margin-top: 8px; font-size: 11px;">Click "Refresh" to load the current system prompt</div>
+      </div>
+      <pre class="prompt-content" id="prompt-content" style="display: none;"></pre>
+    </div>
+    <div class="status-bar">
+      <span id="prompt-status"></span>
+      <span></span>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * Dev Console Script
+     * 
+     * Manages the tabbed interface and content for:
+     * - Logs: Real-time log viewer with filtering
+     * - Conversation: Expandable conversation history
+     * - System Prompt: Current agent system prompt
+     */
+
+    // =========================================================
+    // TAB SWITCHING
+    // =========================================================
+    const tabs = document.querySelectorAll('.tab');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    let activeTab = 'logs';
+    
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetId = `tab-${tab.dataset.tab}`;
+        activeTab = tab.dataset.tab;
+        
+        // Update tab active states
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        // Update content visibility
+        tabContents.forEach(content => {
+          content.classList.toggle('active', content.id === targetId);
+        });
+        
+        // Auto-refresh content when switching to conversation or prompt tabs
+        if (activeTab === 'conversation') {
+          refreshConversation();
+        } else if (activeTab === 'prompt') {
+          refreshPrompt();
+        }
+      });
+    });
+
+    // =========================================================
+    // LOGS TAB (Tab 1)
+    // =========================================================
+    let allEntries = [];
+    let filteredEntries = [];
+    let filterSource = 'all';
+    let filterLevel = 'all';
+    let autoScroll = true;
+
+    const LEVEL_SEVERITY = {
+      debug: 0,
+      info: 1,
+      notice: 2,
+      warning: 3,
+      error: 4,
+      critical: 5,
+      alert: 6,
+      emergency: 7
+    };
+
+    const logContainer = document.getElementById('log-container');
+    const emptyStateLogs = document.getElementById('empty-state-logs');
+    const autoScrollCheckbox = document.getElementById('auto-scroll');
+    const btnClear = document.getElementById('btn-clear');
+    const statusCount = document.getElementById('status-count');
+    const statusFiltered = document.getElementById('status-filtered');
+
+    /**
+     * Try to parse JSON from a message.
+     */
+    function tryParseJSON(message) {
+      try {
+        const parsed = JSON.parse(message);
+        if (typeof parsed === 'object' && parsed !== null) {
+          return { prefix: '', json: parsed, suffix: '' };
+        }
+      } catch (e) {}
+
+      const jsonStart = message.indexOf('{');
+      if (jsonStart === -1) return null;
+
+      let depth = 0;
+      let jsonEnd = -1;
+      let inString = false;
+      let escapeNext = false;
+
+      for (let i = jsonStart; i < message.length; i++) {
+        const char = message[i];
+        if (escapeNext) { escapeNext = false; continue; }
+        if (char === '\\' && inString) { escapeNext = true; continue; }
+        if (char === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (char === '{') depth++;
+        if (char === '}') {
+          depth--;
+          if (depth === 0) { jsonEnd = i; break; }
+        }
+      }
+
+      if (jsonEnd === -1) return null;
+
+      const jsonStr = message.substring(jsonStart, jsonEnd + 1);
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (typeof parsed === 'object' && parsed !== null) {
+          return {
+            prefix: message.substring(0, jsonStart),
+            json: parsed,
+            suffix: message.substring(jsonEnd + 1)
+          };
+        }
+      } catch (e) { return null; }
+
+      return null;
+    }
+
+    /**
+     * Syntax highlight JSON for display.
+     */
+    function highlightJSON(obj, indent = 0) {
+      const spaces = '  '.repeat(indent);
+      
+      if (obj === null) return '<span class="json-null">null</span>';
+      if (typeof obj === 'boolean') return `<span class="json-boolean">${obj}</span>`;
+      if (typeof obj === 'number') return `<span class="json-number">${obj}</span>`;
+      
+      if (typeof obj === 'string') {
+        const escaped = obj.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<span class="json-string">"${escaped}"</span>`;
+      }
+      
+      if (Array.isArray(obj)) {
+        if (obj.length === 0) return '[]';
+        const items = obj.map(item => `${spaces}  ${highlightJSON(item, indent + 1)}`);
+        return `[\n${items.join(',\n')}\n${spaces}]`;
+      }
+      
+      if (typeof obj === 'object') {
+        const keys = Object.keys(obj);
+        if (keys.length === 0) return '{}';
+        const items = keys.map(key => {
+          const escapedKey = key.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          return `${spaces}  <span class="json-key">"${escapedKey}"</span>: ${highlightJSON(obj[key], indent + 1)}`;
+        });
+        return `{\n${items.join(',\n')}\n${spaces}}`;
+      }
+      
+      return String(obj);
+    }
+
+    function getJSONPreview(obj) {
+      if (Array.isArray(obj)) return `Array(${obj.length})`;
+      const keys = Object.keys(obj);
+      if (keys.length <= 2) return `{ ${keys.join(', ')} }`;
+      return `{ ${keys.slice(0, 2).join(', ')}, ... }`;
+    }
+
+    function formatTimestamp(isoString) {
+      const date = new Date(isoString);
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      const ms = String(date.getMilliseconds()).padStart(3, '0');
+      return `${hours}:${minutes}:${seconds}.${ms}`;
+    }
+
+    function getSourceDisplay(entry) {
+      if (entry.source === 'host') return 'Host';
+      if (entry.sourceName) {
+        if (entry.source === 'mcp') return `${entry.sourceName} [server]`;
+        if (entry.source === 'ui') return `${entry.sourceName} [ui]`;
+        return entry.sourceName;
+      }
+      return entry.source;
+    }
+
+    const mcpColorCache = new Map();
+    /**
+     * Color palette for MCP servers in the log viewer.
+     * Each MCP gets a unique color assigned in order as they first log.
+     * IMPORTANT: #7EE787 is reserved for Host logs - do not include it here.
+     */
+    const MCP_COLOR_PALETTE = [
+      '#58A6FF', '#FFB347', '#F778BA', '#A5D6FF', '#FFA657',
+      '#D2A8FF', '#79C0FF', '#FDDF68', '#FF7B72', '#9ECBFF',
+      '#FFAB70', '#E0A458', '#F692CE', '#B392F0', '#FFCB6B',
+      '#89DDFF', '#C792EA', '#82AAFF', '#F07178', '#56D364',
+    ];
+    let nextColorIndex = 0;
+
+    function getMcpColor(mcpName) {
+      if (!mcpName) return null;
+      if (!mcpColorCache.has(mcpName)) {
+        const color = MCP_COLOR_PALETTE[nextColorIndex % MCP_COLOR_PALETTE.length];
+        mcpColorCache.set(mcpName, color);
+        nextColorIndex++;
+      }
+      return mcpColorCache.get(mcpName);
+    }
+
+    function passesFilter(entry) {
+      if (filterSource !== 'all' && entry.source !== filterSource) return false;
+      if (filterLevel !== 'all') {
+        const minSeverity = LEVEL_SEVERITY[filterLevel] || 0;
+        const entrySeverity = LEVEL_SEVERITY[entry.level] || 0;
+        if (entrySeverity < minSeverity) return false;
+      }
+      return true;
+    }
+
+    function createCollapsibleJSON(json) {
+      const container = document.createElement('span');
+      container.className = 'json-container';
+
+      const toggle = document.createElement('span');
+      toggle.className = 'json-toggle';
+      toggle.innerHTML = `<span class="json-toggle-arrow">▶</span> ${getJSONPreview(json)}`;
+
+      const copyIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>';
+      const checkIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>';
+      
+      const copyBtn = document.createElement('span');
+      copyBtn.className = 'json-copy';
+      copyBtn.innerHTML = copyIcon;
+      copyBtn.title = 'Copy JSON';
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const jsonStr = JSON.stringify(json, null, 2);
+        navigator.clipboard.writeText(jsonStr).then(() => {
+          copyBtn.classList.add('copied');
+          copyBtn.innerHTML = checkIcon;
+          setTimeout(() => {
+            copyBtn.classList.remove('copied');
+            copyBtn.innerHTML = copyIcon;
+          }, 1500);
+        });
+      });
+
+      const content = document.createElement('div');
+      content.className = 'json-content';
+      const pre = document.createElement('pre');
+      pre.innerHTML = highlightJSON(json);
+      content.appendChild(pre);
+
+      toggle.addEventListener('click', () => {
+        toggle.classList.toggle('expanded');
+        content.classList.toggle('expanded');
+      });
+
+      container.appendChild(toggle);
+      container.appendChild(copyBtn);
+      container.appendChild(content);
+
+      return container;
+    }
+
+    function createEntryElement(entry) {
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.dataset.id = entry.id;
+
+      const timestamp = document.createElement('span');
+      timestamp.className = 'log-timestamp';
+      timestamp.textContent = formatTimestamp(entry.timestamp);
+
+      const level = document.createElement('span');
+      level.className = `log-level ${entry.level}`;
+      level.textContent = entry.level;
+
+      const source = document.createElement('span');
+      source.className = `log-source ${entry.source}`;
+      source.textContent = getSourceDisplay(entry);
+      source.title = getSourceDisplay(entry);
+      
+      if ((entry.source === 'mcp' || entry.source === 'ui') && entry.sourceName) {
+        const mcpColor = getMcpColor(entry.sourceName);
+        if (mcpColor) source.style.color = mcpColor;
+      }
+
+      const message = document.createElement('span');
+      message.className = 'log-message';
+
+      const jsonResult = tryParseJSON(entry.message);
+      
+      if (jsonResult) {
+        if (jsonResult.prefix) {
+          const prefixSpan = document.createElement('span');
+          prefixSpan.className = 'log-message-text';
+          prefixSpan.textContent = jsonResult.prefix;
+          message.appendChild(prefixSpan);
+        }
+        message.appendChild(createCollapsibleJSON(jsonResult.json));
+        if (jsonResult.suffix) {
+          const suffixSpan = document.createElement('span');
+          suffixSpan.className = 'log-message-text';
+          suffixSpan.textContent = jsonResult.suffix;
+          message.appendChild(suffixSpan);
+        }
+      } else {
+        message.textContent = entry.message;
+      }
+
+      div.appendChild(timestamp);
+      div.appendChild(level);
+      div.appendChild(source);
+      div.appendChild(message);
+
+      return div;
+    }
+
+    function renderLogEntries() {
+      const entries = logContainer.querySelectorAll('.log-entry');
+      entries.forEach(el => el.remove());
+
+      filteredEntries = allEntries.filter(passesFilter);
+      emptyStateLogs.style.display = filteredEntries.length === 0 ? 'flex' : 'none';
+
+      const fragment = document.createDocumentFragment();
+      for (const entry of filteredEntries) {
+        fragment.appendChild(createEntryElement(entry));
+      }
+      logContainer.appendChild(fragment);
+
+      updateLogStatus();
+      if (autoScroll) scrollToBottom();
+    }
+
+    function addLogEntry(entry) {
+      allEntries.push(entry);
+      if (allEntries.length > 1000) {
+        allEntries.shift();
+        const firstEntry = logContainer.querySelector('.log-entry');
+        if (firstEntry) firstEntry.remove();
+      }
+
+      if (passesFilter(entry)) {
+        filteredEntries.push(entry);
+        emptyStateLogs.style.display = 'none';
+        logContainer.appendChild(createEntryElement(entry));
+      }
+
+      updateLogStatus();
+      if (autoScroll) scrollToBottom();
+    }
+
+    function scrollToBottom() {
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    function updateLogStatus() {
+      statusCount.textContent = `${allEntries.length} entries`;
+      if (filteredEntries.length !== allEntries.length) {
+        statusFiltered.textContent = `(${filteredEntries.length} shown)`;
+      } else {
+        statusFiltered.textContent = '';
+      }
+    }
+
+    async function clearLogs() {
+      await window.electronAPI.logs.clear();
+      allEntries = [];
+      filteredEntries = [];
+      renderLogEntries();
+    }
+
+    autoScrollCheckbox.addEventListener('change', (e) => {
+      autoScroll = e.target.checked;
+      if (autoScroll) scrollToBottom();
+    });
+
+    btnClear.addEventListener('click', clearLogs);
+
+    // =========================================================
+    // FILTER DROPDOWNS AND COPY FUNCTIONALITY
+    // =========================================================
+    const filterSourceBtn = document.getElementById('filter-source-btn');
+    const filterSourceLabel = document.getElementById('filter-source-label');
+    const filterSourceDropdown = document.getElementById('filter-source-dropdown');
+
+    const filterLevelBtn = document.getElementById('filter-level-btn');
+    const filterLevelLabel = document.getElementById('filter-level-label');
+    const filterLevelDropdown = document.getElementById('filter-level-dropdown');
+
+    const btnCopyDropdown = document.getElementById('btn-copy-dropdown');
+    const copyDropdown = document.getElementById('copy-dropdown');
+    const conversationCopyDropdown = document.getElementById('conversation-copy-dropdown');
+    const promptCopyDropdown = document.getElementById('prompt-copy-dropdown');
+
+    // Source filter dropdown
+    filterSourceBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      filterSourceDropdown.classList.toggle('open');
+      filterLevelDropdown.classList.remove('open');
+      copyDropdown.classList.remove('open');
+    });
+
+    filterSourceDropdown.querySelectorAll('.dropdown-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const value = btn.dataset.value;
+        filterSource = value;
+        filterSourceLabel.textContent = btn.textContent;
+        filterSourceDropdown.classList.remove('open');
+        renderLogEntries();
+      });
+    });
+
+    // Level filter dropdown
+    filterLevelBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      filterLevelDropdown.classList.toggle('open');
+      filterSourceDropdown.classList.remove('open');
+      copyDropdown.classList.remove('open');
+    });
+
+    filterLevelDropdown.querySelectorAll('.dropdown-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const value = btn.dataset.value;
+        filterLevel = value;
+        filterLevelLabel.textContent = btn.textContent;
+        filterLevelDropdown.classList.remove('open');
+        renderLogEntries();
+      });
+    });
+
+    // =========================================================
+    // COPY LOGS FUNCTIONALITY
+    // =========================================================
+    function formatLogEntryForCopy(entry) {
+      const time = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
+      return `[${time}] [${entry.source}] [${entry.level}] ${entry.message}`;
+    }
+
+    function copyLogs(lineCount) {
+      const entriesToCopy = lineCount === 'all' 
+        ? filteredEntries 
+        : filteredEntries.slice(-lineCount);
+      
+      const text = entriesToCopy.map(formatLogEntryForCopy).join('\n');
+      navigator.clipboard.writeText(text);
+    }
+
+    btnCopyDropdown.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyDropdown.classList.toggle('open');
+      filterSourceDropdown.classList.remove('open');
+      filterLevelDropdown.classList.remove('open');
+    });
+
+    copyDropdown.querySelectorAll('.dropdown-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const lines = btn.dataset.lines;
+        const lineCount = lines === 'all' ? 'all' : parseInt(lines, 10);
+        
+        // Copy and close
+        copyLogs(lineCount);
+        copyDropdown.classList.remove('open');
+      });
+    });
+
+    // Close all dropdowns when clicking outside
+    document.addEventListener('click', () => {
+      copyDropdown.classList.remove('open');
+      filterSourceDropdown.classList.remove('open');
+      filterLevelDropdown.classList.remove('open');
+      if (conversationCopyDropdown) conversationCopyDropdown.classList.remove('open');
+      if (promptCopyDropdown) promptCopyDropdown.classList.remove('open');
+    });
+
+    // Set up log IPC listeners
+    if (window.electronAPI?.logs) {
+      window.electronAPI.logs.onInitial((entries) => {
+        allEntries = entries;
+        renderLogEntries();
+      });
+
+      window.electronAPI.logs.onEntry((entry) => {
+        addLogEntry(entry);
+      });
+
+      window.electronAPI.logs.onCleared(() => {
+        allEntries = [];
+        filteredEntries = [];
+        renderLogEntries();
+      });
+    }
+
+    // =========================================================
+    // CONVERSATION TAB (Tab 2)
+    // =========================================================
+    let conversationMessages = [];
+    const conversationContainer = document.getElementById('conversation-container');
+    const emptyStateConversation = document.getElementById('empty-state-conversation');
+    const conversationStatus = document.getElementById('conversation-status');
+    const btnRefreshConversation = document.getElementById('btn-refresh-conversation');
+
+    /**
+     * Get a preview of message content for the collapsed view.
+     * Shows tool call info when present, making it easy to identify tool calls.
+     */
+    function getMessagePreview(msg) {
+      if (msg.parts && Array.isArray(msg.parts)) {
+        const previews = [];
+        let textPreview = null;
+        let toolCount = 0;
+        const toolNames = [];
+
+        for (const part of msg.parts) {
+          // Capture first text preview
+          if (part.type === 'text' && part.text && !textPreview) {
+            const preview = part.text.substring(0, 60);
+            textPreview = preview.length < part.text.length ? preview + '...' : preview;
+          }
+          // Count tool calls and capture names
+          if (part.type === 'tool-invocation' && part.toolInvocation) {
+            toolCount++;
+            toolNames.push(part.toolInvocation.toolName);
+          }
+          // AI SDK v6 format: dynamic-tool or tool-{toolName}
+          if (part.type === 'dynamic-tool' || (part.type && part.type.startsWith('tool-') && part.type !== 'tool-invocation')) {
+            toolCount++;
+            const name = part.type === 'dynamic-tool' ? part.toolName : part.type.substring(5);
+            if (name) toolNames.push(name);
+          }
+        }
+
+        // Build preview string
+        if (toolCount > 0) {
+          const toolInfo = toolNames.length <= 2 
+            ? toolNames.join(', ') 
+            : `${toolNames.slice(0, 2).join(', ')} +${toolCount - 2} more`;
+          previews.push(`[${toolCount} tool${toolCount > 1 ? 's' : ''}: ${toolInfo}]`);
+        }
+        if (textPreview) {
+          previews.push(textPreview);
+        }
+
+        if (previews.length > 0) {
+          return previews.join(' ');
+        }
+        return `[${msg.parts.length} parts]`;
+      }
+      if (msg.content && typeof msg.content === 'string') {
+        const preview = msg.content.substring(0, 80);
+        return preview.length < msg.content.length ? preview + '...' : preview;
+      }
+      return '[No content]';
+    }
+
+    /**
+     * Count tool calls in a message.
+     */
+    function countToolCalls(msg) {
+      if (!msg.parts || !Array.isArray(msg.parts)) return 0;
+      let count = 0;
+      for (const part of msg.parts) {
+        if (part.type === 'tool-invocation') count++;
+        if (part.type === 'dynamic-tool') count++;
+        if (part.type && part.type.startsWith('tool-') && part.type !== 'tool-invocation') count++;
+      }
+      return count;
+    }
+
+    /**
+     * Create a message entry element for the conversation viewer.
+     */
+    function createMessageElement(msg, index) {
+      const entry = document.createElement('div');
+      entry.className = 'message-entry';
+      entry.dataset.index = index;
+
+      const header = document.createElement('div');
+      header.className = 'message-header';
+
+      const role = document.createElement('span');
+      role.className = `message-role ${msg.role || 'unknown'}`;
+      role.textContent = msg.role || 'unknown';
+
+      const id = document.createElement('span');
+      id.className = 'message-id';
+      id.textContent = msg.id || `msg-${index}`;
+
+      // Add tool badge if message contains tool calls
+      const toolCount = countToolCalls(msg);
+      if (toolCount > 0) {
+        const toolBadge = document.createElement('span');
+        toolBadge.className = 'message-tool-badge';
+        toolBadge.textContent = `${toolCount} tool${toolCount > 1 ? 's' : ''}`;
+        header.appendChild(role);
+        header.appendChild(toolBadge);
+        header.appendChild(id);
+      } else {
+        header.appendChild(role);
+        header.appendChild(id);
+      }
+
+      const preview = document.createElement('span');
+      preview.className = 'message-preview';
+      preview.textContent = getMessagePreview(msg);
+
+      const expandIcon = document.createElement('span');
+      expandIcon.className = 'message-expand-icon';
+      expandIcon.innerHTML = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M3 4.5L6 7.5L9 4.5"/></svg>';
+
+      header.appendChild(preview);
+      header.appendChild(expandIcon);
+
+      const body = document.createElement('div');
+      body.className = 'message-body';
+      const pre = document.createElement('pre');
+      pre.innerHTML = highlightJSON(msg);
+      body.appendChild(pre);
+
+      header.addEventListener('click', () => {
+        entry.classList.toggle('expanded');
+      });
+
+      entry.appendChild(header);
+      entry.appendChild(body);
+
+      return entry;
+    }
+
+    /**
+     * Render the conversation messages.
+     */
+    function renderConversation() {
+      // Clear existing messages
+      const existingEntries = conversationContainer.querySelectorAll('.message-entry');
+      existingEntries.forEach(el => el.remove());
+
+      if (conversationMessages.length === 0) {
+        emptyStateConversation.style.display = 'flex';
+        conversationStatus.textContent = '0 messages';
+        return;
+      }
+
+      emptyStateConversation.style.display = 'none';
+
+      const fragment = document.createDocumentFragment();
+      conversationMessages.forEach((msg, index) => {
+        fragment.appendChild(createMessageElement(msg, index));
+      });
+      conversationContainer.appendChild(fragment);
+
+      conversationStatus.textContent = `${conversationMessages.length} messages`;
+    }
+
+    /**
+     * Refresh conversation from main process.
+     */
+    async function refreshConversation() {
+      if (window.electronAPI?.devConsole) {
+        conversationMessages = await window.electronAPI.devConsole.getConversation();
+        renderConversation();
+      }
+    }
+
+    /**
+     * Copy conversation messages to clipboard.
+     */
+    function copyConversation(messageCount) {
+      const messagesToCopy = messageCount === 'all' 
+        ? conversationMessages 
+        : conversationMessages.slice(-messageCount);
+      
+      const json = JSON.stringify(messagesToCopy, null, 2);
+      navigator.clipboard.writeText(json);
+    }
+
+    btnRefreshConversation.addEventListener('click', refreshConversation);
+
+    // Conversation copy dropdown
+    const btnCopyConversation = document.getElementById('btn-copy-conversation');
+
+    btnCopyConversation.addEventListener('click', (e) => {
+      e.stopPropagation();
+      conversationCopyDropdown.classList.toggle('open');
+    });
+
+    conversationCopyDropdown.querySelectorAll('.dropdown-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const messages = btn.dataset.messages;
+        const messageCount = messages === 'all' ? 'all' : parseInt(messages, 10);
+        
+        copyConversation(messageCount);
+        conversationCopyDropdown.classList.remove('open');
+      });
+    });
+
+    // =========================================================
+    // SYSTEM PROMPT TAB (Tab 3)
+    // =========================================================
+    let currentPrompt = '';
+    const promptContainer = document.getElementById('prompt-container');
+    const emptyStatePrompt = document.getElementById('empty-state-prompt');
+    const promptContent = document.getElementById('prompt-content');
+    const promptStatus = document.getElementById('prompt-status');
+    const btnRefreshPrompt = document.getElementById('btn-refresh-prompt');
+
+    /**
+     * Render the system prompt with optional highlighting of dynamic sections.
+     */
+    function renderPrompt() {
+      if (!currentPrompt || currentPrompt.startsWith('(No active session')) {
+        emptyStatePrompt.style.display = 'flex';
+        promptContent.style.display = 'none';
+        promptStatus.textContent = '';
+        return;
+      }
+
+      emptyStatePrompt.style.display = 'none';
+      promptContent.style.display = 'block';
+      
+      // Escape HTML and highlight dynamic sections
+      let escaped = currentPrompt
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      
+      // Highlight the dynamic "Current working directory" and "Current active Pips" sections
+      escaped = escaped.replace(
+        /(Current working directory:\s*\n)([^\n]+)/g,
+        '$1<span class="prompt-dynamic">$2</span>'
+      );
+      escaped = escaped.replace(
+        /(Current active Pips:\s*\n)([\s\S]*?)(?=\n\n|$)/g,
+        '$1<span class="prompt-dynamic">$2</span>'
+      );
+
+      promptContent.innerHTML = escaped;
+      promptStatus.textContent = `${currentPrompt.length} characters`;
+    }
+
+    /**
+     * Refresh system prompt from main process.
+     */
+    async function refreshPrompt() {
+      if (window.electronAPI?.devConsole) {
+        currentPrompt = await window.electronAPI.devConsole.getSystemPrompt();
+        renderPrompt();
+      }
+    }
+
+    /**
+     * Copy system prompt to clipboard.
+     */
+    function copyPrompt(format) {
+      let textToCopy = currentPrompt;
+      
+      if (format === 'markdown') {
+        // Wrap in markdown code block
+        textToCopy = '```\n' + currentPrompt + '\n```';
+      }
+      
+      navigator.clipboard.writeText(textToCopy);
+    }
+
+    btnRefreshPrompt.addEventListener('click', refreshPrompt);
+
+    // Prompt copy dropdown
+    const btnCopyPrompt = document.getElementById('btn-copy-prompt');
+
+    btnCopyPrompt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      promptCopyDropdown.classList.toggle('open');
+    });
+
+    promptCopyDropdown.querySelectorAll('.dropdown-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const format = btn.dataset.format;
+        
+        copyPrompt(format);
+        promptCopyDropdown.classList.remove('open');
+      });
+    });
+
+    // =========================================================
+    // AUTO-REFRESH FOR CONVERSATION AND PROMPT TABS
+    // =========================================================
+    
+    /**
+     * Refresh the currently active tab (conversation or prompt).
+     * Logs tab uses real-time IPC push, so doesn't need polling.
+     */
+    function refreshActiveTab() {
+      if (activeTab === 'conversation') {
+        refreshConversation();
+      } else if (activeTab === 'prompt') {
+        refreshPrompt();
+      }
+    }
+    
+    // Poll active tab every 2 seconds for updates
+    setInterval(refreshActiveTab, 2000);
+    
+    // Initial refresh on page load for conversation and prompt
+    // (Logs are already handled by onInitial IPC listener)
+    refreshConversation();
+    refreshPrompt();
+  </script>
+</body>
+</html>
+

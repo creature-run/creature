@@ -1,0 +1,178 @@
+import { useState, useCallback } from "react";
+import {
+  ArrowClockwise,
+  CaretRight,
+  Folder,
+  FolderOpen,
+  File,
+  FileTs,
+  FileJs,
+  FileJsx,
+  FileHtml,
+  FileCss,
+  FilePy,
+  FileRs,
+  FileCode,
+  BracketsCurly,
+  FileText,
+} from "@phosphor-icons/react";
+
+/**
+ * File or directory item from the server.
+ */
+interface FileItem {
+  name: string;
+  type: "file" | "directory";
+  path: string;
+  children?: FileItem[];
+}
+
+interface FileTreeProps {
+  items: FileItem[];
+  onFileSelect: (path: string) => void;
+  onRefresh: () => void;
+  selectedPath?: string;
+}
+
+/**
+ * FileTree Component
+ *
+ * Displays a hierarchical file browser.
+ * Directories can be expanded/collapsed.
+ * Files can be clicked to open in the editor.
+ */
+export const FileTree = ({ items, onFileSelect, onRefresh, selectedPath }: FileTreeProps) => {
+  return (
+    <div className="file-tree">
+      <div className="file-tree-header">
+        <span className="file-tree-title">Explorer</span>
+        <button className="file-tree-refresh" onClick={onRefresh} title="Refresh">
+          <ArrowClockwise size={14} weight="bold" />
+        </button>
+      </div>
+      <div className="file-tree-content">
+        {items.map((item) => (
+          <FileTreeNode
+            key={item.path}
+            item={item}
+            depth={0}
+            onFileSelect={onFileSelect}
+            selectedPath={selectedPath}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+interface FileTreeNodeProps {
+  item: FileItem;
+  depth: number;
+  onFileSelect: (path: string) => void;
+  selectedPath?: string;
+}
+
+/**
+ * FileTreeNode Component
+ *
+ * Renders a single file or directory in the tree.
+ * Directories show expand/collapse icons and can have children.
+ */
+const FileTreeNode = ({ item, depth, onFileSelect, selectedPath }: FileTreeNodeProps) => {
+  const [isExpanded, setIsExpanded] = useState(depth === 0);
+
+  const handleClick = useCallback(() => {
+    if (item.type === "directory") {
+      setIsExpanded((prev) => !prev);
+    } else {
+      onFileSelect(item.path);
+    }
+  }, [item, onFileSelect]);
+
+  const isSelected = selectedPath === item.path;
+  const paddingLeft = 12 + depth * 16;
+
+  return (
+    <div className="file-tree-node">
+      <div
+        className={`file-tree-item ${item.type} ${isSelected ? "selected" : ""}`}
+        style={{ paddingLeft }}
+        onClick={handleClick}
+      >
+        {item.type === "directory" && (
+          <span className={`expand-icon ${isExpanded ? "expanded" : ""}`}>
+            <CaretRight size={10} weight="bold" />
+          </span>
+        )}
+        <span className="file-icon">
+          {item.type === "directory" ? (
+            isExpanded ? <FolderOpen size={14} weight="duotone" /> : <Folder size={14} weight="duotone" />
+          ) : (
+            <FileIcon filename={item.name} />
+          )}
+        </span>
+        <span className="file-name">{item.name}</span>
+      </div>
+      {item.type === "directory" && isExpanded && item.children && (
+        <div className="file-tree-children">
+          {item.children.map((child) => (
+            <FileTreeNode
+              key={child.path}
+              item={child}
+              depth={depth + 1}
+              onFileSelect={onFileSelect}
+              selectedPath={selectedPath}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * FileIcon Component
+ *
+ * Returns an appropriate Phosphor icon for a file based on its extension.
+ */
+const FileIcon = ({ filename }: { filename: string }) => {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  const size = 14;
+  const weight = "duotone" as const;
+
+  switch (ext) {
+    case "ts":
+    case "tsx":
+      return <FileTs size={size} weight={weight} />;
+    case "js":
+      return <FileJs size={size} weight={weight} />;
+    case "jsx":
+      return <FileJsx size={size} weight={weight} />;
+    case "json":
+      return <BracketsCurly size={size} weight={weight} />;
+    case "md":
+      return <FileText size={size} weight={weight} />;
+    case "css":
+    case "scss":
+    case "sass":
+    case "less":
+      return <FileCss size={size} weight={weight} />;
+    case "html":
+    case "htm":
+      return <FileHtml size={size} weight={weight} />;
+    case "py":
+      return <FilePy size={size} weight={weight} />;
+    case "rs":
+      return <FileRs size={size} weight={weight} />;
+    case "go":
+    case "java":
+    case "c":
+    case "cpp":
+    case "h":
+      return <FileCode size={size} weight={weight} />;
+    default:
+      return <File size={size} weight={weight} />;
+  }
+};
+
+export type { FileItem };

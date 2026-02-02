@@ -1,0 +1,119 @@
+# Enterprise Sustained License
+
+Version 1.0
+
+## Preamble
+
+Serverless Inc believes in transparency and building in the open. We make our source code available so you can inspect it, learn from it, and contribute to it. Enterprise subscriptions sustain this project and keep it free for everyone else. We're grateful for their support.
+
+**TL;DR:** Free for individuals and organizations under $10M revenue / 100 employees. Large organizations must purchase a subscription. Contributors keep their copyright. Code converts to Apache 2.0 after four years.
+
+## 1. Definitions
+
+"Software" means the Creature application, including all source code, documentation, and associated files made available by Serverless Inc.
+
+"You" or "Your" means the individual or entity exercising rights under this License.
+
+"Organization" means any corporation, limited liability company, partnership, sole proprietorship, non-profit, government agency, or other legal entity.
+
+"Revenue" means the consolidated annual gross revenue of Your Organization and all of its affiliates, subsidiaries, and parent entities, calculated in accordance with generally accepted accounting principles.
+
+"Evaluation Use" means using the Software for evaluation, trialing, proof-of-concept, or training purposes, and expressly excludes Business Purposes.
+
+"Business Purposes" means using the Software for Your Organization's internal operations or to deliver services to clients. Business Purposes expressly excludes Evaluation Use.
+
+"Small Organization" means an Organization with (a) annual Revenue of less than three million United States dollars ($3,000,000 USD), and (b) fewer than twenty-five (25) employees.
+
+"Large Organization" means any Organization that is not a Small Organization.
+
+## 2. Grant of License
+
+**2.1 Free Use.** Subject to the terms of this License, Serverless Inc grants You a non-exclusive, worldwide, royalty-free license to use, copy, and modify the Software if You are:
+
+(a) A Small Organization, provided You are not using the Software for Business Purposes primarily on behalf of, or for the benefit of, a Large Organization;
+
+(b) An individual using the Software for personal purposes, provided they are not using it on behalf of a Large Organization; or
+
+(c) Any Organization using the Software for Evaluation Use. Evaluation Use should not exceed forty-five (45) days.
+
+**2.2 Paid Use.** Large Organizations using the Software for Business Purposes must purchase a subscription from Serverless Inc.
+
+**2.3 Security Research.** Security researchers may use the Software without restriction for vulnerability research and responsible disclosure.
+
+**2.4 Client Services.** When using the Software to deliver services to a client, the client's qualification under this Section 2 determines licensing requirements. A subscription is required if the client would require a subscription for its own direct use of the Software.
+
+## 3. Honor System
+
+By using the Software, You represent and warrant that Your use qualifies for free use under Section 2.1, or that You have purchased a valid subscription. Serverless Inc trusts You to make this determination honestly and in good faith.
+
+## 4. Restrictions
+
+You may not:
+
+(a) Redistribute, sublicense, sell, or otherwise transfer the Software as a standalone product or service;
+
+(b) Use the Software to create a product or service that competes with the Software;
+
+(c) Remove, alter, or obscure any licensing, copyright, or other proprietary notices contained in the Software; or
+
+(d) Use the Software in any manner that violates applicable law; or
+
+(e) Use the Software, its source code, documentation, or any derivative works to train, fine-tune, or improve machine learning models, artificial intelligence systems, or similar technologies without prior written consent from Serverless Inc.
+
+## 5. Commercial Licensing
+
+The following activities require a separate written agreement with Serverless Inc:
+
+(a) **Reseller Arrangements.** Selling or distributing subscriptions to the Software on behalf of Serverless Inc;
+
+(b) **OEM Licensing.** Embedding, bundling, or integrating the Software into Your own products or services for distribution to third parties; and
+
+(c) **White-Label Licensing.** Rebranding, modifying, or removing Creature branding from the Software for distribution under Your own brand.
+
+To inquire about commercial licensing, contact sales@serverless.com.
+
+## 6. Source Code
+
+The source code for the Software is made available for transparency and to enable You to make modifications for Your internal use. This availability does not grant any rights beyond those expressly stated in this License.
+
+## 7. Contributions
+
+Contributors retain copyright to their contributions and grant Serverless Inc (and its successors and assigns) an irrevocable, perpetual, worldwide, royalty-free license to use, modify, sublicense (through multiple tiers), and distribute their contributions. Contributors also grant a corresponding patent license for any patent claims necessarily infringed by their contributions or by combination of their contributions with the Software. These licenses are freely assignable without contributor consent.
+
+## 8. License Conversion
+
+The source code for each release of the Software will automatically convert to the Apache License 2.0 four (4) years after its release date.
+
+## 9. Intellectual Property
+
+Serverless Inc retains all right, title, and interest in and to the Software, including all intellectual property rights. This License does not grant You any rights to use Serverless Inc's trademarks, service marks, or logos.
+
+## 10. Disclaimer of Warranties
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL SERVERLESS INC BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+## 11. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL SERVERLESS INC BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS OR REVENUES, WHETHER INCURRED DIRECTLY OR INDIRECTLY, OR ANY LOSS OF DATA, USE, GOODWILL, OR OTHER INTANGIBLE LOSSES, RESULTING FROM YOUR USE OF THE SOFTWARE.
+
+## 12. Termination
+
+This License is effective until terminated. Your rights under this License will terminate automatically without notice if You fail to comply with any of its terms. Upon termination, You must cease all use of the Software and destroy all copies in Your possession.
+
+## 13. General
+
+**13.1 Governing Law.** This License shall be governed by the laws of the State of California, without regard to its conflict of laws principles.
+
+**13.2 Entire Agreement.** This License constitutes the entire agreement between You and Serverless Inc regarding the Software and supersedes all prior agreements and understandings.
+
+**13.3 Severability.** If any provision of this License is held to be unenforceable, such provision shall be modified only to the extent necessary to make it enforceable, and the remaining provisions shall continue in full force and effect.
+
+**13.4 Amendments.** Serverless Inc reserves the right to modify this License at any time. Continued use of the Software after any such modification constitutes Your acceptance of the modified License.
+
+---
+
+Serverless Inc
+522 San Anselmo Ave.
+San Anselmo, CA 94960
+
+For questions about this License or to purchase a subscription, contact sales@serverless.com.

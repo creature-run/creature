@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Pip</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* Dark mode (default) */
+    :root {
+      --bg-card: #1F1E1D;
+      --text: #ABABAB;
+    }
+
+    /* Light mode */
+    :root.light {
+      --bg-card: #EFEEEC;
+      --text: #1F1E1D;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-card);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Standard MCP: iframe fills the window */
+    .content {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .content iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: var(--bg-card);
+    }
+
+    /* Browser mode: nav bar (40px) + webview (rest) */
+    body.browser-mode .content {
+      display: none;
+    }
+
+    .browser-container {
+      display: none;
+      flex-direction: column;
+      height: 100vh;
+      width: 100%;
+    }
+
+    body.browser-mode .browser-container {
+      display: flex;
+    }
+
+    .browser-nav-frame {
+      height: 40px;
+      width: 100%;
+      border: none;
+      flex-shrink: 0;
+      background: var(--bg-card);
+    }
+
+    .browser-webview {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      background: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <!-- Standard MCP content (hidden in browser mode) -->
+  <div class="content">
+    <iframe id="content-frame" srcdoc="<!DOCTYPE html><html><head></head><body></body></html>"></iframe>
+  </div>
+
+  <!-- Browser mode content (hidden by default) -->
+  <div class="browser-container">
+    <iframe id="browser-nav-frame" class="browser-nav-frame" srcdoc="<!DOCTYPE html><html><head></head><body></body></html>"></iframe>
+    <webview id="browser-webview" class="browser-webview" src="about:blank" webpreferences="contextIsolation=yes, nodeIntegration=no"></webview>
+  </div>
+
+  <!-- Bundled AppBridge integration script -->
+  <script src="./popout-mcp-bridge.js"></script>
+
+  <script>
+    // Apply theme from URL params
+    const params = new URLSearchParams(window.location.search);
+    const theme = params.get('theme');
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+    }
+
+    // Set window title from URL params
+    const title = params.get('title');
+    if (title) {
+      document.title = decodeURIComponent(title);
+    }
+  </script>
+</body>
+</html>

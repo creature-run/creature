@@ -1,0 +1,94 @@
+/**
+ * Terminal UI Styles
+ *
+ * ALL colors are provided by the Host via hostContext.styles.variables.
+ * The SDK applies MCP Apps spec CSS variables to :root via applyHostStyleVariables().
+ *
+ * MCP Apps Spec variables used:
+ * - --color-background-primary (main background)
+ * - --color-background-secondary (card/elevated surfaces)
+ * - --color-text-primary (main text)
+ * - --color-text-secondary (muted text)
+ * - --color-border-primary (borders)
+ * - --font-sans (system font)
+ * - --font-mono (monospace font)
+ */
+
+:root {
+  /* Fallback defaults for dark mode (used only if host doesn't provide values) */
+  --color-background-primary: #0D0D0B;
+  --color-background-secondary: #1A1917;
+  --color-text-primary: #efefef;
+  --color-text-secondary: #888888;
+  --color-border-primary: #4A4846;
+  --font-sans: "Sora", system-ui, sans-serif;
+  --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+.container {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  /* Terminal always uses dark mode regardless of host theme */
+  --color-background-primary: #0D0D0B;
+  --color-background-secondary: #1A1917;
+  --color-text-primary: #efefef;
+  --color-text-secondary: #888888;
+  --color-border-primary: #4A4846;
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+}
+
+.terminal {
+  flex: 1;
+  padding: 8px;
+  min-height: 0;
+}
+
+/* Override xterm.js background to use our theme variable */
+.terminal .xterm-viewport {
+  background: var(--color-background-primary) !important;
+}
+
+.terminal .xterm-screen {
+  background: var(--color-background-primary) !important;
+}
+
+.status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* Hide scrollbars for cleaner look (terminal handles its own scrolling) */
+*::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

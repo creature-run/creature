@@ -1,0 +1,429 @@
+import type { ForgeConfig } from '@electron-forge/shared-types';
+import { MakerSquirrel } from '@electron-forge/maker-squirrel';
+import { MakerZIP } from '@electron-forge/maker-zip';
+import { MakerDeb } from '@electron-forge/maker-deb';
+import { MakerRpm } from '@electron-forge/maker-rpm';
+import { MakerDMG } from '@electron-forge/maker-dmg';
+import { MakerAppImage } from '@reforged/maker-appimage';
+import { VitePlugin } from '@electron-forge/plugin-vite';
+import { FusesPlugin } from '@electron-forge/plugin-fuses';
+import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
+import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import path from 'path';
+import fs from 'fs';
+
+/**
+ * Recursively remove all .bin directories and broken symlinks from node_modules.
+ * This is required for macOS code signing - symlinks that point to invalid
+ * destinations (outside the app bundle) cause codesign to fail.
+ */
+const cleanNodeModulesForSigning = (nodeModulesPath: string): void => {
+  let binDirsRemoved = 0;
+  let symlinksRemoved = 0;
+
+  const walk = (dir: string) => {
+    if (!fs.existsSync(dir)) return;
+    
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      
+      // Remove any .bin directory
+      if (entry.isDirectory() && entry.name === '.bin') {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+        binDirsRemoved++;
+        continue;
+      }
+      
+      // Check for symlinks - remove if broken or pointing outside node_modules
+      if (entry.isSymbolicLink()) {
+        try {
+          const linkTarget = fs.readlinkSync(fullPath);
+          const resolvedTarget = path.resolve(path.dirname(fullPath), linkTarget);
+          
+          // Remove if symlink points outside the node_modules directory
+          // or if the target doesn't exist (broken symlink)
+          if (!resolvedTarget.startsWith(nodeModulesPath) || !fs.existsSync(resolvedTarget)) {
+            fs.rmSync(fullPath, { force: true });
+            symlinksRemoved++;
+          }
+        } catch {
+          // If we can't read the symlink, remove it
+          fs.rmSync(fullPath, { force: true });
+          symlinksRemoved++;
+        }
+        continue;
+      }
+      
+      // Recurse into subdirectories (including nested node_modules)
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      }
+    }
+  };
+
+  walk(nodeModulesPath);
+  
+  if (binDirsRemoved > 0) {
+    console.log(`[Forge] Removed ${binDirsRemoved} .bin directories (symlinks break codesign)`);
+  }
+  if (symlinksRemoved > 0) {
+    console.log(`[Forge] Removed ${symlinksRemoved} broken/external symlinks`);
+  }
+};
+
+// Import Windows signing config if available (only on Windows CI with Azure Trusted Signing)
+import { windowsSign } from './windowsSign';
+
+/**
+ * Copy MCP UI bundles to resources for packaged app.
+ * UIs are built to dist/{name}/ui/ as single-file HTML.
+ */
+const copyMcpUIs = (resourcesPath: string) => {
+  const distDir = path.join(__dirname, 'dist');
+  const destDir = path.join(resourcesPath, 'mcp-uis');
+
+  // Copy all MCP UIs (browser, terminal, ide)
+  const mcpNames = ['browser', 'terminal', 'ide'];
+  for (const name of mcpNames) {
+    const srcPath = path.join(distDir, name, 'ui');
+    const destPath = path.join(destDir, name, 'ui');
+    if (fs.existsSync(srcPath)) {
+      fs.mkdirSync(destPath, { recursive: true });
+      fs.cpSync(srcPath, destPath, { recursive: true });
+      console.log(`[Forge] Copied ${name} UI to resources`);
+    } else {
+      console.warn(`[Forge] Warning: ${name} UI not found at ${srcPath}. Run build first.`);
+    }
+  }
+
+  // Copy popout assets
+  const popoutSrc = path.join(distDir, 'assets', 'popouts');
+  const popoutDest = path.join(destDir, 'assets', 'popouts');
+  if (fs.existsSync(popoutSrc)) {
+    fs.mkdirSync(popoutDest, { recursive: true });
+    fs.cpSync(popoutSrc, popoutDest, { recursive: true });
+    console.log('[Forge] Copied popout assets to resources');
+  }
+};
+
+/**
+ * Copy native dependencies for MCP servers.
+ * 
+ * MCP servers are bundled by Vite with native modules externalized.
+ * We copy native modules to Resources/native-deps/node_modules/ so
+ * they can be found via NODE_PATH when spawning MCP servers.
+ */
+const copyNativeDeps = (resourcesPath: string) => {
+  const destDir = path.join(resourcesPath, 'native-deps', 'node_modules');
+  
+  // Native modules to copy (relative to node_modules)
+  // Note: chokidar is bundled by Vite (only fsevents is external)
+  const nativeModules = [
+    'node-pty',           // Terminal MCP - PTY support
+    '@vscode/ripgrep',    // IDE MCP - fast file search
+  ];
+
+  // Try desktop/node_modules first, then root node_modules
+  const nodeModulesLocations = [
+    path.join(__dirname, 'node_modules'),
+    path.join(__dirname, '..', 'node_modules'),
+  ];
+
+  for (const moduleName of nativeModules) {
+    let src: string | null = null;
+    for (const nodeModules of nodeModulesLocations) {
+      const candidate = path.join(nodeModules, moduleName);
+      if (fs.existsSync(candidate)) {
+        src = candidate;
+        break;
+      }
+    }
+
+    if (src) {
+      const dest = path.join(destDir, moduleName);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.cpSync(src, dest, { recursive: true });
+      console.log(`[Forge] Copied ${moduleName} to resources`);
+    } else {
+      console.warn(`[Forge] Warning: ${moduleName} not found`);
+    }
+  }
+};
+
+/**
+ * Generate app-update.yml for the auto-updater.
+ * 
+ * The URL is dynamically set based on the current platform and architecture
+ * so each platform build points to its own S3 folder.
+ * 
+ * Maps:
+ * - darwin/arm64 -> darwin/arm64
+ * - win32/x64 -> win32/x64
+ * - linux/x64 -> linux/x64
+ */
+const generateAppUpdateConfig = (resourcesPath: string) => {
+  const platform = process.platform;
+  const arch = process.arch;
+  
+  const updateUrl = `https://releases.creature.run/desktop/${platform}/${arch}`;
+  
+  const appUpdateYml = `provider: generic
+url: ${updateUrl}
+updaterCacheDirName: Creature
+`;
+
+  const destPath = path.join(resourcesPath, 'app-update.yml');
+  fs.writeFileSync(destPath, appUpdateYml, 'utf-8');
+  console.log(`[Forge] Generated app-update.yml for ${platform}/${arch} -> ${updateUrl}`);
+};
+
+/**
+ * Copy MCP app templates for users to create new MCPs.
+ * Source files use published npm version of open-mcp-app.
+ *
+ * For built-in MCP apps (todos, notes), also copies dist/ and node_modules/
+ * so they can run as built-in MCPs for work projects.
+ */
+const copyMcpApps = (resourcesPath: string) => {
+  const mcpApps = ['todos', 'notes', 'crm'];
+  // Built-in MCP apps that should be runnable (not just templates)
+  const builtinMcpApps = ['todos', 'notes'];
+
+  for (const name of mcpApps) {
+    const srcDir = path.join(__dirname, 'artifacts', 'mcp-apps', name);
+    const destDir = path.join(resourcesPath, `mcp-${name}`);
+
+    if (!fs.existsSync(srcDir)) {
+      console.warn(`[Forge] Warning: ${name} MCP app not found at`, srcDir);
+      continue;
+    }
+
+    fs.mkdirSync(destDir, { recursive: true });
+
+    // Copy config files
+    const filesToCopy = ['package.json', 'tsconfig.json', 'tsconfig.server.json', 'vite.config.ts', 'README.md'];
+    for (const file of filesToCopy) {
+      const srcFile = path.join(srcDir, file);
+      if (fs.existsSync(srcFile)) {
+        fs.copyFileSync(srcFile, path.join(destDir, file));
+      }
+    }
+
+    // Copy src directory
+    const templateSrcDir = path.join(srcDir, 'src');
+    if (fs.existsSync(templateSrcDir)) {
+      fs.cpSync(templateSrcDir, path.join(destDir, 'src'), { recursive: true });
+    }
+
+    // For built-in MCP apps, also copy dist/ and node_modules/
+    // so they can run as built-in MCPs for work projects
+    if (builtinMcpApps.includes(name)) {
+      // Copy dist directory (built server code)
+      const distDir = path.join(srcDir, 'dist');
+      if (fs.existsSync(distDir)) {
+        fs.cpSync(distDir, path.join(destDir, 'dist'), { recursive: true });
+        console.log(`[Forge] Copied ${name} dist/ for built-in MCP support`);
+      } else {
+        console.warn(`[Forge] Warning: ${name} dist/ not found - run 'npm run build' in artifacts/mcp-apps/${name}`);
+      }
+
+      // Copy node_modules (runtime dependencies)
+      const nodeModulesDir = path.join(srcDir, 'node_modules');
+      if (fs.existsSync(nodeModulesDir)) {
+        const destNodeModules = path.join(destDir, 'node_modules');
+        fs.cpSync(nodeModulesDir, destNodeModules, { recursive: true });
+        
+        // Clean node_modules for macOS code signing
+        // Removes all .bin directories and broken/external symlinks recursively
+        console.log(`[Forge] Cleaning ${name} node_modules for code signing...`);
+        cleanNodeModulesForSigning(destNodeModules);
+        
+        console.log(`[Forge] Copied ${name} node_modules/ for built-in MCP support`);
+      } else {
+        console.warn(`[Forge] Warning: ${name} node_modules/ not found - run 'npm install' in artifacts/mcp-apps/${name}`);
+      }
+    }
+
+    console.log(`[Forge] Copied ${name} MCP app to resources`);
+  }
+};
+
+/**
+ * Check if Apple signing credentials are available.
+ */
+const hasAppleCredentials = !!(
+  process.env.APPLE_ID &&
+  process.env.APPLE_PASSWORD &&
+  process.env.APPLE_TEAM_ID
+);
+
+if (hasAppleCredentials) {
+  console.log('[Forge] Apple credentials detected - signing enabled');
+} else {
+  console.log('[Forge] No Apple credentials - building unsigned');
+}
+
+const config: ForgeConfig = {
+  packagerConfig: {
+    asar: true,
+    name: 'Creature',
+    executableName: 'Creature',
+    icon: path.join(__dirname, 'icons', 'icon'),
+    appBundleId: 'run.creature.desktop',
+    appCategoryType: 'public.app-category.developer-tools',
+
+    // Note: app-update.yml is generated dynamically in packageAfterCopy hook
+    // based on the platform/arch to point to the correct S3 folder
+
+    // Allow localhost connections for the auto-updater proxy server (Squirrel.Mac)
+    extendInfo: {
+      NSAppTransportSecurity: {
+        NSAllowsLocalNetworking: true,
+      },
+    },
+
+    // macOS code signing and notarization
+    ...(hasAppleCredentials && {
+      osxSign: {
+        // Use explicit identity from env var, or fall back to auto-detection
+        ...(process.env.APPLE_IDENTITY && { identity: process.env.APPLE_IDENTITY }),
+        optionsForFile: () => ({
+          hardenedRuntime: true,
+          entitlements: path.join(__dirname, 'entitlements.plist'),
+        }),
+      },
+      osxNotarize: {
+        appleId: process.env.APPLE_ID!,
+        appleIdPassword: process.env.APPLE_PASSWORD!,
+        teamId: process.env.APPLE_TEAM_ID!,
+      },
+    }),
+
+    // Windows code signing via Azure Trusted Signing
+    ...(windowsSign && { windowsSign }),
+  },
+  rebuildConfig: {},
+  hooks: {
+    /**
+     * Copy MCP assets after packaging.
+     * - MCP UIs (browser, terminal, ide) as single-file HTML
+     * - Native dependencies (@vscode/ripgrep)
+     * - MCP app templates for users to create new MCPs
+     * - Generate platform-specific app-update.yml for auto-updater
+     */
+    packageAfterCopy: async (_config, buildPath) => {
+      const resourcesPath = path.dirname(buildPath);
+      console.log('[Forge] Copying MCP assets to', resourcesPath);
+      
+      copyMcpUIs(resourcesPath);
+      copyNativeDeps(resourcesPath);
+      copyMcpApps(resourcesPath);
+      generateAppUpdateConfig(resourcesPath);
+      
+      console.log('[Forge] MCP assets copied successfully');
+    },
+  },
+  makers: [
+    new MakerSquirrel({
+      name: 'Creature',
+      setupIcon: path.join(__dirname, 'icons', 'icon.ico'),
+      iconUrl: 'https://www.creature.run/favicon.ico',
+      // Windows code signing via Azure Trusted Signing (passed through from packagerConfig)
+      ...(windowsSign && { windowsSign }),
+    }),
+    new MakerZIP({}, ['darwin']),
+    new MakerDMG({
+      icon: path.join(__dirname, 'icons', 'icon.icns'),
+      format: 'ULFO',
+      background: path.join(__dirname, 'icons', 'dmg-background.png'),
+      contents: (opts) => [
+        { x: 180, y: 200, type: 'file', path: opts.appPath },
+        { x: 480, y: 200, type: 'link', path: '/Applications' },
+      ],
+    }),
+    new MakerDeb({
+      options: {
+        name: 'creature',
+        bin: 'Creature',
+        productName: 'Creature',
+        genericName: 'AI Development Environment',
+        description: 'Desktop app for AI agents with rich, interactive components',
+        categories: ['Development', 'Utility'],
+        icon: path.join(__dirname, 'icons', 'icon.png'),
+      },
+    }),
+    new MakerRpm({
+      options: {
+        name: 'creature',
+        bin: 'Creature',
+        productName: 'Creature',
+        genericName: 'AI Development Environment',
+        description: 'Desktop app for AI agents with rich, interactive components',
+        categories: ['Development', 'Utility'],
+        icon: path.join(__dirname, 'icons', 'icon.png'),
+      },
+    }),
+    new MakerAppImage({
+      options: {
+        bin: 'Creature',
+        categories: ['Development', 'Utility'],
+        icon: path.join(__dirname, 'icons', 'icon.png'),
+      },
+    }),
+  ],
+  plugins: [
+    // Automatically unpacks native modules (.node files) from asar
+    // Required for node-pty, @vscode/ripgrep, and other native addons
+    new AutoUnpackNativesPlugin({}),
+    new VitePlugin({
+      build: [
+        {
+          entry: 'src/electron/main.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/preload.ts',
+          config: 'vite.preload.config.mts',
+          target: 'preload',
+        },
+        // Built-in MCP servers (run as subprocesses with Electron's Node)
+        // Uses same config as main since both are Node targets with same externals
+        {
+          entry: 'src/electron/mcps/terminal/terminal-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/mcps/ide/ide-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/mcps/browser/browser-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+      ],
+      renderer: [
+        {
+          name: 'main_window',
+          config: 'vite.renderer.config.mts',
+        },
+      ],
+    }),
+    new FusesPlugin({
+      version: FuseVersion.V1,
+      [FuseV1Options.RunAsNode]: true,
+      [FuseV1Options.EnableCookieEncryption]: false,
+      [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+      [FuseV1Options.EnableNodeCliInspectArguments]: false,
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+      [FuseV1Options.OnlyLoadAppFromAsar]: true,
+    }),
+  ],
+};
+
+export default config;

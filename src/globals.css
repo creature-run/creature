@@ -1,0 +1,449 @@
+/**
+ * Creature Global Styles
+ * 
+ * Theme variables are loaded from the Settings system and injected at runtime.
+ * This file contains only structural CSS: fonts, Tailwind config, base styles,
+ * component styles, animations, and syntax highlighting.
+ * 
+ * @see desktop/src/electron/settings/settingsStore.ts for theme defaults
+ * @see desktop/src/contexts/ThemeContext.tsx for runtime CSS injection
+ */
+
+@import "tailwindcss";
+
+/* ============================================================================
+   FONTS
+   ========================================================================= */
+
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/Sora-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/Sora-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/Sora-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/Sora-Bold.woff2") format("woff2");
+}
+
+/* ============================================================================
+   TAILWIND THEME CONFIGURATION
+   
+   Maps CSS variables (injected by Settings) to Tailwind utility classes.
+   These variables are set on :root by ThemeContext at runtime.
+   ========================================================================= */
+
+@theme inline {
+  /* Fonts */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Font sizes - map to Tailwind text-* utilities */
+  --font-size-xs: var(--font-text-xs-size);
+  --font-size-sm: var(--font-text-sm-size);
+  --font-size-base: var(--font-text-md-size);
+  --font-size-lg: var(--font-text-lg-size);
+  --font-size-xl: var(--font-heading-sm-size);
+  --font-size-2xl: var(--font-heading-md-size);
+  --font-size-3xl: var(--font-heading-lg-size);
+  --font-size-4xl: var(--font-heading-xl-size);
+
+  /* Border radius - maps to rounded-* utilities */
+  --radius-xs: var(--border-radius-xs);
+  --radius-sm: var(--border-radius-sm);
+  --radius-md: var(--border-radius-md);
+  --radius-lg: var(--border-radius-lg);
+  --radius-xl: var(--border-radius-xl);
+  --radius-full: var(--border-radius-full);
+
+  /* Background colors */
+  --color-background-primary: var(--color-background-primary);
+  --color-background-secondary: var(--color-background-secondary);
+  --color-background-tertiary: var(--color-background-tertiary);
+  --color-background-inverse: var(--color-background-inverse);
+  --color-background-ghost: var(--color-background-ghost);
+  --color-background-info: var(--color-background-info);
+  --color-background-danger: var(--color-background-danger);
+  --color-background-success: var(--color-background-success);
+  --color-background-warning: var(--color-background-warning);
+  --color-background-disabled: var(--color-background-disabled);
+
+  /* Text colors */
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
+  --color-text-inverse: var(--color-text-inverse);
+  --color-text-ghost: var(--color-text-ghost);
+  --color-text-info: var(--color-text-info);
+  --color-text-danger: var(--color-text-danger);
+  --color-text-success: var(--color-text-success);
+  --color-text-warning: var(--color-text-warning);
+  --color-text-disabled: var(--color-text-disabled);
+
+  /* Border colors */
+  --color-border-primary: var(--color-border-primary);
+  --color-border-secondary: var(--color-border-secondary);
+  --color-border-tertiary: var(--color-border-tertiary);
+  --color-border-inverse: var(--color-border-inverse);
+  --color-border-ghost: var(--color-border-ghost);
+  --color-border-info: var(--color-border-info);
+  --color-border-danger: var(--color-border-danger);
+  --color-border-success: var(--color-border-success);
+  --color-border-warning: var(--color-border-warning);
+  --color-border-disabled: var(--color-border-disabled);
+
+  /* Ring colors */
+  --color-ring-primary: var(--color-ring-primary);
+  --color-ring-secondary: var(--color-ring-secondary);
+  --color-ring-inverse: var(--color-ring-inverse);
+  --color-ring-info: var(--color-ring-info);
+  --color-ring-danger: var(--color-ring-danger);
+  --color-ring-success: var(--color-ring-success);
+  --color-ring-warning: var(--color-ring-warning);
+
+  /* Solid fill colors (for buttons, badges) */
+  --color-solid-primary: var(--color-solid-primary);
+  --color-solid-info: var(--color-solid-info);
+  --color-solid-danger: var(--color-solid-danger);
+  --color-solid-success: var(--color-solid-success);
+  --color-solid-warning: var(--color-solid-warning);
+
+  /* Animations */
+  --animate-fade-in: fade-in 0.5s ease-out forwards;
+  --animate-spin: spin 1s linear infinite;
+}
+
+/* ============================================================================
+   BASE STYLES
+   ========================================================================= */
+
+* {
+  box-sizing: border-box;
+}
+
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: none;
+}
+
+body {
+  background-color: var(--color-background-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-text-md-size);
+  line-height: var(--font-text-md-line-height);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================================
+   SCROLLBAR STYLES
+   ========================================================================= */
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.show-scrollbar::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+
+.show-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.show-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border-primary);
+  border-radius: 4px;
+}
+
+.show-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+.show-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-primary) transparent;
+}
+
+/* ============================================================================
+   COMPONENT STYLES
+   ========================================================================= */
+
+/* Alert/Message Base */
+.alert {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--border-radius-md);
+  font-size: var(--font-text-sm-size);
+  line-height: var(--font-text-sm-line-height);
+  border: 1px solid;
+}
+
+.alert-danger {
+  background-color: var(--color-background-danger);
+  border-color: var(--color-border-danger);
+  color: var(--color-text-danger);
+}
+
+.alert-info {
+  background-color: var(--color-background-tertiary);
+  border-color: var(--color-border-secondary);
+  color: var(--color-text-secondary);
+}
+
+/* Dark mode: Ensure alert/destructive buttons have readable text on colored backgrounds */
+:root .bg-solid-danger,
+.dark .bg-solid-danger {
+  color: var(--color-text-primary);
+}
+
+/* Light mode: Ensure alert/destructive buttons have readable text on colored backgrounds */
+.light .bg-solid-danger {
+  color: var(--color-text-inverse);
+}
+
+/* Chat Input Container */
+.chat-input-container {
+  position: relative;
+  background: var(--color-background-primary);
+  border: 1px solid transparent;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 200ms ease-in-out, transform 200ms ease-in-out;
+}
+
+.chat-input-container .input-row {
+  min-height: 48px;
+  transition: min-height 300ms ease-in-out;
+}
+
+.chat-input-container:hover .input-row,
+.chat-input-container:focus-within .input-row {
+  min-height: 80px;
+  cursor: text;
+}
+
+.chat-input-container::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    to bottom,
+    var(--color-border-primary) 0%,
+    var(--color-border-primary) 100%
+  );
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.chat-input-container::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    to bottom,
+    var(--color-ring-primary) 0%,
+    var(--color-border-primary) 100%
+  );
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: all 400ms ease-in-out;
+}
+
+.chat-input-container:focus-within,
+.chat-input-container-focused {
+  box-shadow: var(--shadow-xl);
+}
+
+.chat-input-container:focus-within::after,
+.chat-input-container-focused::after {
+  opacity: 1;
+}
+
+/* ============================================================================
+   ANIMATIONS
+   ========================================================================= */
+
+@keyframes fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes hover-card-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hover-card-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(4px); }
+}
+
+@keyframes toast-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes toast-slide-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+.toast-enter {
+  animation: toast-slide-in 0.3s ease-out forwards;
+}
+
+.toast-exit {
+  animation: toast-slide-out 0.3s ease-in forwards;
+}
+
+@keyframes dialog-overlay-show {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialog-content-show {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.dialog-overlay[data-state="open"] {
+  animation: dialog-overlay-show 150ms ease-out forwards;
+}
+
+.dialog-content {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.dialog-content[data-state="open"] {
+  animation: dialog-content-show 150ms ease-out forwards;
+}
+
+
+/* ============================================================================
+   SYNTAX HIGHLIGHTING (Prism.js)
+   ========================================================================= */
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6a737d;
+}
+
+.token.punctuation {
+  color: #e1e4e8;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #79b8ff;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #9ecbff;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #e1e4e8;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #f97583;
+}
+
+.token.function,
+.token.class-name {
+  color: #b392f0;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #ffab70;
+}
+
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+
+.token.italic {
+  font-style: italic;
+}
