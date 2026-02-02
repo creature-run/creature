@@ -156,6 +156,9 @@ const AI_EXCLUDED_FILENAMES = new Set([
 /** Maximum file size for AI context (100KB) */
 const AI_MAX_FILE_SIZE = 100 * 1024;
 
+/** Maximum number of paths included in ide_dir_list text output */
+const DIR_LIST_TEXT_MAX_ITEMS = 200;
+
 /**
  * Check if a file should be excluded from AI context.
  * @returns Reason string if excluded, null if allowed.
@@ -332,6 +335,69 @@ const startFileWatcher = () => {
 
   const rootLabels = WORKSPACE_ROOTS.map(r => r.label).join(", ");
   console.info(`[IDE] File watcher started for ${WORKSPACE_ROOTS.length} root(s): ${rootLabels}`);
+};
+
+type DirListItem = {
+  path: string;
+  type: "file" | "directory";
+  children?: DirListItem[];
+};
+
+const countDirItems = (items: DirListItem[]): number => {
+  let count = 0;
+  for (const item of items) {
+    count += 1;
+    if (item.children && item.children.length > 0) {
+      count += countDirItems(item.children);
+    }
+  }
+  return count;
+};
+
+const collectDirPaths = (items: DirListItem[], limit: number): string[] => {
+  const paths: string[] = [];
+  const walk = (nodes: DirListItem[]) => {
+    for (const item of nodes) {
+      if (paths.length >= limit) return;
+      const suffix = item.type === "directory" ? "/" : "";
+      paths.push(`${item.path}${suffix}`);
+      if (item.children && item.children.length > 0) {
+        walk(item.children);
+        if (paths.length >= limit) return;
+      }
+    }
+  };
+  walk(items);
+  return paths;
+};
+
+const buildDirListText = (
+  items: DirListItem[],
+  pathLabel: string,
+  recursive: boolean
+): string => {
+  const safePathLabel = pathLabel === "" ? "." : pathLabel;
+  const total = countDirItems(items);
+  const listedPaths = total > 0 ? collectDirPaths(items, DIR_LIST_TEXT_MAX_ITEMS) : [];
+  const truncated = total > listedPaths.length;
+  const lines: string[] = [
+    `Listed ${total} items under "${safePathLabel}" (recursive: ${recursive ? "true" : "false"}).`,
+  ];
+
+  if (total > 0) {
+    if (truncated) {
+      lines.push(`Showing first ${listedPaths.length} paths; ${total - listedPaths.length} more not shown.`);
+    }
+    lines.push(...listedPaths);
+  }
+
+  if (truncated) {
+    lines.push("Tip: use ide_search to find files or grep content:");
+    lines.push(`- list files: ide_search { listFiles: true, path: "${safePathLabel}", fileGlob: "**/*.ts", maxResults: 200 }`);
+    lines.push(`- grep text: ide_search { pattern: "FooBar", path: "${safePathLabel}" }`);
+  }
+
+  return lines.join("\n");
 };
 
 // =============================================================================
@@ -676,7 +742,7 @@ app.tool(
 
         return {
           data: { success: true, path: ".", items: rootItems, isMultiRoot: true },
-          text: JSON.stringify({ path: ".", items: rootItems }, null, 2),
+          text: buildDirListText(rootItems, ".", recursive),
           title: "Workspace",
         };
       }
@@ -688,7 +754,7 @@ app.tool(
 
       return {
         data: { success: true, path: dirPath, items, rootId: root.id, rootLabel: root.label },
-        text: JSON.stringify({ path: dirPath, items }, null, 2),
+        text: buildDirListText(items, dirPath, recursive),
         title: dirPath === "." ? (root.label || "Root") : path.basename(relativePath),
       };
     } catch (error) {
