@@ -18,7 +18,7 @@ import { spawn, exec, type ChildProcess } from "node:child_process";
 import { injectCSP, type CspConfig } from "./csp";
 import { injectConsoleOverride } from "./consoleCapture";
 import { getMainWindow } from "../window/mainWindow";
-import { getExtendedPath } from "../utils/env";
+import { getExtendedPath, resolveBundledCommand } from "../utils/env";
 import { refreshPipsForMcp, closeAllPips } from "./controlPlane";
 import { logAggregator, type LogLevel } from "../logging";
 import { portManager } from "./portManager";
@@ -860,9 +860,17 @@ const spawnHttpServerProcess = async (
       return arg;
     });
     env.ELECTRON_RUN_AS_NODE = "1";
+  } else {
+    // For npm/npx commands, use bundled versions when available (in packaged app)
+    const resolved = resolveBundledCommand(command, args);
+    if (resolved.useBundled) {
+      command = resolved.command;
+      args = resolved.args;
+      env.ELECTRON_RUN_AS_NODE = "1";
+    }
   }
 
-  // Always extend PATH with common Node installation locations to ensure npm/npx are found
+  // Extend PATH for any remaining commands that need system tools
   env.PATH = getExtendedPath(env.PATH);
 
 
@@ -1017,7 +1025,14 @@ const createStdioTransport = (
     }
     env.ELECTRON_RUN_AS_NODE = "1";
   } else if (app.isPackaged) {
-    // For registry/custom MCPs, extend PATH with common Node installation locations
+    // For registry/custom MCPs, use bundled npm/npx when available
+    const resolved = resolveBundledCommand(finalCommand, finalArgs);
+    if (resolved.useBundled) {
+      finalCommand = resolved.command;
+      finalArgs = resolved.args;
+      env.ELECTRON_RUN_AS_NODE = "1";
+    }
+    // Extend PATH for any remaining commands that need system tools
     env.PATH = getExtendedPath(env.PATH);
   }
 

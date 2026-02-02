@@ -102,6 +102,7 @@
     "electron-updater": "^6.7.3",
     "lottie-react": "^2.4.1",
     "node-pty": "1.1.0",
+    "npm": "^10.9.2",
     "open-mcp-app": "file:./artifacts/sdk",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

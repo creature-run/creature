@@ -11,7 +11,7 @@ import path from "path";
 import { getMcpServerConfigs, restartMcp, disableMcp, getCurrentFolderPath, closeMcpsForProject, getUIResources } from "../mcp/client";
 import { launchResourcePip } from "../mcp/controlPlane";
 import { findWorkspaceRoot } from "../utils/workspace";
-import { buildSpawnEnv } from "../utils/env";
+import { buildSpawnEnv, resolveBundledCommand } from "../utils/env";
 import * as telemetry from "../telemetry";
 
 /**
@@ -106,6 +106,7 @@ const copyDirectory = ({
 
 /**
  * Run a shell command and return a promise.
+ * Uses bundled npm/npx when available (in packaged app).
  */
 const runCommand = ({
   command,
@@ -117,12 +118,22 @@ const runCommand = ({
   cwd: string;
 }): Promise<{ success: boolean; error?: string }> => {
   return new Promise((resolve) => {
-    console.log(`[MCP] Running: ${command} ${args.join(" ")} in ${cwd}`);
+    // Resolve npm/npx to bundled versions when available
+    const resolved = resolveBundledCommand(command, args);
+    const finalCommand = resolved.command;
+    const finalArgs = resolved.args;
 
-    const proc = spawn(command, args, {
+    console.log(`[MCP] Running: ${finalCommand} ${finalArgs.join(" ")} in ${cwd}`);
+
+    const env = buildSpawnEnv({ npm_config_yes: "true" });
+    if (resolved.useBundled) {
+      env.ELECTRON_RUN_AS_NODE = "1";
+    }
+
+    const proc = spawn(finalCommand, finalArgs, {
       cwd,
-      shell: true,
-      env: buildSpawnEnv({ npm_config_yes: "true" }),
+      shell: !resolved.useBundled, // Don't use shell when running bundled npm directly
+      env,
     });
 
     let stderr = "";

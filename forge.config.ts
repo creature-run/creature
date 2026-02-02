@@ -109,6 +109,92 @@ const copyMcpUIs = (resourcesPath: string) => {
 };
 
 /**
+ * Create wrapper scripts in Resources/bin/ for node, npm, and npx.
+ * 
+ * These wrappers allow npm scripts and postinstall hooks to find node/npm/npx.
+ * - node: Invokes Electron with ELECTRON_RUN_AS_NODE=1
+ * - npm: Invokes Electron with ELECTRON_RUN_AS_NODE=1 running npm-cli.js
+ * - npx: Invokes Electron with ELECTRON_RUN_AS_NODE=1 running npx-cli.js
+ */
+const createNodeWrapper = (resourcesPath: string) => {
+  const binDir = path.join(resourcesPath, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+
+  if (process.platform === 'win32') {
+    // Windows batch scripts
+    const nodeCmd = path.join(binDir, 'node.cmd');
+    fs.writeFileSync(nodeCmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\..\\MacOS\\Creature.exe" %*\r\n`);
+    
+    const npmCmd = path.join(binDir, 'npm.cmd');
+    fs.writeFileSync(npmCmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\..\\MacOS\\Creature.exe" "%~dp0..\\npm\\bin\\npm-cli.js" %*\r\n`);
+    
+    const npxCmd = path.join(binDir, 'npx.cmd');
+    fs.writeFileSync(npxCmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\..\\MacOS\\Creature.exe" "%~dp0..\\npm\\bin\\npx-cli.js" %*\r\n`);
+    
+    console.log('[Forge] Created node/npm/npx wrappers for Windows');
+  } else {
+    // Unix shell scripts - use relative paths from Resources/bin/
+    const nodeScript = path.join(binDir, 'node');
+    fs.writeFileSync(nodeScript, `#!/bin/bash
+ELECTRON_RUN_AS_NODE=1 exec "$(dirname "$0")/../../MacOS/Creature" "$@"
+`, { mode: 0o755 });
+
+    const npmScript = path.join(binDir, 'npm');
+    fs.writeFileSync(npmScript, `#!/bin/bash
+ELECTRON_RUN_AS_NODE=1 exec "$(dirname "$0")/../../MacOS/Creature" "$(dirname "$0")/../npm/bin/npm-cli.js" "$@"
+`, { mode: 0o755 });
+
+    const npxScript = path.join(binDir, 'npx');
+    fs.writeFileSync(npxScript, `#!/bin/bash
+ELECTRON_RUN_AS_NODE=1 exec "$(dirname "$0")/../../MacOS/Creature" "$(dirname "$0")/../npm/bin/npx-cli.js" "$@"
+`, { mode: 0o755 });
+
+    console.log('[Forge] Created node/npm/npx wrapper scripts for Unix');
+  }
+};
+
+/**
+ * Copy bundled npm for running npm/npx commands in packaged app.
+ * 
+ * Electron bundles Node.js but not npm. To make the app self-contained
+ * (not requiring users to have Node/npm installed), we bundle npm
+ * and run it using Electron's Node via process.execPath.
+ */
+const copyBundledNpm = (resourcesPath: string) => {
+  const destDir = path.join(resourcesPath, 'npm');
+
+  // Try desktop/node_modules first, then root node_modules
+  const nodeModulesLocations = [
+    path.join(__dirname, 'node_modules'),
+    path.join(__dirname, '..', 'node_modules'),
+  ];
+
+  let npmSrc: string | null = null;
+  for (const nodeModules of nodeModulesLocations) {
+    const candidate = path.join(nodeModules, 'npm');
+    if (fs.existsSync(candidate)) {
+      npmSrc = candidate;
+      break;
+    }
+  }
+
+  if (npmSrc) {
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.cpSync(npmSrc, destDir, { recursive: true });
+    
+    // Clean npm's node_modules for signing (remove .bin and broken symlinks)
+    const npmNodeModules = path.join(destDir, 'node_modules');
+    if (fs.existsSync(npmNodeModules)) {
+      cleanNodeModulesForSigning(npmNodeModules);
+    }
+    
+    console.log('[Forge] Bundled npm for self-contained app');
+  } else {
+    console.warn('[Forge] Warning: npm not found in node_modules - app will require system npm');
+  }
+};
+
+/**
  * Copy native dependencies for MCP servers.
  * 
  * MCP servers are bundled by Vite with native modules externalized.
@@ -308,6 +394,8 @@ const config: ForgeConfig = {
   hooks: {
     /**
      * Copy MCP assets after packaging.
+     * - Node wrapper script for npm postinstall scripts
+     * - Bundled npm for self-contained app (no system Node/npm required)
      * - MCP UIs (browser, terminal, ide) as single-file HTML
      * - Native dependencies (@vscode/ripgrep)
      * - MCP app templates for users to create new MCPs
@@ -317,6 +405,8 @@ const config: ForgeConfig = {
       const resourcesPath = path.dirname(buildPath);
       console.log('[Forge] Copying MCP assets to', resourcesPath);
       
+      createNodeWrapper(resourcesPath);
+      copyBundledNpm(resourcesPath);
       copyMcpUIs(resourcesPath);
       copyNativeDeps(resourcesPath);
       copyMcpApps(resourcesPath);
