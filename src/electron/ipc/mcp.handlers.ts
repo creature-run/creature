@@ -348,10 +348,24 @@ export const registerMcpHandlers = () => {
 
   /**
    * Restart an MCP server by name.
+   * Optionally accepts config for new custom MCPs.
    */
-  ipcMain.handle("mcp:restart", async (_, { name }) => {
+  ipcMain.handle("mcp:restart", async (_, { name, config }: { 
+    name: string; 
+    config?: { 
+      name: string;
+      transport?: "stdio" | "streamable-http";
+      url?: string;
+      headers?: Record<string, string>;
+      command?: string;
+      args?: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+      enabled: boolean;
+    };
+  }) => {
     try {
-      await restartMcp({ name });
+      await restartMcp({ name, config });
 
       // Track MCP restart
       telemetry.track("mcp_restart", { server_name: name });

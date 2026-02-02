@@ -324,8 +324,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
       name: string
     ): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke("mcp:createFromTemplate", { targetPath, name }),
-    restart: (name: string): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke("mcp:restart", { name }),
+    restart: (name: string, config?: {
+      name: string;
+      transport?: "stdio" | "streamable-http";
+      url?: string;
+      headers?: Record<string, string>;
+      command?: string;
+      args?: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+      enabled: boolean;
+    }): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("mcp:restart", { name, config }),
     disable: (name: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke("mcp:disable", { name }),
     closeAll: (): Promise<{ success: boolean; error?: string }> =>
@@ -878,7 +888,17 @@ declare global {
       mcp: {
         getConfigs: () => Promise<MCPServerConfigForRenderer[]>;
         createFromTemplate: (targetPath: string, name: string) => Promise<{ success: boolean; error?: string }>;
-        restart: (name: string) => Promise<{ success: boolean; error?: string }>;
+        restart: (name: string, config?: {
+          name: string;
+          transport?: "stdio" | "streamable-http";
+          url?: string;
+          headers?: Record<string, string>;
+          command?: string;
+          args?: string[];
+          cwd?: string;
+          env?: Record<string, string>;
+          enabled: boolean;
+        }) => Promise<{ success: boolean; error?: string }>;
         disable: (name: string) => Promise<{ success: boolean; error?: string }>;
         closeAll: () => Promise<{ success: boolean; error?: string }>;
         onRestarted: (callback: (data: { name: string }) => void) => () => void;

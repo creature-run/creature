@@ -1384,7 +1384,8 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       } | undefined;
 
       // Ensure inputSchema has required type: "object" for Anthropic API compatibility
-      const inputSchema = t.inputSchema as Record<string, unknown>;
+      // Some MCPs may return tools with undefined or empty inputSchema
+      const inputSchema = (t.inputSchema as Record<string, unknown>) || { type: "object" };
       if (!inputSchema.type) {
         inputSchema.type = "object";
       }
@@ -1608,11 +1609,36 @@ export const closeMcpsForProject = async (): Promise<void> => {
  * Closes the existing connection (if any), clears cached data,
  * and creates a fresh connection. Useful after changing dev mode
  * or other settings that require a full server restart.
+ *
+ * @param params.name - Server name to restart
+ * @param params.config - Optional config for new custom MCPs (not needed for built-in or existing MCPs)
  */
-export const restartMcp = async ({ name }: { name: string }): Promise<void> => {
+export const restartMcp = async ({ name, config }: { 
+  name: string;
+  config?: ProjectMcpConfigInput;
+}): Promise<void> => {
 
   // Add to project MCP names if not already there (for newly added MCPs)
   projectMcpNames.add(name);
+
+  // If config is provided for a non-built-in MCP, add/update it in userMcpConfigs
+  if (config && !isBuiltinMcp(name)) {
+    // Remove existing config if present
+    userMcpConfigs = userMcpConfigs.filter(c => c.name !== name);
+    // Add the new config
+    userMcpConfigs.push({
+      name: config.name,
+      transport: config.transport,
+      url: config.url,
+      headers: config.headers,
+      command: config.command,
+      args: config.args,
+      cwd: config.cwd,
+      env: config.env,
+      enabled: true,
+      scope: "custom" as MCPScope,
+    });
+  }
 
   // Close existing connection if present
   const existing = connections.get(name);
@@ -1941,20 +1967,30 @@ export const getMcpInfo = async ({
  * Recursively handles nested object schemas.
  */
 const jsonSchemaToZod = (schema: Record<string, unknown>): z.ZodType => {
+  // Handle undefined/null schemas
+  if (!schema || typeof schema !== "object") {
+    return z.object({});
+  }
+
   const type = schema.type as string;
   const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
   const required = schema.required as string[] | undefined;
 
-  if (type === "object" && properties) {
-    const shape: Record<string, z.ZodType> = {};
-    for (const [key, propSchema] of Object.entries(properties)) {
-      let propZod = jsonSchemaToZod(propSchema);
-      if (!required?.includes(key)) {
-        propZod = propZod.optional();
+  // Handle object type (with or without properties)
+  if (type === "object") {
+    if (properties) {
+      const shape: Record<string, z.ZodType> = {};
+      for (const [key, propSchema] of Object.entries(properties)) {
+        let propZod = jsonSchemaToZod(propSchema);
+        if (!required?.includes(key)) {
+          propZod = propZod.optional();
+        }
+        shape[key] = propZod;
       }
-      shape[key] = propZod;
+      return z.object(shape);
     }
-    return z.object(shape);
+    // Object without properties - return empty object schema
+    return z.object({});
   }
 
   if (type === "string") return z.string();
@@ -1963,7 +1999,8 @@ const jsonSchemaToZod = (schema: Record<string, unknown>): z.ZodType => {
   if (type === "boolean") return z.boolean();
   if (type === "array") return z.array(z.unknown());
 
-  return z.unknown();
+  // Default to empty object for unknown/missing types (Anthropic requires type field)
+  return z.object({});
 };
 
 /**
