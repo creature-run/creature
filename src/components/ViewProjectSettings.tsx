@@ -161,9 +161,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
       // Track what needs to be connected/disconnected
       const initialNames = new Set(initialMcpServers.map(s => s.name));
       const mcpsToDisconnect = Array.from(mcpsToDelete);
-      const mcpsToConnect = projectMcps
-        .filter(m => !initialNames.has(m.name))
-        .map(m => m.name);
+      const mcpsToConnect = projectMcps.filter(m => !initialNames.has(m.name));
 
       // Build context with local_directory if set
       const updatedContext: { custom_instructions?: string; local_directory?: { path: string } } = {
@@ -190,13 +188,13 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
           }
         }
 
-        // Connect newly added MCPs
-        for (const mcpName of mcpsToConnect) {
+        // Connect newly added MCPs (pass config for custom MCPs)
+        for (const mcp of mcpsToConnect) {
           try {
-            await window.electronAPI.mcp.restart(mcpName);
+            await window.electronAPI.mcp.restart(mcp.name, mcp);
           } catch (error) {
-            console.error(`Failed to connect MCP ${mcpName}:`, error);
-            toast.error(`Failed to connect ${mcpName}`);
+            console.error(`Failed to connect MCP ${mcp.name}:`, error);
+            toast.error(`Failed to connect ${mcp.name}`);
           }
         }
 
