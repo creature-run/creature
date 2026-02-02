@@ -11,9 +11,9 @@ export default defineConfig({
     // Prevents "Invalid hook call" errors when dependencies have their own React.
     dedupe: ["react", "react-dom"],
     alias: {
-      // With npm workspaces, dependencies are hoisted to root node_modules
-      react: path.resolve(__dirname, "../node_modules/react"),
-      "react-dom": path.resolve(__dirname, "../node_modules/react-dom"),
+      // Ensure React resolves to local node_modules
+      react: path.resolve(__dirname, "node_modules/react"),
+      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
   },
 });

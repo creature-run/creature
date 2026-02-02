@@ -35,9 +35,9 @@ export default defineConfig({
     // Prevents "Invalid hook call" errors when the SDK has React externalized.
     dedupe: ["react", "react-dom"],
     alias: {
-      // With npm workspaces, dependencies are hoisted to root node_modules
-      react: resolve(__dirname, "../node_modules/react"),
-      "react-dom": resolve(__dirname, "../node_modules/react-dom"),
+      // Ensure React resolves to local node_modules
+      react: resolve(__dirname, "node_modules/react"),
+      "react-dom": resolve(__dirname, "node_modules/react-dom"),
     },
     // dedupe: ['react', 'react-dom'],
   },

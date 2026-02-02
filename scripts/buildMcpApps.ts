@@ -99,6 +99,16 @@ function buildApp(appName: string): void {
         originalSdkVersion || PUBLISHED_SDK_VERSION;
       writePackageJson(appDir, pkg);
     }
+
+    // Reinstall with published SDK version so node_modules contains the
+    // actual npm package (not a symlink to local SDK) for packaging
+    console.log(`[buildMcpApps] Reinstalling ${appName} with published SDK...`);
+    removeDir(path.join(appDir, "node_modules"));
+    removeFile(path.join(appDir, "package-lock.json"));
+    execSync("npm install --production", {
+      cwd: appDir,
+      stdio: "inherit",
+    });
   }
 }
 
