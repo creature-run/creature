@@ -109,47 +109,63 @@ const copyMcpUIs = (resourcesPath: string) => {
 };
 
 /**
- * Create wrapper scripts in Resources/bin/ for node, npm, and npx.
+ * Copy the standalone Node.js binary to Resources/bin/.
  * 
- * These wrappers allow npm scripts and postinstall hooks to find node/npm/npx.
- * - node: Invokes Electron with ELECTRON_RUN_AS_NODE=1
- * - npm: Invokes Electron with ELECTRON_RUN_AS_NODE=1 running npm-cli.js
- * - npx: Invokes Electron with ELECTRON_RUN_AS_NODE=1 running npx-cli.js
+ * We bundle a real Node.js binary (not Electron) to avoid macOS showing
+ * dock icons when npm spawns child processes. On macOS, any executable
+ * inside a .app bundle shows in the dock, even with ELECTRON_RUN_AS_NODE=1.
+ * 
+ * The Node.js binary must be downloaded before packaging. Run:
+ *   npm run download:node
+ * 
+ * This downloads the appropriate Node.js binary for the current platform
+ * to artifacts/node-binary/
  */
-const createNodeWrapper = (resourcesPath: string) => {
+const copyNodeBinary = (resourcesPath: string) => {
   const binDir = path.join(resourcesPath, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
 
-  if (process.platform === 'win32') {
-    // Windows batch scripts
-    const nodeCmd = path.join(binDir, 'node.cmd');
-    fs.writeFileSync(nodeCmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\..\\MacOS\\Creature.exe" %*\r\n`);
-    
+  // Source: downloaded Node.js binary in artifacts/node-binary/
+  const nodeBinaryDir = path.join(__dirname, 'artifacts', 'node-binary');
+  const isWindows = process.platform === 'win32';
+  const nodeExeName = isWindows ? 'node.exe' : 'node';
+  const srcNodeBinary = path.join(nodeBinaryDir, nodeExeName);
+
+  if (!fs.existsSync(srcNodeBinary)) {
+    console.error(`[Forge] ERROR: Node.js binary not found at ${srcNodeBinary}`);
+    console.error('[Forge] Run "npm run download:node" before packaging');
+    throw new Error('Node.js binary not found. Run "npm run download:node" first.');
+  }
+
+  // Copy node binary
+  const destNodeBinary = path.join(binDir, nodeExeName);
+  fs.copyFileSync(srcNodeBinary, destNodeBinary);
+  if (!isWindows) {
+    fs.chmodSync(destNodeBinary, 0o755);
+  }
+  console.log('[Forge] Copied Node.js binary to resources');
+
+  // Create npm/npx wrapper scripts that use the bundled node
+  if (isWindows) {
     const npmCmd = path.join(binDir, 'npm.cmd');
-    fs.writeFileSync(npmCmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\..\\MacOS\\Creature.exe" "%~dp0..\\npm\\bin\\npm-cli.js" %*\r\n`);
+    fs.writeFileSync(npmCmd, `@echo off\r\n"%~dp0node.exe" "%~dp0..\\npm\\bin\\npm-cli.js" %*\r\n`);
     
     const npxCmd = path.join(binDir, 'npx.cmd');
-    fs.writeFileSync(npxCmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\..\\MacOS\\Creature.exe" "%~dp0..\\npm\\bin\\npx-cli.js" %*\r\n`);
+    fs.writeFileSync(npxCmd, `@echo off\r\n"%~dp0node.exe" "%~dp0..\\npm\\bin\\npx-cli.js" %*\r\n`);
     
-    console.log('[Forge] Created node/npm/npx wrappers for Windows');
+    console.log('[Forge] Created npm/npx wrappers for Windows');
   } else {
-    // Unix shell scripts - use relative paths from Resources/bin/
-    const nodeScript = path.join(binDir, 'node');
-    fs.writeFileSync(nodeScript, `#!/bin/bash
-ELECTRON_RUN_AS_NODE=1 exec "$(dirname "$0")/../../MacOS/Creature" "$@"
-`, { mode: 0o755 });
-
     const npmScript = path.join(binDir, 'npm');
     fs.writeFileSync(npmScript, `#!/bin/bash
-ELECTRON_RUN_AS_NODE=1 exec "$(dirname "$0")/../../MacOS/Creature" "$(dirname "$0")/../npm/bin/npm-cli.js" "$@"
+"$(dirname "$0")/node" "$(dirname "$0")/../npm/bin/npm-cli.js" "$@"
 `, { mode: 0o755 });
 
     const npxScript = path.join(binDir, 'npx');
     fs.writeFileSync(npxScript, `#!/bin/bash
-ELECTRON_RUN_AS_NODE=1 exec "$(dirname "$0")/../../MacOS/Creature" "$(dirname "$0")/../npm/bin/npx-cli.js" "$@"
+"$(dirname "$0")/node" "$(dirname "$0")/../npm/bin/npx-cli.js" "$@"
 `, { mode: 0o755 });
 
-    console.log('[Forge] Created node/npm/npx wrapper scripts for Unix');
+    console.log('[Forge] Created npm/npx wrapper scripts');
   }
 };
 
@@ -405,7 +421,7 @@ const config: ForgeConfig = {
       const resourcesPath = path.dirname(buildPath);
       console.log('[Forge] Copying MCP assets to', resourcesPath);
       
-      createNodeWrapper(resourcesPath);
+      copyNodeBinary(resourcesPath);
       copyBundledNpm(resourcesPath);
       copyMcpUIs(resourcesPath);
       copyNativeDeps(resourcesPath);

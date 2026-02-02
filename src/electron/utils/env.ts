@@ -17,7 +17,7 @@ import fs from "fs";
 import path from "path";
 
 /**
- * Get the path to the bin directory containing the node wrapper script.
+ * Get the path to the bin directory containing the bundled node binary.
  * This is created at packaging time in forge.config.ts.
  */
 export const getNodeBinDir = (): string | null => {
@@ -30,6 +30,28 @@ export const getNodeBinDir = (): string | null => {
     return binDir;
   }
   
+  return null;
+};
+
+/**
+ * Get the path to the bundled Node.js binary.
+ * In packaged mode, we bundle a standalone Node.js binary to avoid
+ * macOS dock icon issues when spawning child processes.
+ */
+export const getBundledNodePath = (): string | null => {
+  if (!app.isPackaged) {
+    return null;
+  }
+
+  const isWindows = process.platform === "win32";
+  const nodeExeName = isWindows ? "node.exe" : "node";
+  const nodePath = path.join(process.resourcesPath, "bin", nodeExeName);
+  
+  if (fs.existsSync(nodePath)) {
+    return nodePath;
+  }
+
+  console.warn("[env] Bundled Node.js not found at:", nodePath);
   return null;
 };
 
@@ -71,37 +93,40 @@ export const getBundledNpxCliPath = (): string | null => {
 };
 
 /**
- * Resolve a command to use bundled npm/npx when available.
+ * Resolve a command to use bundled node/npm/npx when available.
  * Returns { command, args, useBundled } where:
- * - command: The resolved command (process.execPath for bundled, original otherwise)
+ * - command: The resolved command (bundled node path for bundled, original otherwise)
  * - args: The resolved args (prepended with CLI path for bundled)
  * - useBundled: Whether we're using the bundled version
  *
  * @example
  * // Input: command="npm", args=["install"]
- * // Output (packaged): { command: process.execPath, args: ["/path/to/npm-cli.js", "install"], useBundled: true }
+ * // Output (packaged): { command: "/path/to/node", args: ["/path/to/npm-cli.js", "install"], useBundled: true }
  * // Output (dev): { command: "npm", args: ["install"], useBundled: false }
  */
 export const resolveBundledCommand = (
   command: string,
   args: string[]
 ): { command: string; args: string[]; useBundled: boolean } => {
-  if (command === "npm") {
+  // Get bundled Node.js path (standalone binary, not Electron)
+  const nodePath = getBundledNodePath();
+  
+  if (command === "npm" && nodePath) {
     const npmCli = getBundledNpmCliPath();
     if (npmCli) {
       return {
-        command: process.execPath,
+        command: nodePath,
         args: [npmCli, ...args],
         useBundled: true,
       };
     }
   }
 
-  if (command === "npx") {
+  if (command === "npx" && nodePath) {
     const npxCli = getBundledNpxCliPath();
     if (npxCli) {
       return {
-        command: process.execPath,
+        command: nodePath,
         args: [npxCli, ...args],
         useBundled: true,
       };
@@ -121,11 +146,12 @@ export const resolveBundledCommand = (
  */
 export const getExtendedPath = (currentPath?: string): string => {
   const basePath = currentPath ?? process.env.PATH ?? "";
+  const pathSeparator = process.platform === "win32" ? ";" : ":";
   
   // In packaged mode, prepend the node bin directory
   const binDir = getNodeBinDir();
   if (binDir) {
-    return `${binDir}:${basePath}`;
+    return `${binDir}${pathSeparator}${basePath}`;
   }
   
   return basePath;

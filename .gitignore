@@ -7,6 +7,9 @@ node_modules/
 out/
 dist/
 
+# Downloaded Node.js binary for packaging
+artifacts/node-binary/
+
 # OS files
 .DS_Store
 Thumbs.db

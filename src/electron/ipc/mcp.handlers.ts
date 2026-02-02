@@ -126,13 +126,10 @@ const runCommand = ({
     console.log(`[MCP] Running: ${finalCommand} ${finalArgs.join(" ")} in ${cwd}`);
 
     const env = buildSpawnEnv({ npm_config_yes: "true" });
-    if (resolved.useBundled) {
-      env.ELECTRON_RUN_AS_NODE = "1";
-    }
 
     const proc = spawn(finalCommand, finalArgs, {
       cwd,
-      shell: !resolved.useBundled, // Don't use shell when running bundled npm directly
+      shell: !resolved.useBundled, // Don't use shell when running bundled node directly
       env,
     });
 
