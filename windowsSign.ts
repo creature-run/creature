@@ -31,21 +31,22 @@ const hasWindowsSigningConfig = !!(
  * Returns undefined if required environment variables are not set,
  * which allows the build to proceed without signing (for local dev).
  * 
- * Note: @electron/windows-sign automatically adds /fd, so we don't include it here.
+ * Note: @electron/windows-sign automatically adds /fd and timestamp options,
+ * so we only include the Azure-specific /dlib and /dmdf flags here.
  */
 export const windowsSign: WindowsSignOptions | undefined = hasWindowsSigningConfig
   ? {
       // Path to signtool.exe from Windows SDK
       signToolPath: process.env.SIGNTOOL_PATH!,
 
+      // RFC 3161 timestamp server for Azure Trusted Signing
+      timestampServer: 'http://timestamp.acs.microsoft.com',
+
       // Custom signtool parameters for Azure Trusted Signing
-      // Uses the /dlib and /dmdf flags to integrate with Azure's signing service
-      // Note: /fd is added automatically by @electron/windows-sign, don't duplicate it
+      // Only include Azure-specific flags - /fd, /t, /tr are handled by the library
       signWithParams: [
         '/v',                                              // Verbose output
         '/debug',                                          // Debug information
-        '/tr', 'http://timestamp.acs.microsoft.com',       // Timestamp server
-        '/td', 'SHA256',                                   // Timestamp digest algorithm
         '/dlib', process.env.AZURE_CODE_SIGNING_DLIB!,     // Azure signing library
         '/dmdf', process.env.AZURE_METADATA_JSON!,         // Azure metadata file
       ].join(' '),
