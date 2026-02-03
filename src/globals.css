@@ -317,6 +317,59 @@ body {
   100% { opacity: 1; }
 }
 
+@keyframes gentle-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes divider-grow-left {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes divider-grow-right {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes tile-enter {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+    box-shadow: none;
+    border-color: var(--color-border-secondary);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(0, 0);
+    box-shadow: none;
+    border-color: var(--color-border-secondary);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-2px, -2px);
+    border-color: var(--color-background-inverse);
+    box-shadow:
+      1px 1px 0 var(--color-background-inverse),
+      2px 2px 0 var(--color-background-inverse),
+      3px 3px 0 var(--color-background-inverse),
+      4px 4px 0 var(--color-background-inverse),
+      5px 5px 0 var(--color-background-inverse);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0);
+    box-shadow: none;
+    border-color: var(--color-border-secondary);
+  }
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

@@ -40,7 +40,7 @@
  */
 
 import { BrowserWindow } from "electron";
-import { readResource, callTool, getTool, getToolsForResourceUri, clearResourceCache, getResourceMetadata, type ResourceIcon, type Views } from "./client";
+import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, type ResourceIcon, type Views } from "./client";
 import { getPopoutWindow } from "../window/popoutWindows";
 import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
@@ -265,32 +265,45 @@ export const createPipInstance = async ({
 
 /**
  * Refresh all pips belonging to a specific MCP server.
- * Re-fetches HTML content and icon, notifies the renderer to update iframes.
+ * Closes pips whose resourceUri no longer exists (MCP app was rewritten).
+ * Re-fetches HTML content and icon for valid pips.
  * Called when an MCP server is restarted.
  */
 export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
-  const pipsToRefresh = Array.from(pipInstances.values()).filter(
+  const pipsForMcp = Array.from(pipInstances.values()).filter(
     (p) => p.serverName === mcpName
   );
 
-  if (pipsToRefresh.length === 0) {
+  if (pipsForMcp.length === 0) {
     return;
   }
 
-  for (const pip of pipsToRefresh) {
+  // Get valid resource URIs from the MCP server
+  const validUris = getResourceUrisForMcp(mcpName);
+
+  for (const pip of pipsForMcp) {
+    // Close pips with stale resourceUri (MCP app was rewritten with different resources)
+    if (!validUris.has(pip.resourceUri)) {
+      console.log(`[Control Plane] Closing stale pip (resource no longer exists)`, {
+        instanceId: pip.instanceId,
+        resourceUri: pip.resourceUri
+      });
+      pipInstances.delete(pip.instanceId);
+      sendToRenderer("pip:closed", { instanceId: pip.instanceId });
+      continue;
+    }
+
+    // Refresh valid pips with fresh content
     try {
-      // Fetch fresh HTML content and icon
       const { html: htmlContent, icon } = await readResource({
         serverName: pip.serverName,
         uri: pip.resourceUri,
       });
 
-      // Update pip instance
       pip.htmlContent = htmlContent;
       pip.icon = icon;
       pip.ready = false;
 
-      // Create new ready promise
       let resolveReady: () => void = () => {};
       const readyPromise = new Promise<void>((resolve) => {
         resolveReady = resolve;
@@ -298,13 +311,13 @@ export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promi
       pip.readyPromise = readyPromise;
       pip.resolveReady = resolveReady;
 
-      // Notify renderer to update the iframe
       sendToRenderer("pip:refresh", {
         instanceId: pip.instanceId,
         htmlContent: pip.htmlContent,
         icon: pip.icon,
       });
 
+      console.log(`[Control Plane] Refreshed pip`, { instanceId: pip.instanceId });
     } catch (error) {
       console.error(`[Control Plane] Failed to refresh pip`, { instanceId: pip.instanceId, error });
     }
@@ -827,26 +840,26 @@ const stripStructuredContent = (result: unknown): unknown => {
 
 /**
  * Strip large image data from tool results to prevent token limit errors.
- * 
- * Screenshots and other image content can be 100k+ tokens when base64 encoded.
+ *
+ * Large image content can be 100k+ tokens when base64 encoded.
  * This replaces image content with a placeholder message while preserving
  * the result structure for the agent.
- * 
+ *
  * The UI pip still receives the full result via pip:tool-result IPC.
  */
 const stripLargeImageData = (result: unknown): unknown => {
   if (!result || typeof result !== "object") return result;
-  
+
   const resultObj = result as Record<string, unknown>;
   if (!resultObj.content || !Array.isArray(resultObj.content)) return result;
-  
+
   const hasLargeImage = resultObj.content.some(
-    (item: { type?: string; data?: string }) => 
+    (item: { type?: string; data?: string }) =>
       item.type === "image" && item.data && item.data.length > 1000
   );
-  
+
   if (!hasLargeImage) return result;
-  
+
   // Replace image content with placeholder
   return {
     ...resultObj,
@@ -854,7 +867,7 @@ const stripLargeImageData = (result: unknown): unknown => {
       if (item.type === "image" && item.data && item.data.length > 1000) {
         return {
           type: "text",
-          text: "[Screenshot captured - image omitted from conversation to save tokens. View in browser pip.]",
+          text: "[Image omitted from conversation to save tokens]",
         };
       }
       return item;
@@ -944,15 +957,15 @@ const handleBrowserToolCall = async ({
     },
   });
 
-  // For screenshot, we need to handle it specially (capture from webview)
-  if (action === "screenshot") {
-    // Screenshot is handled asynchronously by PipBrowser
-    // For now, return a placeholder - the actual screenshot will be sent via IPC
-    return {
-      content: [{ type: "text", text: "Screenshot requested - see browser pip" }],
-      structuredContent: { success: true, action: "screenshot" },
-    };
-  }
+  // TEMPORARILY DISABLED: Screenshot tool is disabled
+  // if (action === "screenshot") {
+  //   // Screenshot is handled asynchronously by PipBrowser
+  //   // For now, return a placeholder - the actual screenshot will be sent via IPC
+  //   return {
+  //     content: [{ type: "text", text: "Screenshot requested - see browser pip" }],
+  //     structuredContent: { success: true, action: "screenshot" },
+  //   };
+  // }
 
   return {
     content: [{ type: "text", text: JSON.stringify({ success: true, action }) }],
@@ -1300,7 +1313,7 @@ export const handleToolCall = async ({
     };
   }
 
-  // Strip large image data (e.g., screenshots) to prevent token limit errors.
+  // Strip large image data to prevent token limit errors.
   // The UI pip already received the full result via pip:tool-result IPC.
   return stripLargeImageData(result);
 };

@@ -8,9 +8,34 @@
  * Design:
  * - Maintains a pool of available ports (configurable range)
  * - Tracks which ports are assigned to which MCP servers
+ * - Checks if ports are actually free before allocating (skips busy ports)
  * - Releases ports when MCPs disconnect or fail
  * - MCPs read their assigned port from MCP_ASSIGNED_PORT env var
  */
+
+import * as net from "net";
+
+/**
+ * Check if a port is available by attempting to create a server on it.
+ *
+ * IMPORTANT: We intentionally do NOT kill processes on busy ports.
+ * When a port is busy, we simply skip it and try the next one. Reasons:
+ * - We cannot reliably distinguish between orphaned MCP processes and
+ *   legitimate user processes (e.g., Vite dev server, other apps)
+ * - Killing arbitrary processes is dangerous and could break the user's
+ *   development environment or other running applications
+ * - Silently skipping busy ports is safe and transparent to the user
+ */
+const isPortFree = (port: number): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
+};
 
 /**
  * Configuration for the port manager.
@@ -52,24 +77,36 @@ class PortManager {
    * Allocate a port for an MCP server.
    * If the server already has a port assigned, returns that port.
    * Otherwise, finds the next available port in the pool.
+   * Checks if ports are actually free on the system (skips busy ports).
    *
    * @param serverName - Unique name of the MCP server
    * @returns The allocated port number
    * @throws Error if no ports are available in the pool
    */
-  allocate({ serverName }: { serverName: string }): number {
-    // Return existing assignment if server already has a port
+  async allocate({ serverName }: { serverName: string }): Promise<number> {
+    // Check existing assignment - but verify the port is still free.
+    // An orphan process from a previous session might be occupying it.
     const existing = this.assignments.get(serverName);
     if (existing !== undefined) {
-      return existing;
+      const stillFree = await isPortFree(existing);
+      if (stillFree) {
+        return existing;
+      }
+      // Port is no longer free (orphan process?) - clear assignment and find new port
+      console.log(`[PortManager] Port ${existing} for ${serverName} is no longer free, reallocating`);
+      this.usedPorts.delete(existing);
+      this.assignments.delete(serverName);
     }
 
-    // Find next available port in the range
+    // Find next available port in the range (check if actually free)
     for (let port = this.config.startPort; port <= this.config.endPort; port++) {
       if (!this.usedPorts.has(port)) {
-        this.usedPorts.add(port);
-        this.assignments.set(serverName, port);
-        return port;
+        const free = await isPortFree(port);
+        if (free) {
+          this.usedPorts.add(port);
+          this.assignments.set(serverName, port);
+          return port;
+        }
       }
     }
 

@@ -29,9 +29,6 @@ type McpCreatorStatus =
 
 type McpCreatorMode = "create" | "existing";
 
-/** Which folder becomes the project's local directory */
-type LocalDirectoryMode = "parent" | "app";
-
 /**
  * McpAppCreator Component
  *
@@ -40,14 +37,13 @@ type LocalDirectoryMode = "parent" | "app";
  * - Existing mode: add an existing MCP folder as a project
  */
 export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
-  const [projectName, setProjectName] = useState("MCP App");
-  const [folderName, setFolderName] = useState("mcp-app");
+  const [projectName, setProjectName] = useState("New MCP App");
+  const [folderName, setFolderName] = useState("new-mcp-app");
   const [mode, setMode] = useState<McpCreatorMode>("create");
   
   // Create mode state
   const [createFolderLocation, setCreateFolderLocation] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("todos");
-  const [localDirectoryMode, setLocalDirectoryMode] = useState<LocalDirectoryMode>("app");
   
   // Existing mode state
   const [existingFolderPath, setExistingFolderPath] = useState("");
@@ -131,14 +127,14 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
       const result = mode === "existing"
         ? await window.electronAPI.project.createMcpApp({
             mcpFolderPath: existingFolderPath,
-            projectName: projectName.trim() || "MCP App",
+            projectName: projectName.trim() || "New MCP App",
           })
         : await window.electronAPI.project.createMcpApp({
             targetPath: createFolderLocation,
             name: folderName.trim(),
             template: selectedTemplate,
-            projectName: projectName.trim() || "MCP App",
-            projectRootMode: localDirectoryMode,
+            projectName: projectName.trim() || "New MCP App",
+            projectRootMode: "app",
           });
 
       if (!result.success || !result.project) {
@@ -155,7 +151,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
       setStatus("error");
       setStatusMessage(null);
     }
-  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, selectedTemplate, localDirectoryMode, onComplete]);
+  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, selectedTemplate, onComplete]);
 
   /**
    * Generates a folder name from a project name.
@@ -179,7 +175,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
     // Only auto-generate folder name in create mode
     if (mode === "create") {
       const generated = generateFolderName(value);
-      setFolderName(generated || "mcp-app");
+      setFolderName(generated || "new-mcp-app");
     }
   }, [mode, generateFolderName]);
 
@@ -227,18 +223,20 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   return (
     <>
       <div className="fixed inset-0 z-50 bg-background-primary/95 dialog-overlay" onClick={onCancel} data-state="open" />
-      <div
+      <form
         className="fixed z-50 grid w-full max-w-lg gap-4 border border-border-primary bg-background-primary p-12 shadow-lg rounded-lg dialog-content"
         onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => { e.preventDefault(); if (!isCreateDisabled) handleCreate(); }}
         data-state="open"
       >
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
             <h2 className="text-sm font-medium text-text-primary">
-              New MCP App
+              Create a new MCP App
             </h2>
             <button
+              type="button"
               className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"
               onClick={onCancel}
             >
@@ -262,7 +260,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
               type="text"
               value={projectName}
               onChange={(e) => handleProjectNameChange(e.target.value)}
-              placeholder="MCP App"
+              placeholder="New MCP App"
             />
           </div>
 
@@ -275,7 +273,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                 className={cn(
                   "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
                   mode === "create"
-                    ? "text-text-primary border-ring-primary"
+                    ? "text-text-primary border-text-primary"
                     : "text-text-secondary border-transparent hover:text-text-primary"
                 )}
               >
@@ -287,7 +285,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                 className={cn(
                   "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
                   mode === "existing"
-                    ? "text-text-primary border-ring-primary"
+                    ? "text-text-primary border-text-primary"
                     : "text-text-secondary border-transparent hover:text-text-primary"
                 )}
               >
@@ -324,7 +322,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                     placeholder="Select parent folder..."
                     className="flex-1 bg-background-tertiary text-text-secondary cursor-default"
                   />
-                  <Button variant="secondary" onClick={handleSelectCreateLocation}>
+                  <Button type="button" variant="secondary" onClick={handleSelectCreateLocation}>
                     Browse
                   </Button>
                 </div>
@@ -336,7 +334,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
               </div>
 
               {/* Folder Name */}
-              <div className="mb-4">
+              <div className="mb-8">
                 <Label htmlFor="folder-name">
                   Folder Name
                 </Label>
@@ -345,49 +343,11 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                   type="text"
                   value={folderName}
                   onChange={(e) => handleFolderNameChange(e.target.value)}
-                  placeholder="mcp-app"
+                  placeholder="new-mcp-app"
                 />
                 <p className="text-xs text-text-secondary mt-2">
                   Lowercase letters, numbers, and hyphens only
                 </p>
-              </div>
-
-              {/* Local Directory Mode */}
-              <div className="mb-8">
-                <Label>Local Directory</Label>
-                <div className="flex gap-1 p-1 bg-background-tertiary rounded-md w-fit">
-                  <button
-                    type="button"
-                    onClick={() => setLocalDirectoryMode("app")}
-                    className={cn(
-                      "px-3 py-1.5 text-xs font-medium rounded transition-colors",
-                      localDirectoryMode === "app"
-                        ? "bg-background-primary text-text-primary shadow-sm"
-                        : "text-text-secondary hover:text-text-primary"
-                    )}
-                  >
-                    App Folder
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLocalDirectoryMode("parent")}
-                    className={cn(
-                      "px-3 py-1.5 text-xs font-medium rounded transition-colors",
-                      localDirectoryMode === "parent"
-                        ? "bg-background-primary text-text-primary shadow-sm"
-                        : "text-text-secondary hover:text-text-primary"
-                    )}
-                  >
-                    Parent Folder
-                  </button>
-                </div>
-                {createFolderLocation && folderName && (
-                  <p className="text-xs text-text-secondary mt-2">
-                    Agent workspace: {localDirectoryMode === "app"
-                      ? `${createFolderLocation}/${folderName}/`
-                      : `${createFolderLocation}/`}
-                  </p>
-                )}
               </div>
             </>
           )}
@@ -404,7 +364,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                   placeholder="Select folder..."
                   className="flex-1 bg-background-tertiary text-text-secondary cursor-default"
                 />
-                <Button variant="secondary" onClick={handleSelectExistingFolder}>
+                <Button type="button" variant="secondary" onClick={handleSelectExistingFolder}>
                   Browse
                 </Button>
               </div>
@@ -413,18 +373,18 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
 
           {/* Footer */}
           <div className="flex justify-end gap-2 pt-6">
-            <Button variant="secondary" onClick={onCancel}>
+            <Button type="button" variant="secondary" onClick={onCancel}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleCreate}
+            <Button
+              type="submit"
               disabled={isCreateDisabled}
             >
               {mode === "create" ? "Create" : "Add"}
             </Button>
           </div>
         </div>
-      </div>
+      </form>
     </>
   );
 }

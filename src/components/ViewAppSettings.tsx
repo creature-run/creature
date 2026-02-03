@@ -21,8 +21,6 @@ interface ViewAppSettingsProps {
 
 const PROVIDERS: { type: ProviderType; name: string; description: string }[] = [
   { type: "anthropic", name: "Anthropic API", description: "Direct API access" },
-  { type: "bedrock", name: "AWS Bedrock", description: "Via Amazon Web Services" },
-  { type: "vertex", name: "Google Vertex AI", description: "Via Google Cloud" },
 ];
 
 const BEDROCK_REGIONS = [
@@ -269,7 +267,6 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
                 placeholder="sk-ant-..."
                 disabled={isLoading}
                 className={`${inputMonoClass} pl-9`}
-                autoFocus
               />
             </div>
             {hasExistingCredentials && !apiKey && (
@@ -291,7 +288,6 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
               placeholder="Access Key ID (AKIA...)"
               disabled={isLoading}
               className={inputMonoClass}
-              autoFocus
             />
             <input
               type="password"
@@ -333,7 +329,6 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
               placeholder="Project ID"
               disabled={isLoading}
               className={inputBaseClass}
-              autoFocus
             />
             <select
               value={vertexLocation}
@@ -427,7 +422,7 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
       {/* Header */}
       <div className="shrink-0 border-b border-border-secondary">
         <div className="flex items-center justify-between px-6 py-4">
-          <h1 className="text-sm font-semibold text-text-primary">Settings</h1>
+          <h1 className="text-sm font-medium text-text-primary">Org Settings</h1>
           <button
             onClick={onClose}
             className="p-1 rounded-md hover:bg-background-tertiary text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
@@ -517,6 +512,9 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
                             <div className="text-xs text-text-tertiary">{provider.description}</div>
                           </button>
                         ))}
+                        <div className="w-full px-3 py-2 text-left cursor-not-allowed opacity-50">
+                          <div className="text-sm text-text-tertiary">More providers coming soon</div>
+                        </div>
                       </div>
                     )}
                   </div>

@@ -351,7 +351,7 @@ const DEFAULT_LIGHT_THEME: ThemeMode = {
   colors: {
     background: {
       primary: "#ffffff",
-      secondary: "#e8e8e8",
+      secondary: "#f5f5f5",
       tertiary: "#eaeaea",
       inverse: "#1F1E1D",
       ghost: "transparent",

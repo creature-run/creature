@@ -21,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./Tool
 import { cn } from "../lib/utils";
 import { useTheme } from "../contexts/ThemeContext";
 import { useApp, type ResourceIcon } from "../contexts/AppContext";
-import { Briefcase, GearFine, SquaresFour, Key } from "@phosphor-icons/react";
+import { Briefcase, Gear, SquaresFour } from "@phosphor-icons/react";
 import { CreatureIcon } from "./CreatureIcon";
 import { validateIcon } from "../lib/iconUtils";
 
@@ -295,8 +295,8 @@ export function SidebarLeft() {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleOpenAppSettings}>
-            <Key size={9} weight="regular" />
-            <span>Settings</span>
+            <Gear size={9} weight="regular" />
+            <span>Org Settings</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -334,7 +334,7 @@ export function SidebarLeft() {
             onClick={() => { setProjectSettingsOpen(!ui.projectSettingsOpen); }}
             active={ui.projectSettingsOpen}
           >
-            <GearFine size={18} weight="regular" />
+            <Gear size={18} weight="regular" />
           </SidebarButton>
         </>
       )}

@@ -16,7 +16,7 @@ import path from "node:path";
  * Project profile types.
  * Determines project behavior and customization.
  */
-export type ProjectProfile = "work" | "dev-general" | "dev-mcp";
+export type ProjectProfile = "playground" | "dev-general" | "dev-mcp";
 
 /**
  * MCP configuration stored in a project.

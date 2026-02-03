@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { cn, truncatePathLeft } from "../lib/utils";
-import { Folder, FileText, Play, Stop } from "@phosphor-icons/react";
+import { Folder, FileText, PaperPlaneRight, Stop } from "@phosphor-icons/react";
 import { useApp } from "../contexts/AppContext";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./HoverCard";
 import { Button } from "./Button";
@@ -367,7 +367,7 @@ export function ChatInput({
   };
 
   /**
-   * Handles image file upload to S3.
+   * Handles image file upload to local storage.
    * Can accept either a file path (string) or a File object.
    */
   const handleImageUpload = useCallback(
@@ -820,7 +820,7 @@ export function ChatInput({
                   title="Send message"
                   className="shrink-0 !w-7 !h-7 !p-0"
                 >
-                  <Play size={10} weight="fill" />
+                  <PaperPlaneRight size={14} weight="regular" />
                 </Button>
               )}
             </div>
@@ -908,8 +908,8 @@ export function ChatInput({
       <div className="flex items-center justify-between px-5 py-2.5 border-t border-border-secondary">
         {/* Left side - Context icons */}
         <div className="flex items-center -ml-1.5">
-          {/* Folder icon - opens project settings (hidden for work projects) */}
-          {project?.profile !== "work" && (
+          {/* Folder icon - opens project settings (hidden for playground projects) */}
+          {project?.profile !== "playground" && (
             <HoverCard openDelay={200}>
               <HoverCardTrigger asChild>
                 <button

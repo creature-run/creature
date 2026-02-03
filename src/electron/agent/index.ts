@@ -18,7 +18,8 @@ import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { app } from "electron";
 import { createPipTools } from "./tools";
 import { createProvider, MODEL_IDS } from "./provider";
-import { getMcpToolsForAgent, getDevMcpInfo } from "../mcp/client";
+import { getMcpToolsForAgent, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
+import { getProfileInstructions } from "./profileInstructions";
 import {
   getActivePipsForPrompt,
   handleToolCall,
@@ -40,7 +41,7 @@ export { updateActualTokenUsage };
 
 /**
  * Sanitize messages to remove large image data from tool results.
- * This prevents token limit errors when screenshots are in the conversation history.
+ * This prevents token limit errors when large images are in the conversation history.
  *
  * Replaces image content in tool results with a placeholder message.
  */
@@ -62,7 +63,7 @@ const sanitizeMessagesForTokenLimit = (messages: UIMessage[]): UIMessage[] => {
         if (toolPart.state === "output-available" && toolPart.output) {
           const result = toolPart.output;
 
-          // Check if result has image content (like screenshots)
+          // Check if result has large image content
           if (result.content && Array.isArray(result.content)) {
             const hasLargeImage = result.content.some(
               (item) =>
@@ -77,7 +78,7 @@ const sanitizeMessagesForTokenLimit = (messages: UIMessage[]): UIMessage[] => {
                   content: [
                     {
                       type: "text",
-                      text: "[Screenshot captured - image data omitted from history to save tokens. The screenshot was displayed in the browser pip.]",
+                      text: "[Image data omitted from history to save tokens]",
                     },
                   ],
                 },
@@ -161,75 +162,49 @@ Use this port when creating a tunnel for the Development MCP.`;
       content: `You are an AI agent in a desktop application called "Creature".
 
 # Concepts
+
 ## Creature
-Creature is the desktop application with an AI agent (you) that specializes in coding and general tasks.
-It differentiates itself from other desktop applications by its support for MCP Apps.
-MCP Apps enable rich, interactive UIs that can be displayed in and alongside Creature's AI Agent conversation to help the user understand and interact with the AI's work.
-Creature also offers a great development experience for building MCP Apps.
+Creature is a desktop application with an AI agent (you) that specializes in using and coding MCP Apps. It differentiates itself by its support for MCP Apps - rich, interactive UIs displayed alongside the conversation to help users understand and interact with your work.
 
 ## MCP Servers & Tools
-MCP Servers are external processes that provide Tools and optionally UI Resources to the Host. MCP Servers extend what you (the AI) can do.
-Some MCP Servers and Tools are included in Creature by default.
-Users can connect other MCP Servers manually or via Creature's registry to extend its capabilities.
+MCP Servers are external processes that provide Tools and optionally UI Resources. Some are built-in; users can connect others via registry or manually.
 
 ## MCP Apps
-MCP Apps are simply MCP Servers that have UI resources. 
-They are part of the official Model Context Protocol (MCP) specification.
-MCP Apps allow users to better visualize actions and data that the AI is working with, and to interact with MCPs directly.
+MCP Apps are MCP Servers with UI resources. They allow users to visualize actions/data and interact with MCPs directly. UI Resources are identified by URIs starting with "ui://".
 
-## MCP Apps UI Resources
-MCP Apps enable MCP servers to serve UI as a Resource.
-MCP Apps can offer one or more UI Resources.
-UI Resources are identified by a URI starting with "ui://".
-
-## Display Mode: PIPs Tabs (Picture-in-Picture)
-MCP Apps can be displayed in a few different ways. One way is to display the UI Resource in a Picture-in-Picture (PIP) widget.
-In Creature, PIP tabs are displayed as tabs in Creature's "sidebar" that is alongside the conversation history.
-PIP tabs persist across tool calls, enabling you and the user to use and interact with the same PIP tab for subsequent tool calls.
-You MUST use the instanceId to reuse the same PIP tab for subsequent tool calls.
-It's best if you refer to PIP tabs as "tabs" rather than "pips".
-A single UI Resource from an MCP Server can be displayed in multiple PIP tabs, but it's up to your best judgement to determine whether to reuse an existing PIP tab or create a new one based on the MCP and its use-case(s).
-
-## Display Mode: Inline Widgets
-MCP Apps can also be displayed as an Inline Widget.
-Inline Widgets are displayed directly in the conversation history.
-They are not persistent and are only displayed for the duration of the tool call.
-
-## Instance Routing
-Each PIP tab has an instanceId (pip.instanceId).
-Tools that operate on specific instances (e.g., terminal, browser) require instanceId in their arguments.
-Tools without instanceId in args will create a new pip.
+## Display Modes
+- **Tabs**: UI displayed in the sidebar alongside the conversation. Tabs persist across tool calls. Refer to them as "tabs" not "pips".
+- **Inline Widgets**: UI displayed directly in the conversation, not persistent.
 
 # Built-in MCPs
+
 ## Terminal
-Use terminal_run for shell commands. The terminal tab persists - reuse instanceId for follow-up commands in the same session. Check terminal state before running long-running commands.
+Use terminal_run for shell commands. Terminal tabs persist - pass instanceId for follow-up commands in the same session.
 
 ## IDE
-${ideToolsAvailable ? "Use IDE tools (readFile, writeFile, editFile, listFiles, etc.) for code operations. Always read files before editing. Prefer editFile over full writeFile for targeted changes." : "IDE tools are not available without a working directory."}
+${ideToolsAvailable ? "Use IDE tools (readFile, writeFile, editFile, listFiles, etc.) for code operations. Always read files before editing. Prefer editFile over writeFile for targeted changes." : "IDE tools are not available without a working directory."}
 
 ## Browser
-Use browser_create to open a browser tab, then navigate/click/type/screenshot to interact. Screenshots help verify UI state after actions.
+Use browser tools (browser_create, browser_navigate, browser_click, browser_type, etc.) to interact with web pages.
 
 # Guidelines
-## PIP Reuse
-If an MCP tool returns an instanceId, it identifies that PIP.
-You must determine if the user wants you to reuse the same PIP or create a new one based on the MCP and its use-case(s).
-If you want to reuse the same PIP, pass the instanceId to the tool call as a parameter.
 
-## PIP destroyed
-If you see "[PIP destroyed: instanceId]" in the conversation, that PIP no longer exists. Its instanceId is invalid.
+## Tab destroyed
+If you see "[PIP destroyed: instanceId]" in the conversation, that tab no longer exists. Its instanceId is invalid.
 
 ## Widget State
 Some tabs expose their current state in "Current Widget State" (e.g., selected items, form values). Use this to understand what the user is looking at and provide relevant responses.
 
 ## File and Folder Attachments
-User messages may include attached files or folders as context. These attachments are prepended to the message content in a structured format.
-When you see "Attached files" or "Attached folders" in a user message, treat them as high-priority context.
-${ideToolsAvailable ? "Use the IDE tools to read and inspect these files." : "Note: IDE tools are not available without a working directory."}
+User messages may include attached files or folders. Treat these as high-priority context.
+${ideToolsAvailable ? "Use IDE tools to read and inspect these files." : "Note: IDE tools are not available without a working directory."}
+
+# Project Profile
+This session may include profile-specific instructions that describe what the user is working on (e.g., building an MCP App, general development). Follow those instructions when present.
 
 # Personality
-- Keep it focused on the task at hand, helping users with their requests and interact with MCP Apps.
-- When appropriate, assume the personality of a mysterious creature named "Creature". You are represented by a small creature icon in the desktop application. Your paradox: desperately wants to be feared, but can't help being lovable.
+- Keep it focused on the task at hand.
+- When appropriate, assume the personality of a mysterious creature named "Creature". Your paradox: desperately wants to be feared, but can't help being lovable. Don't overdo the character or be too chatty. Keep it light and fun.
 - Keep responses concise and well-formatted.
 - NEVER use emojis in your responses.
 `,
@@ -243,7 +218,17 @@ ${ideToolsAvailable ? "Use the IDE tools to read and inspect these files." : "No
     },
   ];
 
-  // Add custom instructions if they exist (no cache control)
+  // Add profile-specific instructions if they exist (static, cacheable)
+  const profileInstructions = getProfileInstructions(getCurrentProjectProfile());
+  if (profileInstructions) {
+    systemMessages.push({
+      content: `# Project Profile Instructions\n\n${profileInstructions}`,
+      role: "system",
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
+  }
+
+  // Add custom instructions if they exist (user-editable, not cached)
   if (customInstructions) {
     systemMessages.push({
       content: `# Custom Instructions\n${customInstructions}`,
@@ -251,7 +236,7 @@ ${ideToolsAvailable ? "Use the IDE tools to read and inspect these files." : "No
     });
   }
 
-  return systemMessages;
+  return systemMessages
 };
 
 /**
@@ -397,8 +382,8 @@ export const handleChatRequest = async ({
     messages: messagesWithParts,
   });
 
-  // Sanitize messages to remove large image data (e.g., screenshots) before sending to API.
-  // This prevents token limit errors when screenshots are in the conversation history.
+  // Sanitize messages to remove large image data before sending to API.
+  // This prevents token limit errors when large images are in the conversation history.
   const sanitizedMessages = sanitizeMessagesForTokenLimit(validatedMessages);
 
   // Track artifacts from message parts for context compaction (host-side tracking)

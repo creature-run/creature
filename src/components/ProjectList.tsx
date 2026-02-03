@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Briefcase, FileCode, Warning, Clock, Trash, Cube } from "@phosphor-icons/react";
+import { Lightning, FileCode, Warning, Clock, Trash, Cube } from "@phosphor-icons/react";
 import { Spinner } from "./Spinner";
 import { Button } from "./Button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./Card";
@@ -15,7 +15,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "./AlertDialog";
-import { WorkProjectCreator, GeneralProjectCreator, McpAppCreator } from "./project-creators";
+import { PlaygroundProjectCreator, GeneralProjectCreator, McpAppCreator } from "./project-creators";
 import type { ProjectCreatorResult } from "./project-creators";
 import type { ProjectWithValidation } from "../electron/preload";
 
@@ -37,7 +37,7 @@ export function ProjectList({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
-  const [activeCreator, setActiveCreator] = useState<"work" | "general" | "mcp" | null>(null);
+  const [activeCreator, setActiveCreator] = useState<"playground" | "general" | "mcp" | null>(null);
 
   /**
    * Fetch projects from the API on mount.
@@ -167,52 +167,66 @@ export function ProjectList({
       <div className="w-full max-w-[600px] flex flex-col">
         {/* New Project Cards */}
         <div className="flex items-center mb-7">
-          <div className="flex-1 border-t border-border-secondary" />
-          <span className="px-5 text-xs text-text-secondary/60">Create A New Project</span>
-          <div className="flex-1 border-t border-border-secondary" />
+          <div
+            className="flex-1 border-t border-border-secondary origin-right"
+            style={{ animation: "divider-grow-left 0.3s ease-out 0.11s backwards" }}
+          />
+          <span
+            className="px-5 text-xs text-text-primary"
+            style={{ animation: "fade-in 0.22s ease-out backwards" }}
+          >
+            What are you building?
+          </span>
+          <div
+            className="flex-1 border-t border-border-secondary origin-left"
+            style={{ animation: "divider-grow-right 0.3s ease-out 0.11s backwards" }}
+          />
         </div>
         <div className="mb-8 grid grid-cols-3 gap-4">
           <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-tertiary/50 hover:border-border-primary"
-            onClick={() => setActiveCreator("work")}
-          >
-            <CardHeader className="flex flex-col items-start py-6">
-              <CardTitle className="flex items-center gap-3 mb-1 text-base">
-                <Briefcase size={16} className="text-text-secondary" />
-                <span className="text-sm">Work Project</span>
-              </CardTitle>
-              <CardDescription className="text-xs ml-[28px]">
-                Work on anything via notes, todos & more
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-tertiary/50 hover:border-border-primary"
-            onClick={() => setActiveCreator("general")}
-          >
-            <CardHeader className="flex flex-col items-start py-6">
-              <CardTitle className="flex items-center gap-3 mb-1 text-base">
-                <FileCode size={16} className="text-text-secondary" />
-                <span className="text-sm">Dev Project</span>
-              </CardTitle>
-              <CardDescription className="text-xs ml-[28px]">
-                Work on a new or existing codebase
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-tertiary/50 hover:border-border-primary"
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.25s backwards" }}
             onClick={() => setActiveCreator("mcp")}
           >
             <CardHeader className="flex flex-col items-start py-6">
-              <CardTitle className="flex items-center gap-3 mb-1 text-base">
-                <Cube size={16} className="text-text-secondary" />
-                <span className="text-sm">MCP App</span>
+              <Cube size={20} className="text-text-secondary mb-3" />
+              <CardTitle className="mb-1 text-base">
+                <span className="text-[13px]">New MCP App</span>
               </CardTitle>
-              <CardDescription className="text-xs ml-[28px]">
-                Work on a new or existing MCP App
+              <CardDescription className="text-xs leading-relaxed">
+                Build a visual AI tool from scratch.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
+          <Card
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.35s backwards" }}
+            onClick={() => setActiveCreator("general")}
+          >
+            <CardHeader className="flex flex-col items-start py-6">
+              <FileCode size={20} className="text-text-secondary mb-3" />
+              <CardTitle className="mb-1 text-base">
+                <span className="text-[13px]">Existing Codebase</span>
+              </CardTitle>
+              <CardDescription className="text-xs leading-relaxed">
+                Code with help from MCP Apps.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
+          <Card
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.45s backwards" }}
+            onClick={() => setActiveCreator("playground")}
+          >
+            <CardHeader className="flex flex-col items-start py-6">
+              <Lightning size={20} className="text-text-secondary mb-3" />
+              <CardTitle className="mb-1 text-base">
+                <span className="text-[13px]">Playground</span>
+              </CardTitle>
+              <CardDescription className="text-xs leading-relaxed">
+                Do anything with MCP Apps.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -220,9 +234,20 @@ export function ProjectList({
 
         {/* Divider with label */}
         <div className="flex items-center mb-8">
-          <div className="flex-1 border-t border-border-secondary" />
-          <span className="px-5 text-xs text-text-secondary/60">Existing Projects</span>
-          <div className="flex-1 border-t border-border-secondary" />
+          <div
+            className="flex-1 border-t border-border-secondary origin-right"
+            style={{ animation: "divider-grow-left 0.3s ease-out 0.6s backwards" }}
+          />
+          <span
+            className="px-5 text-xs text-text-primary"
+            style={{ animation: "fade-in 0.22s ease-out 0.5s backwards" }}
+          >
+            Existing Projects
+          </span>
+          <div
+            className="flex-1 border-t border-border-secondary origin-left"
+            style={{ animation: "divider-grow-right 0.3s ease-out 0.6s backwards" }}
+          />
         </div>
 
         {/* Error message */}
@@ -230,7 +255,10 @@ export function ProjectList({
 
         {/* Projects list - scrollable */}
         {projects.length > 0 && (
-          <div className="flex-1 overflow-y-auto -mx-2 space-y-1">
+          <div
+            className="flex-1 overflow-y-auto -mx-2 space-y-1"
+            style={{ animation: "fade-in 0.3s ease-out 0.75s backwards" }}
+          >
             {projects.map((project) => {
               const hasFolder = !!project.context.local_directory?.path;
               const folderInvalid =
@@ -322,15 +350,18 @@ export function ProjectList({
 
         {/* Empty state */}
         {projects.length === 0 && (
-          <div className="text-xs text-text-secondary pt-4">
+          <div
+            className="text-xs text-text-secondary pt-4 text-center"
+            style={{ animation: "fade-in 0.3s ease-out 0.75s backwards" }}
+          >
             No projects yet
           </div>
         )}
       </div>
 
       {/* Project Creator Modals */}
-      {activeCreator === "work" && (
-        <WorkProjectCreator
+      {activeCreator === "playground" && (
+        <PlaygroundProjectCreator
           onComplete={handleCreatorComplete}
           onCancel={handleCreatorCancel}
         />
