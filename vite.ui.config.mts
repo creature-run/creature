@@ -36,8 +36,8 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
     alias: {
       // Ensure React resolves to local node_modules
-      react: resolve(__dirname, "../node_modules/react"),
-      "react-dom": resolve(__dirname, "../node_modules/react-dom"),
+      react: resolve(__dirname, "node_modules/react"),
+      "react-dom": resolve(__dirname, "node_modules/react-dom"),
     },
     // dedupe: ['react', 'react-dom'],
   },
