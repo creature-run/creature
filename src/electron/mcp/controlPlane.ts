@@ -827,26 +827,26 @@ const stripStructuredContent = (result: unknown): unknown => {
 
 /**
  * Strip large image data from tool results to prevent token limit errors.
- * 
- * Screenshots and other image content can be 100k+ tokens when base64 encoded.
+ *
+ * Large image content can be 100k+ tokens when base64 encoded.
  * This replaces image content with a placeholder message while preserving
  * the result structure for the agent.
- * 
+ *
  * The UI pip still receives the full result via pip:tool-result IPC.
  */
 const stripLargeImageData = (result: unknown): unknown => {
   if (!result || typeof result !== "object") return result;
-  
+
   const resultObj = result as Record<string, unknown>;
   if (!resultObj.content || !Array.isArray(resultObj.content)) return result;
-  
+
   const hasLargeImage = resultObj.content.some(
-    (item: { type?: string; data?: string }) => 
+    (item: { type?: string; data?: string }) =>
       item.type === "image" && item.data && item.data.length > 1000
   );
-  
+
   if (!hasLargeImage) return result;
-  
+
   // Replace image content with placeholder
   return {
     ...resultObj,
@@ -854,7 +854,7 @@ const stripLargeImageData = (result: unknown): unknown => {
       if (item.type === "image" && item.data && item.data.length > 1000) {
         return {
           type: "text",
-          text: "[Screenshot captured - image omitted from conversation to save tokens. View in browser pip.]",
+          text: "[Image omitted from conversation to save tokens]",
         };
       }
       return item;
@@ -944,15 +944,15 @@ const handleBrowserToolCall = async ({
     },
   });
 
-  // For screenshot, we need to handle it specially (capture from webview)
-  if (action === "screenshot") {
-    // Screenshot is handled asynchronously by PipBrowser
-    // For now, return a placeholder - the actual screenshot will be sent via IPC
-    return {
-      content: [{ type: "text", text: "Screenshot requested - see browser pip" }],
-      structuredContent: { success: true, action: "screenshot" },
-    };
-  }
+  // TEMPORARILY DISABLED: Screenshot tool is disabled
+  // if (action === "screenshot") {
+  //   // Screenshot is handled asynchronously by PipBrowser
+  //   // For now, return a placeholder - the actual screenshot will be sent via IPC
+  //   return {
+  //     content: [{ type: "text", text: "Screenshot requested - see browser pip" }],
+  //     structuredContent: { success: true, action: "screenshot" },
+  //   };
+  // }
 
   return {
     content: [{ type: "text", text: JSON.stringify({ success: true, action }) }],
@@ -1300,7 +1300,7 @@ export const handleToolCall = async ({
     };
   }
 
-  // Strip large image data (e.g., screenshots) to prevent token limit errors.
+  // Strip large image data to prevent token limit errors.
   // The UI pip already received the full result via pip:tool-result IPC.
   return stripLargeImageData(result);
 };

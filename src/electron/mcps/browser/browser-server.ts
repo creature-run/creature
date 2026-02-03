@@ -46,7 +46,7 @@ app.resource({
       "browser_navigate",
       "browser_click",
       "browser_type",
-      "browser_screenshot",
+      // "browser_screenshot", // TEMPORARILY DISABLED
       "browser_scroll",
       "browser_back",
       "browser_forward",
@@ -151,23 +151,24 @@ app.tool(
 
 /**
  * Take a screenshot of the current page.
+ * TEMPORARILY DISABLED - will be re-enabled later
  */
-app.tool(
-  "browser_screenshot",
-  {
-    description: "Take a screenshot of the current page. Use this to see what's on the page.",
-    input: z.object({
-      instanceId: z.string().describe("The instance ID from browser_create"),
-      fullPage: z.boolean().optional().describe("Capture the full scrollable page (default: false)"),
-    }),
-    ui: BROWSER_UI_RESOURCE_URI,
-    visibility: ["model", "app"],
-  },
-  async ({ instanceId, fullPage }) => ({
-    data: { success: true, action: "screenshot", instanceId, fullPage },
-    text: "Screenshot requested - see browser pip",
-  })
-);
+// app.tool(
+//   "browser_screenshot",
+//   {
+//     description: "Take a screenshot of the current page. Use this to see what's on the page.",
+//     input: z.object({
+//       instanceId: z.string().describe("The instance ID from browser_create"),
+//       fullPage: z.boolean().optional().describe("Capture the full scrollable page (default: false)"),
+//     }),
+//     ui: BROWSER_UI_RESOURCE_URI,
+//     visibility: ["model", "app"],
+//   },
+//   async ({ instanceId, fullPage }) => ({
+//     data: { success: true, action: "screenshot", instanceId, fullPage },
+//     text: "Screenshot requested - see browser pip",
+//   })
+// );
 
 /**
  * Scroll the page.

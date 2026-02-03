@@ -335,9 +335,19 @@ if (exp.kvIsAvailable()) {
 
 ## Development
 
-**The MCP App is already running.** When this project opens, it auto-connects to the MCP server in the local directory. Do NOT run \`npm run dev\` - it's already started.
+**The MCP App is already running and auto-connected.** When this project opens, it automatically connects to the MCP server in the local directory.
 
-**NEVER rebuild the server** - HMR handles UI changes automatically. Just edit code and it reloads.
+**Opening the UI:** The UI is only displayed in a PIP tab if you have opened it. Before trying to open it:
+1. First check if a PIP tab for this MCP App is already open (check the active PIP tabs in context)
+2. If already open, do nothing - you can interact with it directly
+3. If not open, use the appropriate tool to open it
+4. If there's an error opening it, report back to the user
+
+**CRITICAL: NEVER use browser tools to view the MCP App.** Using browser_create or browser_navigate to view localhost URLs for the MCP App is wrong - the MCP App has its own UI resource that opens in a PIP tab.
+
+**CRITICAL: Do NOT run \`npm run dev\`** - the server is already started automatically.
+
+**CRITICAL: NEVER rebuild the server** - HMR handles UI changes automatically. Just edit code and it reloads.
 
 **If something isn't working**, the user should check the Dev Console (View -> Dev Console):
 - Server logs (use \`console.error()\` - stdout is MCP protocol)

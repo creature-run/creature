@@ -41,7 +41,7 @@ export { updateActualTokenUsage };
 
 /**
  * Sanitize messages to remove large image data from tool results.
- * This prevents token limit errors when screenshots are in the conversation history.
+ * This prevents token limit errors when large images are in the conversation history.
  *
  * Replaces image content in tool results with a placeholder message.
  */
@@ -63,7 +63,7 @@ const sanitizeMessagesForTokenLimit = (messages: UIMessage[]): UIMessage[] => {
         if (toolPart.state === "output-available" && toolPart.output) {
           const result = toolPart.output;
 
-          // Check if result has image content (like screenshots)
+          // Check if result has large image content
           if (result.content && Array.isArray(result.content)) {
             const hasLargeImage = result.content.some(
               (item) =>
@@ -78,7 +78,7 @@ const sanitizeMessagesForTokenLimit = (messages: UIMessage[]): UIMessage[] => {
                   content: [
                     {
                       type: "text",
-                      text: "[Screenshot captured - image data omitted from history to save tokens. The screenshot was displayed in the browser pip.]",
+                      text: "[Image data omitted from history to save tokens]",
                     },
                   ],
                 },
@@ -382,8 +382,8 @@ export const handleChatRequest = async ({
     messages: messagesWithParts,
   });
 
-  // Sanitize messages to remove large image data (e.g., screenshots) before sending to API.
-  // This prevents token limit errors when screenshots are in the conversation history.
+  // Sanitize messages to remove large image data before sending to API.
+  // This prevents token limit errors when large images are in the conversation history.
   const sanitizedMessages = sanitizeMessagesForTokenLimit(validatedMessages);
 
   // Track artifacts from message parts for context compaction (host-side tracking)
