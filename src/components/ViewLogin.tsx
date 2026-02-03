@@ -504,7 +504,6 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
         </p>
 
         <div className="mt-[60px] flex items-center gap-3 font-body text-sm text-text-secondary tracking-[0.05em] select-none">
-          <span className="text-xs">v0.1</span>
           <button
             onClick={toggleTheme}
             className="p-1 rounded hover:text-text-primary transition-colors cursor-pointer"
