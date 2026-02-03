@@ -100,7 +100,7 @@ export const getBuildIdentity = (): BuildIdentity => {
     appId: "run.creature.desktop.dev",
     bundleId: "run.creature.desktop.dev",
     packagerName: "Creature Dev",
-    executableName: "Creature Dev",
+    executableName: "creature-dev",
     squirrelName: "creature-dev",
     linuxPackageName: "creature-dev",
     linuxBin: "creature-dev",
