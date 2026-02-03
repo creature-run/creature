@@ -16,6 +16,7 @@ import { getChatServer, stopChatServer } from "./server/chatServer";
 import { installHostConsoleCapture } from "./logging";
 import { initAutoUpdater, isUpdatePending } from "./updater";
 import * as telemetry from "./telemetry";
+import { getRuntimeAppName, isProdRuntime } from "./utils/appIdentity";
 
 // Track app start time for startup_ms metric
 const appStartTime = Date.now();
@@ -25,7 +26,7 @@ const appStartTime = Date.now();
 installHostConsoleCapture();
 
 // Set the app name for the menu bar (required for dev mode on macOS)
-app.setName("Creature");
+app.setName(getRuntimeAppName());
 
 // Suppress noisy GPU compositor errors (harmless Chromium internal messages)
 app.commandLine.appendSwitch("disable-gpu-driver-bug-workarounds");
@@ -67,7 +68,7 @@ const configureWebviewPermissions = () => {
  * Initializes all modules and creates the main window.
  */
 app.on("ready", () => {
-  console.log("Creature Initialized");
+  console.log(`${app.getName()} Initialized`);
 
   // Initialize telemetry early to capture all events
   telemetry.init();
@@ -80,7 +81,7 @@ app.on("ready", () => {
   configureWebviewPermissions();
 
   // Initialize auto-updater (production only)
-  if (app.isPackaged) {
+  if (app.isPackaged && isProdRuntime()) {
     initAutoUpdater();
   }
 

@@ -11,14 +11,15 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { ProviderCredentials } from "../../shared/credentials";
+import { getRuntimeAppName } from "../utils/appIdentity";
 
 /**
  * Derives an encryption key from the app identifier.
  * This avoids macOS Keychain prompts while still providing basic encryption.
  */
 const getEncryptionKey = (): Buffer => {
-  const appId = app.isPackaged ? app.getName() : "creature-dev";
-  return crypto.createHash("sha256").update(appId).digest();
+  const appName = getRuntimeAppName();
+  return crypto.createHash("sha256").update(appName).digest();
 };
 
 /**
