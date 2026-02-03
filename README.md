@@ -1,8 +1,6 @@
 <img width="3000" height="1000" alt="creautre-github" src="https://github.com/user-attachments/assets/3f81630d-c468-4ad0-a158-01e9bb991f47" />
 
 
-# Creature
-
 **MCP Apps** — Visual AI tools that agents summon to show content relevant to your task—tools you use collaboratively, with the agent ready to pick up exactly where you leave off. Based on an open specification supported by all major AI companies.
 
 **Creature** — The desktop client that pushes MCP Apps to their full potential, realizing a vision of an AI operating system. Work with multiple apps in persistent tabs alongside your conversation, achieving productivity and clarity that chat alone cannot offer.
