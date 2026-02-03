@@ -322,9 +322,9 @@ export interface WorkspaceRoot {
 // Each root can be the main workspace or an MCP app project
 let currentWorkspaceRoots: WorkspaceRoot[] = [];
 
-// Track current project profile (work, dev-general, or dev-mcp)
+// Track current project profile (playground, dev-general, or dev-mcp)
 // Used to determine project type and MCP enablement
-let currentProjectProfile: "work" | "dev-general" | "dev-mcp" | null = null;
+let currentProjectProfile: "playground" | "dev-general" | "dev-mcp" | null = null;
 
 // Track current project ID for per-project storage scoping
 // Set when project is opened, cleared when project is closed
@@ -756,7 +756,7 @@ export const getDevMcpInfo = (): { name: string; port: number } | null => {
  * Get the current project profile.
  * Returns null if no project is open.
  */
-export const getCurrentProjectProfile = (): "work" | "dev-general" | "dev-mcp" | null => {
+export const getCurrentProjectProfile = (): "playground" | "dev-general" | "dev-mcp" | null => {
   return currentProjectProfile;
 };
 
@@ -1519,7 +1519,7 @@ export const initMcpsForProject = async ({
 }: {
   projectId: string;
   workspaceRoots: WorkspaceRoot[];
-  profile: "work" | "dev-general" | "dev-mcp";
+  profile: "playground" | "dev-general" | "dev-mcp";
   mcps: ProjectMcpConfigInput[];
 }): Promise<void> => {
   console.log(`[MCP] Initializing MCPs for project ${projectId}`);

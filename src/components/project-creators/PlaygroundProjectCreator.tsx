@@ -1,7 +1,7 @@
 /**
- * WorkProjectCreator Component
+ * PlaygroundProjectCreator Component
  *
- * Creator for "work" profile projects.
+ * Creator for "playground" profile projects.
  * Simple project creation with no local directory - uses app-managed folder.
  * MCPs: browser, todos, notes
  */
@@ -20,12 +20,12 @@ type WorkCreatorStatus =
   | "error";
 
 /**
- * WorkProjectCreator Component
+ * PlaygroundProjectCreator Component
  *
- * Creates a work project with no local directory.
+ * Creates a playground project with no local directory.
  * Uses app-managed folder for project storage.
  */
-export function WorkProjectCreator({ onComplete, onCancel }: ProjectCreatorProps) {
+export function PlaygroundProjectCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   const [projectName, setProjectName] = useState("MCP Apps Playground");
   const [status, setStatus] = useState<WorkCreatorStatus>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -42,10 +42,10 @@ export function WorkProjectCreator({ onComplete, onCancel }: ProjectCreatorProps
 
     try {
       // Create project without local_directory - will use app-managed folder
-      // Include default MCPs for work projects
+      // Include default MCPs for playground projects
       const createResult = await window.electronAPI.project.create({
         name: projectName.trim() || "MCP Apps Playground",
-        profile: "work",
+        profile: "playground",
         mcps: [
           { name: "browser", enabled: true },
           { name: "todos", enabled: true },

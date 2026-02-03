@@ -317,6 +317,17 @@ body {
   100% { opacity: 1; }
 }
 
+@keyframes gentle-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes divider-grow-left {
   0% { transform: scaleX(0); }
   100% { transform: scaleX(1); }

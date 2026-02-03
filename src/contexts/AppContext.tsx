@@ -131,7 +131,7 @@ interface PipsState {
 interface ProjectWithValidation {
   id: string;
   name: string;
-  profile: "work" | "dev-general" | "dev-mcp";
+  profile: "playground" | "dev-general" | "dev-mcp";
   context: {
     local_directory?: { path: string };
     custom_instructions?: string;

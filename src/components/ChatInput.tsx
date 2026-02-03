@@ -908,8 +908,8 @@ export function ChatInput({
       <div className="flex items-center justify-between px-5 py-2.5 border-t border-border-secondary">
         {/* Left side - Context icons */}
         <div className="flex items-center -ml-1.5">
-          {/* Folder icon - opens project settings (hidden for work projects) */}
-          {project?.profile !== "work" && (
+          {/* Folder icon - opens project settings (hidden for playground projects) */}
+          {project?.profile !== "playground" && (
             <HoverCard openDelay={200}>
               <HoverCardTrigger asChild>
                 <button

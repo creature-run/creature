@@ -92,6 +92,17 @@ export const createMainWindow = () => {
 export const createAppMenu = () => {
   const isMac = process.platform === "darwin";
 
+  // Set About panel options (macOS)
+  if (isMac) {
+    app.setAboutPanelOptions({
+      applicationName: "Creature",
+      applicationVersion: app.getVersion(),
+      version: "",
+      credits: "This is a beta release. Things may break.",
+      copyright: "Serverless, Inc.",
+    });
+  }
+
   const template: Electron.MenuItemConstructorOptions[] = [
     // App menu (macOS only)
     ...(isMac

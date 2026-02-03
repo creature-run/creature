@@ -400,20 +400,36 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
 
       <div className="flex flex-col items-center text-center w-full max-w-md px-4 -mt-[40px]">
         {/* Creature icon - centered above text */}
-        <div className="mb-4">
+        <div
+          className="mb-2"
+          style={{ animation: "gentle-rise 0.6s ease-out backwards" }}
+        >
           <CreatureIcon isDarkMode={isDarkMode} width={56} height={55} showEyes={false} />
         </div>
 
         {/* Brand text - Sora font, bold */}
         <h1
           className="text-foreground text-4xl font-semibold select-none tracking-tight"
-          style={{ fontFamily: "'Sora', sans-serif" }}
+          style={{ fontFamily: "'Sora', sans-serif", animation: "fade-in 0.5s ease-out 0.2s backwards" }}
         >
           Creature
         </h1>
 
+        {/* Beta notice */}
+        <div
+          className="mt-3 border border-border-secondary rounded px-3 py-[4px] bg-background-secondary/30"
+          style={{ animation: "fade-in 0.4s ease-out 0.35s backwards" }}
+        >
+          <p className="text-[10px] text-text-secondary text-center select-none">
+            This is a beta release. Things may break.
+          </p>
+        </div>
+
         {/* Subtitle */}
-        <p className="text-text-secondary text-sm mt-2 select-none">
+        <p
+          className="text-text-secondary text-sm mt-10 select-none"
+          style={{ animation: "fade-in 0.4s ease-out 0.5s backwards" }}
+        >
           Connect your AI provider to get started
         </p>
 
@@ -422,7 +438,10 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
         )}
 
         {/* Provider Selection & Credentials Form */}
-        <div className="mt-8 w-full max-w-[320px]">
+        <div
+          className="mt-8 w-full max-w-[320px]"
+          style={{ animation: "fade-in 0.5s ease-out 0.65s backwards" }}
+        >
           {/* Provider Dropdown */}
           <div className="relative mb-4">
             <Label>Provider</Label>
@@ -492,7 +511,10 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
         </div>
 
         {/* Help link */}
-        <p className="mt-6 text-xs text-text-tertiary">
+        <p
+          className="mt-6 text-xs text-text-tertiary"
+          style={{ animation: "fade-in 0.4s ease-out 0.8s backwards" }}
+        >
           Get your credentials from{" "}
           <button
             onClick={() => window.electronAPI.shell.openExternal(HELP_URLS[providerType])}
@@ -504,14 +526,17 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
           </button>
         </p>
 
-        <div className="mt-[60px] flex items-center gap-3 font-body text-sm text-text-secondary tracking-[0.05em] select-none">
+        {/* Theme toggle */}
+        <div
+          className="mt-8"
+          style={{ animation: "fade-in 0.4s ease-out 0.95s backwards" }}
+        >
           <button
             onClick={toggleTheme}
-            className="p-1 rounded hover:text-text-primary transition-colors cursor-pointer"
+            className="p-1 rounded text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
             aria-label="Toggle theme"
           >
             {isDarkMode ? (
-              // Sun icon - shown in dark mode, click to switch to light
               <svg
                 width="16"
                 height="16"
@@ -533,7 +558,6 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                 <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
               </svg>
             ) : (
-              // Moon icon - shown in light mode, click to switch to dark
               <svg
                 width="16"
                 height="16"

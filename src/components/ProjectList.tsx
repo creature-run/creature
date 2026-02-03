@@ -15,7 +15,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "./AlertDialog";
-import { WorkProjectCreator, GeneralProjectCreator, McpAppCreator } from "./project-creators";
+import { PlaygroundProjectCreator, GeneralProjectCreator, McpAppCreator } from "./project-creators";
 import type { ProjectCreatorResult } from "./project-creators";
 import type { ProjectWithValidation } from "../electron/preload";
 
@@ -37,7 +37,7 @@ export function ProjectList({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
-  const [activeCreator, setActiveCreator] = useState<"work" | "general" | "mcp" | null>(null);
+  const [activeCreator, setActiveCreator] = useState<"playground" | "general" | "mcp" | null>(null);
 
   /**
    * Fetch projects from the API on mount.
@@ -184,8 +184,8 @@ export function ProjectList({
         </div>
         <div className="mb-8 grid grid-cols-3 gap-4">
           <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none"
-            style={{ animation: "fade-in 0.3s ease-out 0.25s backwards" }}
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.25s backwards" }}
             onClick={() => setActiveCreator("mcp")}
           >
             <CardHeader className="flex flex-col items-start py-6">
@@ -200,8 +200,8 @@ export function ProjectList({
           </Card>
 
           <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none"
-            style={{ animation: "fade-in 0.3s ease-out 0.35s backwards" }}
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.35s backwards" }}
             onClick={() => setActiveCreator("general")}
           >
             <CardHeader className="flex flex-col items-start py-6">
@@ -216,9 +216,9 @@ export function ProjectList({
           </Card>
 
           <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none"
-            style={{ animation: "fade-in 0.3s ease-out 0.45s backwards" }}
-            onClick={() => setActiveCreator("work")}
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.45s backwards" }}
+            onClick={() => setActiveCreator("playground")}
           >
             <CardHeader className="flex flex-col items-start py-6">
               <Lightning size={20} className="text-text-secondary mb-3" />
@@ -351,7 +351,7 @@ export function ProjectList({
         {/* Empty state */}
         {projects.length === 0 && (
           <div
-            className="text-xs text-text-secondary pt-4"
+            className="text-xs text-text-secondary pt-4 text-center"
             style={{ animation: "fade-in 0.3s ease-out 0.75s backwards" }}
           >
             No projects yet
@@ -360,8 +360,8 @@ export function ProjectList({
       </div>
 
       {/* Project Creator Modals */}
-      {activeCreator === "work" && (
-        <WorkProjectCreator
+      {activeCreator === "playground" && (
+        <PlaygroundProjectCreator
           onComplete={handleCreatorComplete}
           onCancel={handleCreatorCancel}
         />
