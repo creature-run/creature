@@ -3,11 +3,11 @@
 
 # Creature
 
-MCP Apps are visual AI tools that agents can summon to show you content relevant to your current task, and that you can use collaboratively, with the agent ready to pick up exactly where you leave off.
+**MCP Apps** — Visual AI tools that agents summon to show content relevant to your task—tools you use collaboratively, with the agent ready to pick up exactly where you leave off. Based on an open specification supported by all major AI companies.
 
-Creature is a desktop client that pushes the MCP Apps specification to its full potential, realizing a vision of an AI operating system. Users work with multiple apps simultaneously in persistent tabs alongside their agent conversation. The result: a collaborative workspace where humans and agents move fluidly across visual tools, achieving a level of productivity and clarity that chat alone cannot offer.
+**Creature** — The desktop client that pushes MCP Apps to their full potential, realizing a vision of an AI operating system. Work with multiple apps in persistent tabs alongside your conversation, achieving productivity and clarity that chat alone cannot offer.
 
-Creature is built for teams and companies seeking to create internal tools on top of this AI operating system. Just as users and agents collaborate seamlessly within the workspace, Creature enables entire organizations to create and share MCP Apps, putting visual AI tools in the hands of everyone, not just developers.
+**Built for Teams** — For teams and companies creating internal tools on this AI operating system. Build and share MCP Apps across your organization—putting visual AI in everyone's hands, not just developers.
 
 ## Download
 
