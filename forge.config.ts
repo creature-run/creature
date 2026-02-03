@@ -216,6 +216,9 @@ const copyBundledNpm = (resourcesPath: string) => {
  * MCP servers are bundled by Vite with native modules externalized.
  * We copy native modules to Resources/native-deps/node_modules/ so
  * they can be found via NODE_PATH when spawning MCP servers.
+ * 
+ * Important: We only copy prebuilds for the current platform to avoid
+ * code signing issues (e.g., Windows signtool can't sign macOS binaries).
  */
 const copyNativeDeps = (resourcesPath: string) => {
   const destDir = path.join(resourcesPath, 'native-deps', 'node_modules');
@@ -233,6 +236,9 @@ const copyNativeDeps = (resourcesPath: string) => {
     path.join(__dirname, '..', 'node_modules'),
   ];
 
+  // Determine current platform prefix for prebuilds (e.g., 'darwin', 'win32', 'linux')
+  const currentPlatform = process.platform;
+
   for (const moduleName of nativeModules) {
     let src: string | null = null;
     for (const nodeModules of nodeModulesLocations) {
@@ -247,6 +253,21 @@ const copyNativeDeps = (resourcesPath: string) => {
       const dest = path.join(destDir, moduleName);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.cpSync(src, dest, { recursive: true });
+      
+      // Remove prebuilds for other platforms to avoid code signing issues
+      // (e.g., Windows signtool can't sign macOS .node files)
+      const prebuildsDir = path.join(dest, 'prebuilds');
+      if (fs.existsSync(prebuildsDir)) {
+        const entries = fs.readdirSync(prebuildsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith(currentPlatform)) {
+            const otherPlatformDir = path.join(prebuildsDir, entry.name);
+            fs.rmSync(otherPlatformDir, { recursive: true, force: true });
+            console.log(`[Forge] Removed non-${currentPlatform} prebuild: ${entry.name}`);
+          }
+        }
+      }
+      
       console.log(`[Forge] Copied ${moduleName} to resources`);
     } else {
       console.warn(`[Forge] Warning: ${moduleName} not found`);
