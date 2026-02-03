@@ -118,16 +118,18 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
   return (
     <>
       <div className="fixed inset-0 z-50 bg-background-primary/95 dialog-overlay" onClick={onCancel} data-state="open" />
-      <div
+      <form
         className="fixed z-50 grid w-full max-w-lg gap-4 border border-border-primary bg-background-primary p-12 shadow-lg rounded-lg dialog-content"
         onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => { e.preventDefault(); if (projectName.trim() && selectedFolder) handleCreate(); }}
         data-state="open"
       >
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-sm font-medium text-text-primary">New Project</h2>
+            <h2 className="text-sm font-medium text-text-primary">Import an existing codebase</h2>
             <button
+              type="button"
               className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"
               onClick={onCancel}
             >
@@ -168,7 +170,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
                 placeholder="Select a folder..."
                 className="flex-1 bg-background-tertiary text-text-secondary cursor-default"
               />
-              <Button variant="secondary" onClick={handleSelectFolder}>
+              <Button type="button" variant="secondary" onClick={handleSelectFolder}>
                 Browse
               </Button>
             </div>
@@ -179,15 +181,15 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
 
           {/* Footer */}
           <div className="flex justify-end gap-2 pt-6">
-            <Button variant="secondary" onClick={onCancel}>
+            <Button type="button" variant="secondary" onClick={onCancel}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={!projectName.trim() || !selectedFolder}>
+            <Button type="submit" disabled={!projectName.trim() || !selectedFolder}>
               Create
             </Button>
           </div>
         </div>
-      </div>
+      </form>
     </>
   );
 }

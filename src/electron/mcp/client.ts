@@ -753,6 +753,14 @@ export const getDevMcpInfo = (): { name: string; port: number } | null => {
 };
 
 /**
+ * Get the current project profile.
+ * Returns null if no project is open.
+ */
+export const getCurrentProjectProfile = (): "work" | "dev-general" | "dev-mcp" | null => {
+  return currentProjectProfile;
+};
+
+/**
  * Get all Development MCP info for MCP Apps being developed in this project.
  * Returns an empty array if no Dev MCPs are detected.
  */

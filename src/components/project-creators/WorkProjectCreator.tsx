@@ -26,7 +26,7 @@ type WorkCreatorStatus =
  * Uses app-managed folder for project storage.
  */
 export function WorkProjectCreator({ onComplete, onCancel }: ProjectCreatorProps) {
-  const [projectName, setProjectName] = useState("Untitled");
+  const [projectName, setProjectName] = useState("MCP Apps Playground");
   const [status, setStatus] = useState<WorkCreatorStatus>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +44,7 @@ export function WorkProjectCreator({ onComplete, onCancel }: ProjectCreatorProps
       // Create project without local_directory - will use app-managed folder
       // Include default MCPs for work projects
       const createResult = await window.electronAPI.project.create({
-        name: projectName.trim() || "Untitled",
+        name: projectName.trim() || "MCP Apps Playground",
         profile: "work",
         mcps: [
           { name: "browser", enabled: true },
@@ -97,16 +97,18 @@ export function WorkProjectCreator({ onComplete, onCancel }: ProjectCreatorProps
   return (
     <>
       <div className="fixed inset-0 z-50 bg-background-primary/95 dialog-overlay" onClick={onCancel} data-state="open" />
-      <div
+      <form
         className="fixed z-50 grid w-full max-w-lg gap-4 border border-border-primary bg-background-primary p-12 shadow-lg rounded-lg dialog-content"
         onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => { e.preventDefault(); if (projectName.trim()) handleCreate(); }}
         data-state="open"
       >
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-sm font-medium text-text-primary">Work Project</h2>
+            <h2 className="text-sm font-medium text-text-primary">Create a general playground</h2>
             <button
+              type="button"
               className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"
               onClick={onCancel}
             >
@@ -130,21 +132,21 @@ export function WorkProjectCreator({ onComplete, onCancel }: ProjectCreatorProps
               type="text"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
-              placeholder="Untitled"
+              placeholder="MCP Apps Playground"
             />
           </div>
 
           {/* Footer */}
           <div className="flex justify-end gap-2 pt-6">
-            <Button variant="secondary" onClick={onCancel}>
+            <Button type="button" variant="secondary" onClick={onCancel}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={!projectName.trim()}>
+            <Button type="submit" disabled={!projectName.trim()}>
               Create
             </Button>
           </div>
         </div>
-      </div>
+      </form>
     </>
   );
 }

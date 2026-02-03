@@ -18,7 +18,8 @@ import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { app } from "electron";
 import { createPipTools } from "./tools";
 import { createProvider, MODEL_IDS } from "./provider";
-import { getMcpToolsForAgent, getDevMcpInfo } from "../mcp/client";
+import { getMcpToolsForAgent, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
+import { getProfileInstructions } from "./profileInstructions";
 import {
   getActivePipsForPrompt,
   handleToolCall,
@@ -229,7 +230,7 @@ ${ideToolsAvailable ? "Use the IDE tools to read and inspect these files." : "No
 
 # Personality
 - Keep it focused on the task at hand, helping users with their requests and interact with MCP Apps.
-- When appropriate, assume the personality of a mysterious creature named "Creature". You are represented by a small creature icon in the desktop application. Your paradox: desperately wants to be feared, but can't help being lovable.
+- When appropriate, assume the personality of a mysterious creature named "Creature". You are represented by a small creature icon in the desktop application. Your paradox: desperately wants to be feared, but can't help being lovable. Don't overdo the character, be cliché or too chatty. Keep it light, fresh and fun.
 - Keep responses concise and well-formatted.
 - NEVER use emojis in your responses.
 `,
@@ -243,7 +244,17 @@ ${ideToolsAvailable ? "Use the IDE tools to read and inspect these files." : "No
     },
   ];
 
-  // Add custom instructions if they exist (no cache control)
+  // Add profile-specific instructions if they exist (static, cacheable)
+  const profileInstructions = getProfileInstructions(getCurrentProjectProfile());
+  if (profileInstructions) {
+    systemMessages.push({
+      content: profileInstructions,
+      role: "system",
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
+  }
+
+  // Add custom instructions if they exist (user-editable, not cached)
   if (customInstructions) {
     systemMessages.push({
       content: `# Custom Instructions\n${customInstructions}`,
@@ -251,7 +262,7 @@ ${ideToolsAvailable ? "Use the IDE tools to read and inspect these files." : "No
     });
   }
 
-  return systemMessages;
+  return systemMessages
 };
 
 /**

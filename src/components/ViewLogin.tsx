@@ -15,8 +15,6 @@ interface ViewLoginProps {
 
 const PROVIDERS: { type: ProviderType; name: string; description: string }[] = [
   { type: "anthropic", name: "Anthropic API", description: "Direct API access" },
-  { type: "bedrock", name: "AWS Bedrock", description: "Via Amazon Web Services" },
-  { type: "vertex", name: "Google Vertex AI", description: "Via Google Cloud" },
 ];
 
 const BEDROCK_REGIONS = [
@@ -403,12 +401,12 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
       <div className="flex flex-col items-center text-center w-full max-w-md px-4 -mt-[40px]">
         {/* Creature icon - centered above text */}
         <div className="mb-4">
-          <CreatureIcon isDarkMode={isDarkMode} width={56} height={55} enableBlink={true} />
+          <CreatureIcon isDarkMode={isDarkMode} width={56} height={55} showEyes={false} />
         </div>
 
         {/* Brand text - Sora font, bold */}
         <h1
-          className="text-foreground text-4xl font-bold select-none tracking-tight"
+          className="text-foreground text-4xl font-semibold select-none tracking-tight"
           style={{ fontFamily: "'Sora', sans-serif" }}
         >
           Creature
@@ -463,6 +461,9 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                     <div className="text-[10px] text-text-secondary">{provider.description}</div>
                   </button>
                 ))}
+                <div className="w-full px-3 py-2 text-left cursor-not-allowed opacity-50">
+                  <div className="text-xs font-medium text-text-tertiary">More providers coming soon</div>
+                </div>
               </div>
             )}
           </div>

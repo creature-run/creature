@@ -506,40 +506,6 @@ export const registerProjectHandlers = () => {
         ? await findExistingProjectContaining(mcpParentDir)
         : null;
 
-      // Custom instructions for MCP App development projects
-      const mcpAppCustomInstructions = `# MCP App Development Project
-
-This project is for building an MCP App—an MCP server with a rich UI widget that displays in Creature.
-
-## What are MCP Apps?
-
-MCP Apps combine:
-- An **MCP Server** that provides tools the AI can call
-- A **UI Resource** (HTML) that renders tool results visually
-- **Communication** between the UI and the server via the host (Creature)
-
-When you call a tool linked to a UI resource, Creature displays that UI in a pip. The UI receives the tool's input and output, and can itself call tools to update its display.
-
-## Connecting to Creature as an MCP App Host
-
-Creature implements the MCP Apps specification (SEP-1865) and acts as the Host for the MCP App.
-
-If the Project type is "dev-mcp", Creature will automatically (attempt) to connect to the MCP App when the project is opened.
-
-Further, it will enable hot module reloading (HMR) for the MCP App.
-
-CRITICAL: NEVER rebuild the MCP App server during development. This will break the HMR connection and require the user to reconnect your MCP App.
-
-## Dev Console
-
-Creature includes a **Dev Console** (View → Dev Console) where you can:
-- View MCP server logs (use \`console.error()\` in server code—stdout is reserved for MCP protocol)
-- See the current system prompt and agent context
-- Monitor tool calls and results
-- Debug communication between the UI and server
-
-Use the Dev Console to troubleshoot issues with your MCP App during development.`;
-
       try {
         let validatedProject;
 
@@ -560,7 +526,6 @@ Use the Dev Console to troubleshoot issues with your MCP App during development.
             profile: "dev-mcp",
             context: {
               local_directory: { path: projectRoot },
-              custom_instructions: mcpAppCustomInstructions,
             },
             mcps: [
               { name: "browser", enabled: true },
