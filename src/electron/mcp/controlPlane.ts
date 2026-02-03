@@ -40,7 +40,7 @@
  */
 
 import { BrowserWindow } from "electron";
-import { readResource, callTool, getTool, getToolsForResourceUri, clearResourceCache, getResourceMetadata, type ResourceIcon, type Views } from "./client";
+import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, type ResourceIcon, type Views } from "./client";
 import { getPopoutWindow } from "../window/popoutWindows";
 import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
@@ -265,32 +265,45 @@ export const createPipInstance = async ({
 
 /**
  * Refresh all pips belonging to a specific MCP server.
- * Re-fetches HTML content and icon, notifies the renderer to update iframes.
+ * Closes pips whose resourceUri no longer exists (MCP app was rewritten).
+ * Re-fetches HTML content and icon for valid pips.
  * Called when an MCP server is restarted.
  */
 export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
-  const pipsToRefresh = Array.from(pipInstances.values()).filter(
+  const pipsForMcp = Array.from(pipInstances.values()).filter(
     (p) => p.serverName === mcpName
   );
 
-  if (pipsToRefresh.length === 0) {
+  if (pipsForMcp.length === 0) {
     return;
   }
 
-  for (const pip of pipsToRefresh) {
+  // Get valid resource URIs from the MCP server
+  const validUris = getResourceUrisForMcp(mcpName);
+
+  for (const pip of pipsForMcp) {
+    // Close pips with stale resourceUri (MCP app was rewritten with different resources)
+    if (!validUris.has(pip.resourceUri)) {
+      console.log(`[Control Plane] Closing stale pip (resource no longer exists)`, {
+        instanceId: pip.instanceId,
+        resourceUri: pip.resourceUri
+      });
+      pipInstances.delete(pip.instanceId);
+      sendToRenderer("pip:closed", { instanceId: pip.instanceId });
+      continue;
+    }
+
+    // Refresh valid pips with fresh content
     try {
-      // Fetch fresh HTML content and icon
       const { html: htmlContent, icon } = await readResource({
         serverName: pip.serverName,
         uri: pip.resourceUri,
       });
 
-      // Update pip instance
       pip.htmlContent = htmlContent;
       pip.icon = icon;
       pip.ready = false;
 
-      // Create new ready promise
       let resolveReady: () => void = () => {};
       const readyPromise = new Promise<void>((resolve) => {
         resolveReady = resolve;
@@ -298,13 +311,13 @@ export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promi
       pip.readyPromise = readyPromise;
       pip.resolveReady = resolveReady;
 
-      // Notify renderer to update the iframe
       sendToRenderer("pip:refresh", {
         instanceId: pip.instanceId,
         htmlContent: pip.htmlContent,
         icon: pip.icon,
       });
 
+      console.log(`[Control Plane] Refreshed pip`, { instanceId: pip.instanceId });
     } catch (error) {
       console.error(`[Control Plane] Failed to refresh pip`, { instanceId: pip.instanceId, error });
     }

@@ -340,6 +340,10 @@ export const getCurrentProjectId = (): string | null => currentProjectId;
 // Set true when closing MCPs, false when initializing new project
 let mcpsShutdown = false;
 
+// Track dev MCP folder paths to their current server names
+// Used to detect when a dev MCP's name changes after code rewrite
+const devMcpPathToName = new Map<string, string>();
+
 /**
  * Check if a server name is a built-in MCP.
  * Built-in MCPs are shipped with the app and don't need user configuration.
@@ -993,12 +997,12 @@ const spawnHttpServerProcess = async (
 /**
  * Create a stdio transport for local MCP servers.
  */
-const createStdioTransport = (
+const createStdioTransport = async (
   config: MCPServerConfig,
   serverName: string,
   resolvedCommand: string | undefined,
   resolvedArgs: string[] | undefined
-): StdioClientTransport => {
+): Promise<StdioClientTransport> => {
   // Use || instead of ?? to also treat empty strings/arrays as falsy
   const resolvedPath = config.path ? findMcpPath(config.path) : null;
   const cwd = config.cwd || resolvedPath || process.cwd();
@@ -1058,7 +1062,7 @@ const createStdioTransport = (
   // Allocate a unique port for this MCP server via the PortManager.
   // MCPs that need a UI port (e.g., for WebSocket) read MCP_ASSIGNED_PORT from env.
   // This avoids port conflicts when running multiple MCPs.
-  const assignedPort = portManager.allocate({ serverName });
+  const assignedPort = await portManager.allocate({ serverName });
   env.MCP_ASSIGNED_PORT = String(assignedPort);
 
   // Pass workspace roots to MCPs that need them (e.g., mcp-ide).
@@ -1110,7 +1114,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       if (app.isPackaged) {
         // Packaged mode: run from Resources/{path}/
         const mcpAppPath = path.join(process.resourcesPath, config.path);
-        const port = portManager.allocate({ serverName });
+        const port = await portManager.allocate({ serverName });
         portAllocated = true;
         config = {
           ...config,
@@ -1131,7 +1135,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
             console.warn(`[MCP] App MCP not found at ${mcpAppPath}`);
             config = undefined;
           } else {
-            const port = portManager.allocate({ serverName });
+            const port = await portManager.allocate({ serverName });
             portAllocated = true;
             config = {
               ...config,
@@ -1161,7 +1165,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
         };
 
         if (config.transport === "streamable-http") {
-          const port = portManager.allocate({ serverName });
+          const port = await portManager.allocate({ serverName });
           portAllocated = true;
           config = {
             ...config,
@@ -1181,7 +1185,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
           console.warn(`[MCP] Could not find workspace root for ${serverName}`);
           config = undefined;
         } else if (config.transport === "streamable-http") {
-          const port = portManager.allocate({ serverName });
+          const port = await portManager.allocate({ serverName });
           portAllocated = true;
           config = {
             ...config,
@@ -1203,7 +1207,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     if (root) {
       const mcpDef = getPublishablePackageInfo(root.path);
       if (mcpDef) {
-        const port = portManager.allocate({ serverName });
+        const port = await portManager.allocate({ serverName });
         portAllocated = true;
         config = {
           name: mcpDef.name,
@@ -1276,7 +1280,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       args = resolvedConfig.args;
     }
 
-    transport = createStdioTransport(config, serverName, command, args);
+    transport = await createStdioTransport(config, serverName, command, args);
       // Stdio transport also allocates a port for MCP_ASSIGNED_PORT
       portAllocated = true;
   }
@@ -1555,12 +1559,15 @@ export const initMcpsForProject = async ({
     }));
 
   // Collect dev MCP names from MCP app roots (these take precedence)
+  // Track path → name mapping to detect name changes on restart
+  devMcpPathToName.clear();
   const devMcpNames: Set<string> = new Set();
   for (const root of workspaceRoots) {
     if (!root.isMcpApp) continue;
     const mcpDef = getPublishablePackageInfo(root.path);
     if (mcpDef) {
       devMcpNames.add(mcpDef.name);
+      devMcpPathToName.set(root.path, mcpDef.name);
     }
   }
 
@@ -1609,6 +1616,7 @@ export const closeMcpsForProject = async (): Promise<void> => {
   currentProjectProfile = null;
   userMcpConfigs = [];
   projectMcpNames = new Set();
+  devMcpPathToName.clear();
 };
 
 /**
@@ -1863,6 +1871,16 @@ export const getUIResources = (): UIResourceInfo[] => {
   }
   
   return resources;
+};
+
+/**
+ * Get valid resource URIs for an MCP server.
+ * Used to check if a pip's resourceUri still exists after MCP restart.
+ */
+export const getResourceUrisForMcp = (serverName: string): Set<string> => {
+  const conn = connections.get(serverName);
+  if (!conn) return new Set();
+  return new Set(conn.resources.keys());
 };
 
 /**
@@ -2228,13 +2246,55 @@ const isSessionInvalidError = (error: unknown): boolean => {
 };
 
 const reconnectServer = async (serverName: string): Promise<void> => {
+  // Check if this is a dev MCP that may have changed names
+  let devMcpPath: string | null = null;
+  for (const [path, name] of devMcpPathToName.entries()) {
+    if (name === serverName) {
+      devMcpPath = path;
+      break;
+    }
+  }
+
+  // Close existing connection
   const conn = connections.get(serverName);
   if (conn) {
     await conn.client.close().catch(() => {});
     await conn.transport.close().catch(() => {});
+    if (conn.spawnedProcess && !conn.spawnedProcess.killed) {
+      killProcessTree(conn.spawnedProcess);
+    }
+    portManager.release({ serverName });
     connections.delete(serverName);
     connectionPromises.delete(serverName);
   }
+
+  // Determine the name to connect with (may have changed for dev MCPs)
+  let newName = serverName;
+  if (devMcpPath) {
+    const mcpDef = getPublishablePackageInfo(devMcpPath);
+    if (mcpDef && mcpDef.name !== serverName) {
+      console.log(`[MCP] Dev MCP name changed: ${serverName} -> ${mcpDef.name}`);
+      newName = mcpDef.name;
+      devMcpPathToName.set(devMcpPath, newName);
+
+      // Notify sidebar to remove old entry
+      const mainWindow = getMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("mcp:disabled", { name: serverName });
+      }
+    }
+  }
+
+  // Create new connection with fresh resources
+  await getConnection(newName);
+
+  // Notify renderer so sidebar refreshes resource list
+  const mainWindow = getMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("mcp:restarted", { name: newName });
+  }
+
+  console.log(`[MCP] Reconnected to ${newName}`);
 };
 
 /**
