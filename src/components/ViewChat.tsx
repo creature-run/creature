@@ -98,6 +98,7 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
   });
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [isScrolled, setIsScrolled] = useState(false);
+  const userScrolledUpRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
 
@@ -295,29 +296,53 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
   }, [focusTrigger]);
 
   /**
-   * Auto-scroll to bottom when streamed messages change.
+   * Auto-scroll to bottom when streamed messages change,
+   * but only if the user hasn't scrolled up manually.
+   * Uses a ref to avoid re-render jitter during streaming.
    */
   useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
+    if (!outputRef.current || userScrolledUpRef.current) return;
+    outputRef.current.scrollTop = outputRef.current.scrollHeight;
   }, [streamedMessages]);
 
   /**
    * Track scroll position to show/hide top shadow.
-   * Shadow only appears when scrolled down from the top.
+   * Re-enables auto-scroll when user scrolls back to the bottom.
    */
   useEffect(() => {
     const handleScroll = () => {
       if (outputRef.current) {
-        setIsScrolled(outputRef.current.scrollTop > 0);
+        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+        setIsScrolled(scrollTop > 0);
+
+        // Re-enable auto-scroll when user scrolls back to the bottom
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        if (distanceFromBottom < 10) {
+          userScrolledUpRef.current = false;
+        }
+      }
+    };
+
+    // Detect actual user scroll-up intent via wheel event
+    const handleWheel = (e: WheelEvent) => {
+      if (outputRef.current && e.deltaY < 0) {
+        // User is scrolling up
+        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        if (distanceFromBottom > 10) {
+          userScrolledUpRef.current = true;
+        }
       }
     };
 
     const scrollElement = outputRef.current;
     if (scrollElement) {
       scrollElement.addEventListener("scroll", handleScroll);
-      return () => scrollElement.removeEventListener("scroll", handleScroll);
+      scrollElement.addEventListener("wheel", handleWheel, { passive: true });
+      return () => {
+        scrollElement.removeEventListener("scroll", handleScroll);
+        scrollElement.removeEventListener("wheel", handleWheel);
+      };
     }
   }, []);
 
@@ -358,6 +383,9 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
   const handleSubmit = useCallback(
     (finalContent: string, _attachedPaths: string[], images: Array<{ url?: string; filename: string }>) => {
       if (!finalContent.trim() && images.length === 0) return;
+
+      // Re-enable auto-scroll when user sends a new message
+      userScrolledUpRef.current = false;
 
       // Check if we have valid images with URLs
       const validImages = images.filter((img) => img.url);
@@ -424,6 +452,8 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
     if (!isStreaming && messageQueue.length > 0) {
       const [nextMessage, ...remainingQueue] = messageQueue;
       setMessageQueue(remainingQueue);
+      // Re-enable auto-scroll for queued message responses
+      userScrolledUpRef.current = false;
       sendMessage({ text: nextMessage });
     }
   }, [isStreaming, messageQueue, sendMessage]);
@@ -534,7 +564,7 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
                         })}
                       </div>
                     )}
-                    <span className="text-text-primary text-md leading-relaxed">
+                    <span className="text-text-primary text-base leading-relaxed">
                       {msg.parts?.map((part, i) => {
                         if (part.type === "text") {
                           return <span key={i}>{part.text}</span>;
@@ -545,7 +575,7 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
                   </div>
                 ) : (
                   <div className="bg-background-secondary rounded-md p-4 mb-4 overflow-hidden">
-                    <div className="text-text-primary text-sm leading-relaxed break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-tertiary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-tertiary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline">
+                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-tertiary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-tertiary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline">
                       {msg.parts?.map((part, i) => {
                         if (part.type === "text") {
                           return <ReactMarkdown key={i}>{part.text}</ReactMarkdown>;

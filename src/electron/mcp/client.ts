@@ -382,6 +382,115 @@ const findRootByMcpName = (serverName: string): WorkspaceRoot | null => {
   return null;
 };
 
+// =============================================================================
+// Package Manager Detection & Dependency Installation
+// =============================================================================
+
+/**
+ * Supported package managers and their lock files.
+ * Used to detect which package manager a project uses.
+ */
+type PackageManager = "npm" | "yarn" | "pnpm" | "bun";
+
+const LOCK_FILE_TO_PACKAGE_MANAGER: Record<string, PackageManager> = {
+  "pnpm-lock.yaml": "pnpm",
+  "yarn.lock": "yarn",
+  "bun.lockb": "bun",
+  "package-lock.json": "npm",
+};
+
+/**
+ * Detect the package manager used by a project based on lock files.
+ * Falls back to npm if no lock file is found.
+ *
+ * @param projectPath - Path to the project directory
+ * @returns The detected package manager
+ */
+const detectPackageManager = (projectPath: string): PackageManager => {
+  for (const [lockFile, packageManager] of Object.entries(LOCK_FILE_TO_PACKAGE_MANAGER)) {
+    if (fs.existsSync(path.join(projectPath, lockFile))) {
+      return packageManager;
+    }
+  }
+  return "npm";
+};
+
+/**
+ * Check if a package manager command is available on the system.
+ * Uses `which` on Unix-like systems to locate the command.
+ *
+ * @param command - Package manager command to check (npm, yarn, pnpm, bun)
+ * @returns Promise that resolves to true if command is available
+ */
+const isPackageManagerAvailable = async (command: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const checkCmd = process.platform === "win32" ? "where" : "which";
+    exec(`${checkCmd} ${command}`, { env: { ...process.env, PATH: getExtendedPath() } }, (error) => {
+      resolve(!error);
+    });
+  });
+};
+
+/**
+ * Install dependencies for a dev MCP app using the appropriate package manager.
+ * Detects the package manager from lock files and runs the install command.
+ * Only npm is guaranteed to be available; other package managers require user installation.
+ *
+ * @param projectPath - Path to the MCP app project directory
+ * @param serverName - Name of the MCP server (for logging)
+ * @throws Error if the detected package manager is not available (except npm)
+ */
+const installDevMcpDependencies = async ({
+  projectPath,
+  serverName,
+}: {
+  projectPath: string;
+  serverName: string;
+}): Promise<void> => {
+  const packageManager = detectPackageManager(projectPath);
+  
+  // npm is always available (bundled with Node.js/Electron)
+  // Other package managers require user installation
+  if (packageManager !== "npm") {
+    const isAvailable = await isPackageManagerAvailable(packageManager);
+    if (!isAvailable) {
+      throw new Error(
+        `MCP app "${serverName}" uses ${packageManager} (detected from lock file), ` +
+        `but ${packageManager} is not installed. Please install ${packageManager} or switch to npm.`
+      );
+    }
+  }
+
+  console.log(`[MCP] Installing dependencies for ${serverName} using ${packageManager}...`);
+
+  return new Promise((resolve, reject) => {
+    const installProcess = spawn(packageManager, ["install"], {
+      cwd: projectPath,
+      env: { ...process.env, PATH: getExtendedPath() },
+      shell: true,
+    });
+
+    let stderr = "";
+    installProcess.stderr?.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    installProcess.on("close", (code) => {
+      if (code === 0) {
+        console.log(`[MCP] Dependencies installed for ${serverName}`);
+        resolve();
+      } else {
+        reject(new Error(
+          `Failed to install dependencies for ${serverName} (exit code ${code}): ${stderr}`
+        ));
+      }
+    });
+
+    installProcess.on("error", (err) => {
+      reject(new Error(`Failed to run ${packageManager} install: ${err.message}`));
+    });
+  });
+};
 
 /**
  * Definition for a publishable MCP.
@@ -1104,8 +1213,45 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   // Track whether we allocated a port so we can release it on failure
   let portAllocated = false;
 
-  // Find config - check in order: builtin, Development MCP, project MCPs
-  let config: MCPServerConfig | undefined = BUILTIN_MCP_SERVERS.find((s) => s.name === serverName);
+  // Find config - check in order: Development MCP, builtin, project MCPs
+  // Dev MCPs take precedence so developers can override built-in MCPs with HMR versions
+  let config: MCPServerConfig | undefined;
+
+  // Check if this is a Development MCP first (takes precedence over built-in)
+  // This allows developers to work on MCP apps with HMR even if they share names with built-ins
+  const devRoot = findRootByMcpName(serverName);
+  if (devRoot) {
+    const mcpDef = getPublishablePackageInfo(devRoot.path);
+    if (mcpDef) {
+      // For dev-mcp profile projects, ensure dependencies are installed before starting
+      // This handles fresh clones, projects with missing node_modules, or production-only deps
+      if (currentProjectProfile === "dev-mcp") {
+        await installDevMcpDependencies({
+          projectPath: devRoot.path,
+          serverName,
+        });
+      }
+
+      const port = await portManager.allocate({ serverName });
+      const hmrPort = await portManager.allocate({ serverName: `${serverName}-hmr` });
+      portAllocated = true;
+      config = {
+        name: mcpDef.name,
+        command: "npm",
+        args: ["run", "dev"],
+        cwd: devRoot.path,
+        env: { MCP_PORT: String(port), MCP_HMR_PORT: String(hmrPort), NODE_ENV: "development" },
+        transport: "streamable-http",
+        url: `http://localhost:${port}/mcp`,
+      };
+      console.log(`[MCP] Using dev MCP for ${serverName} at ${devRoot.path} (overrides built-in)`);
+    }
+  }
+
+  // Fall back to built-in MCPs if no dev MCP found
+  if (!config) {
+    config = BUILTIN_MCP_SERVERS.find((s) => s.name === serverName);
+  }
 
   // Handle built-in MCPs with paths
   if (config?.path) {
@@ -1201,27 +1347,6 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     }
   }
 
-  // Check if this is a Development MCP (search across all MCP app roots)
-  if (!config) {
-    const root = findRootByMcpName(serverName);
-    if (root) {
-      const mcpDef = getPublishablePackageInfo(root.path);
-      if (mcpDef) {
-        const port = await portManager.allocate({ serverName });
-        portAllocated = true;
-        config = {
-          name: mcpDef.name,
-          command: "npm",
-          args: ["run", "dev"],
-          cwd: root.path,
-          env: { MCP_PORT: String(port), NODE_ENV: "development" },
-          transport: "streamable-http",
-          url: `http://localhost:${port}/mcp`,
-        };
-      }
-    }
-  }
-
   // Check custom MCPs from project config
   if (!config) {
     const userConfig = userMcpConfigs.find((c) => c.name === serverName);
@@ -1231,9 +1356,10 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   }
 
   if (!config) {
-    // Release port if we allocated one but couldn't find config
+    // Release ports if we allocated them but couldn't find config
     if (portAllocated) {
       portManager.release({ serverName });
+      portManager.release({ serverName: `${serverName}-hmr` });
     }
     console.error(`[MCP] Server not found: ${serverName}. User configs:`, userMcpConfigs.map(c => c.name));
     throw new Error(`MCP server not found: ${serverName}`);
@@ -1478,9 +1604,10 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
 
   return connection;
   } catch (error) {
-    // Clean up on failure: release port and kill spawned process
+    // Clean up on failure: release ports and kill spawned process
     if (portAllocated) {
       portManager.release({ serverName });
+      portManager.release({ serverName: `${serverName}-hmr` });
     }
     if (spawnedProcess && !spawnedProcess.killed) {
       killProcessTree(spawnedProcess);
@@ -1571,13 +1698,9 @@ export const initMcpsForProject = async ({
     }
   }
 
-  // Initialize Development MCPs first (they take precedence)
-  // TODO: Remove this skip once template issues are resolved
-  const SKIP_DEV_MCPS = ["todos", "notes", "crm"];
+  // Initialize Development MCPs first (they take precedence over built-in MCPs)
+  // Dev MCPs run with `npm run dev` for HMR support during development
   for (const devMcpName of devMcpNames) {
-    if (SKIP_DEV_MCPS.includes(devMcpName)) {
-      continue;
-    }
     try {
       await getConnection(devMcpName);
     } catch (error) {
@@ -1679,8 +1802,9 @@ export const restartMcp = async ({ name, config }: {
       if (existing.spawnedProcess && !existing.spawnedProcess.killed) {
         killProcessTree(existing.spawnedProcess);
       }
-      // Release the port so it can be reused on reconnect
+      // Release ports so they can be reused on reconnect
       portManager.release({ serverName: name });
+      portManager.release({ serverName: `${name}-hmr` });
     }
     connections.delete(name);
   }
@@ -1739,8 +1863,9 @@ export const disableMcp = async ({ name }: { name: string }): Promise<void> => {
       if (existing.spawnedProcess && !existing.spawnedProcess.killed) {
         killProcessTree(existing.spawnedProcess);
       }
-      // Release the port so it can be reused
+      // Release ports so they can be reused
       portManager.release({ serverName: name });
+      portManager.release({ serverName: `${name}-hmr` });
     }
     connections.delete(name);
   }
@@ -1811,14 +1936,16 @@ export const closeAllConnections = async (): Promise<void> => {
           // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
           killProcessTree(stdioTransport.childProcess);
         }
-        // Release the port assigned to this MCP (only for stdio since they use local ports)
+        // Release ports assigned to this MCP
         portManager.release({ serverName: name });
+        portManager.release({ serverName: `${name}-hmr` });
       }
 
       // Kill spawned process for HTTP-based local MCPs
       if (conn.spawnedProcess && !conn.spawnedProcess.killed) {
         killProcessTree(conn.spawnedProcess);
         portManager.release({ serverName: name });
+        portManager.release({ serverName: `${name}-hmr` });
       }
     }
   }
@@ -2264,6 +2391,7 @@ const reconnectServer = async (serverName: string): Promise<void> => {
       killProcessTree(conn.spawnedProcess);
     }
     portManager.release({ serverName });
+    portManager.release({ serverName: `${serverName}-hmr` });
     connections.delete(serverName);
     connectionPromises.delete(serverName);
   }

@@ -496,11 +496,12 @@ app.tool(
       path: z.string().describe("File path (use rootId/path for multi-root, or path for primary root)"),
       startLine: z.number().optional().describe("Start line (1-indexed)"),
       endLine: z.number().optional().describe("End line (1-indexed, max 200 lines from start)"),
+      _source: z.enum(["agent", "ui"]).optional().describe("Internal: source of tool call"),
     }),
     ui: IDE_UI_RESOURCE_URI,
     visibility: ["model", "app"],
   },
-  async ({ path: filePath, startLine, endLine }) => {
+  async ({ path: filePath, startLine, endLine, _source }) => {
     console.info(`[IDE] Reading file: ${filePath}`);
 
     try {
@@ -531,7 +532,8 @@ app.tool(
       const totalLines = lines.length;
 
       const start = startLine ? Math.max(1, startLine) : 1;
-      const maxEnd = start + 199;
+      // UI gets full file, AI is limited to 200 lines to save tokens
+      const maxEnd = _source === "ui" ? totalLines : start + 199;
       const end = Math.min(totalLines, endLine || totalLines, maxEnd);
 
       const selectedLines = lines.slice(start - 1, end);

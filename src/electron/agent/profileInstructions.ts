@@ -125,7 +125,7 @@ src/
     lib/*.ts      # Data, types, utilities
   ui/
     app.tsx       # Entry: HostProvider + main component
-    styles.css    # Custom styles using host CSS variables
+    styles.css    # (Optional) Custom CSS - prefer Tailwind classes
 \`\`\`
 
 ## Server: createApp & Resources
@@ -201,11 +201,9 @@ app.tool(
 
 \`\`\`tsx
 // app.tsx - Entry point
-import { detectEnvironment, initDefaultStyles } from "open-mcp-app/core";
-initDefaultStyles({ environment: detectEnvironment() }); // MUST be first
-
 import { HostProvider } from "open-mcp-app/react";
-import "./styles.css";
+import "open-mcp-app/styles/tailwind.css"; // Host-themed Tailwind
+import "./styles.css"; // App-specific overrides (if needed)
 
 export default function App() {
   return (
@@ -279,33 +277,101 @@ setWidgetState({
 **modelContent**: What the AI sees. Include current view, key identifiers, and brief status. Keep it concise so the AI can follow along.
 **privateContent**: UI-only state for restoration (scroll position, expanded panels, draft content).
 
-## Styling
+## Styling with Tailwind
 
-You can add custom styles, but NEVER recreate host styles (they won't update with theme changes). All styles must work with light/dark themes.
+The SDK uses Tailwind 4 with host-provided theming. **One import gives you instant host theming.**
 
-Use host CSS variables for colors, fonts, borders, and spacing:
+### Setup
 
-\`\`\`css
-.container {
-  background: var(--color-background-primary);
-  color: var(--color-text-primary);
-  border: var(--border-width-regular) solid var(--color-border-secondary);
-  border-radius: var(--border-radius-md);
-  font-family: var(--font-sans);
-  font-size: var(--font-text-md-size);
-}
-
-.button {
-  background: var(--color-text-primary);
-  color: var(--color-text-inverse);
-}
-
-.secondary-text {
-  color: var(--color-text-secondary);
-}
+\`\`\`tsx
+// In app.tsx
+import "open-mcp-app/styles/tailwind.css";
 \`\`\`
 
-The host handles light/dark themes automatically. Your CSS references variables so it adapts.
+This single import enables:
+- Host-provided colors, typography, shadows, and radii
+- Automatic light/dark theme adaptation
+- Standard Tailwind utilities for layout and spacing
+
+### How It Works
+
+1. **Host injects CSS variables** (e.g., \`--color-background-primary\`) at runtime
+2. **SDK maps them to Tailwind** via \`@theme\` directive
+3. **You use Tailwind classes** that resolve to host values
+
+Apps inherit the host's visual design automatically. A notes app in Creature looks like Creature; the same app in ChatGPT looks like ChatGPT.
+
+### Color Classes (Host-Themed)
+
+Use these prefixed classes - they map to host-provided values:
+
+**Backgrounds** (\`bg-bg-*\`):
+- \`bg-bg-primary\`, \`bg-bg-secondary\`, \`bg-bg-tertiary\`
+- \`bg-bg-info\`, \`bg-bg-danger\`, \`bg-bg-success\`, \`bg-bg-warning\`
+
+**Text** (\`text-txt-*\`):
+- \`text-txt-primary\`, \`text-txt-secondary\`, \`text-txt-tertiary\`
+- \`text-txt-info\`, \`text-txt-danger\`, \`text-txt-success\`, \`text-txt-warning\`
+
+**Borders** (\`border-bdr-*\`):
+- \`border-bdr-primary\`, \`border-bdr-secondary\`, \`border-bdr-tertiary\`
+
+**Focus rings** (\`ring-ring-*\`):
+- \`ring-ring-primary\`, \`ring-ring-secondary\`
+
+### Other Tailwind Classes
+
+Standard Tailwind works as expected for:
+- **Spacing**: \`p-4\`, \`m-2\`, \`gap-3\`, etc.
+- **Layout**: \`flex\`, \`grid\`, \`items-center\`, \`justify-between\`, etc.
+- **Typography sizes**: \`text-sm\`, \`text-base\`, \`text-lg\`
+- **Border radius**: \`rounded-sm\`, \`rounded-md\`, \`rounded-lg\` (mapped to host values)
+- **Shadows**: \`shadow-sm\`, \`shadow-md\`, \`shadow-lg\` (mapped to host values)
+
+### Custom Utilities
+
+The SDK adds utilities for common patterns:
+
+**Headings** (combines size + weight + line-height):
+\`\`\`tsx
+<h1 className="heading-xl">Page Title</h1>
+<h2 className="heading-lg">Section</h2>
+<h3 className="heading-md">Subsection</h3>
+\`\`\`
+
+**Control heights** (for buttons/inputs):
+\`\`\`tsx
+<button className="h-control-sm">Small</button>
+<button className="h-control-md">Medium</button>
+\`\`\`
+
+**Icon sizes**:
+\`\`\`tsx
+<Icon className="icon-sm" />
+<Icon className="icon-md" />
+\`\`\`
+
+### Example
+
+\`\`\`tsx
+<div className="flex flex-col h-full bg-bg-primary text-txt-primary">
+  <header className="flex items-center justify-between p-4 border-b border-bdr-secondary">
+    <h1 className="heading-lg">Notes</h1>
+    <button className="bg-txt-primary text-txt-inverse px-3 py-1.5 rounded-md text-sm font-medium">
+      + New
+    </button>
+  </header>
+  <main className="flex-1 overflow-y-auto p-4">
+    <p className="text-txt-secondary">No notes yet</p>
+  </main>
+</div>
+\`\`\`
+
+### Rules
+
+- **NEVER hardcode colors** - use \`bg-bg-*\`, \`text-txt-*\`, \`border-bdr-*\`
+- **NEVER use raw hex/rgb values** - they won't match the host theme
+- Custom CSS is rarely needed - Tailwind covers most use cases
 
 ## Storage (Server-Side)
 
