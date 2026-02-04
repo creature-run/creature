@@ -315,7 +315,7 @@ const copyMcpApps = (resourcesPath: string) => {
   const builtinMcpApps = ['todos', 'notes'];
 
   for (const name of mcpApps) {
-    const srcDir = path.join(__dirname, 'artifacts', 'mcp-apps', name);
+    const srcDir = path.join(__dirname, 'src', 'electron', 'mcps', name);
     const destDir = path.join(resourcesPath, `mcp-${name}`);
 
     if (!fs.existsSync(srcDir)) {
@@ -349,7 +349,7 @@ const copyMcpApps = (resourcesPath: string) => {
         fs.cpSync(distDir, path.join(destDir, 'dist'), { recursive: true });
         console.log(`[Forge] Copied ${name} dist/ for built-in MCP support`);
       } else {
-        console.warn(`[Forge] Warning: ${name} dist/ not found - run 'npm run build' in artifacts/mcp-apps/${name}`);
+        console.warn(`[Forge] Warning: ${name} dist/ not found - run 'npm run build' in src/electron/mcps/${name}`);
       }
 
       // Copy node_modules (runtime dependencies)
@@ -365,7 +365,7 @@ const copyMcpApps = (resourcesPath: string) => {
         
         console.log(`[Forge] Copied ${name} node_modules/ for built-in MCP support`);
       } else {
-        console.warn(`[Forge] Warning: ${name} node_modules/ not found - run 'npm install' in artifacts/mcp-apps/${name}`);
+        console.warn(`[Forge] Warning: ${name} node_modules/ not found - run 'npm install' in src/electron/mcps/${name}`);
       }
     }
 

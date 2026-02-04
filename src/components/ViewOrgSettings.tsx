@@ -14,7 +14,7 @@ import {
 } from "./AlertDialog";
 import type { ProviderCredentials, ProviderType } from "../electron/preload";
 
-interface ViewAppSettingsProps {
+interface ViewOrgSettingsProps {
   onClose: () => void;
   currentProviderType?: ProviderType;
 }
@@ -50,12 +50,12 @@ const HELP_URLS: Record<ProviderType, string> = {
 };
 
 /**
- * ViewAppSettings Component
+ * ViewOrgSettings Component
  *
- * App-level settings overlay for managing AI provider credentials.
+ * Organization-level settings overlay for managing AI provider credentials.
  * Allows viewing current provider and changing to a different one.
  */
-export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSettingsProps) {
+export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSettingsProps) {
   const [providerType, setProviderType] = useState<ProviderType>(currentProviderType || "anthropic");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,7 +248,7 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
    */
   const renderProviderFields = () => {
     const inputBaseClass =
-      "w-full h-[34px] px-3 rounded-md bg-background-primary border border-border-primary text-text-primary text-xs placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all";
+      "w-full h-[34px] px-3 rounded-md bg-background-primary border border-border-primary text-text-primary text-base placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all";
     const inputMonoClass = `${inputBaseClass} font-mono`;
 
     switch (providerType) {
@@ -396,7 +396,7 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
                   placeholder="Private Key (-----BEGIN PRIVATE KEY-----...)"
                   disabled={isLoading}
                   rows={3}
-                  className="w-full px-3 py-2 rounded-md bg-background-primary border border-border-primary text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all font-mono text-xs resize-none"
+                  className="w-full px-3 py-2 rounded-md bg-background-primary border border-border-primary text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all font-mono text-base resize-none"
                 />
                 <button
                   type="button"
@@ -422,7 +422,7 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
       {/* Header */}
       <div className="shrink-0 border-b border-border-secondary">
         <div className="flex items-center justify-between px-6 py-4">
-          <h1 className="text-sm font-medium text-text-primary">Org Settings</h1>
+          <h1 className="text-base font-medium text-text-primary">Org Settings</h1>
           <button
             onClick={onClose}
             className="p-1 rounded-md hover:bg-background-tertiary text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
@@ -439,8 +439,8 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
           <div className="w-full max-w-[800px]">
             {/* Section Header */}
             <div className="mb-12">
-              <h2 className="text-sm font-medium text-text-primary">AI Provider</h2>
-              <p className="text-xs text-text-secondary mt-1">
+              <h2 className="text-base font-medium text-text-primary">AI Provider</h2>
+              <p className="text-sm text-text-secondary mt-1">
                 Configure the AI provider used for conversations
               </p>
             </div>
@@ -450,9 +450,9 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
               <div className="rounded-md border border-border-primary">
                 <div className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-3">
-                    <Key size={16} className="text-text-secondary shrink-0" />
+                    <Key size={20} className="text-text-secondary shrink-0 pr-1" />
                     <div>
-                      <div className="text-sm font-medium text-text-primary">
+                      <div className="text-base font-medium text-text-primary pb-1">
                         {currentProvider?.name || "Not configured"}
                       </div>
                       <div className="text-xs text-text-secondary">
@@ -479,14 +479,14 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
               <div className="rounded-md border border-border-primary p-4">
                 {/* Provider Selection */}
                 <div className="mb-4">
-                  <label className="block text-xs text-text-secondary mb-2">Provider</label>
+                  <label className="block text-sm text-text-secondary mb-2">Provider</label>
                   <div className="relative">
                     <button
                       type="button"
                       onClick={() => setShowProviderDropdown(!showProviderDropdown)}
                       className="w-full h-[34px] px-3 rounded-md bg-background-primary border border-border-primary text-text-primary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all flex items-center justify-between"
                     >
-                      <span className="text-sm">{selectedProvider.name}</span>
+                      <span className="text-base">{selectedProvider.name}</span>
                       <CaretDown
                         size={14}
                         className={`text-text-secondary transition-transform ${showProviderDropdown ? "rotate-180" : ""}`}
@@ -508,12 +508,12 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
                               provider.type === providerType ? "bg-background-secondary" : ""
                             }`}
                           >
-                            <div className="text-sm text-text-primary">{provider.name}</div>
-                            <div className="text-xs text-text-tertiary">{provider.description}</div>
+                            <div className="text-base text-text-primary">{provider.name}</div>
+                            <div className="text-sm text-text-tertiary">{provider.description}</div>
                           </button>
                         ))}
                         <div className="w-full px-3 py-2 text-left cursor-not-allowed opacity-50">
-                          <div className="text-sm text-text-tertiary">More providers coming soon</div>
+                          <div className="text-base text-text-tertiary">More providers coming soon</div>
                         </div>
                       </div>
                     )}
@@ -522,12 +522,12 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
 
                 {/* Credentials fields */}
                 <div className="mb-4">
-                  <label className="block text-xs text-text-secondary mb-2">Credentials</label>
+                  <label className="block text-sm text-text-secondary mb-2">Credentials</label>
                   {renderProviderFields()}
                 </div>
 
                 {/* Help link */}
-                <p className="text-xs text-text-tertiary mb-4">
+                <p className="text-sm text-text-tertiary mb-4">
                   Get credentials from{" "}
                   <button
                     onClick={() => window.electronAPI.shell.openExternal(HELP_URLS[providerType])}
@@ -550,7 +550,7 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
                 )}
 
                 {success && (
-                  <div className="flex items-center gap-2 text-sm text-text-success mb-4">
+                  <div className="flex items-center gap-2 text-base text-text-success mb-4">
                     <Check size={14} className="shrink-0" />
                     <span>Credentials saved. Reloading...</span>
                   </div>
@@ -589,7 +589,7 @@ export function ViewAppSettings({ onClose, currentProviderType }: ViewAppSetting
 
             {/* Footer Note */}
             <div className="mt-6 pt-4 border-t border-border-secondary">
-              <p className="text-xs text-text-tertiary">
+              <p className="text-sm text-text-tertiary">
                 Credentials are stored locally and encrypted. Changing your provider will reload the app.
               </p>
             </div>

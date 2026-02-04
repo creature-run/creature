@@ -16,7 +16,7 @@ import * as path from "path";
 import { execSync } from "child_process";
 
 const MCP_APPS = ["notes", "todos", "crm"];
-const LOCAL_SDK_PATH = "file:../../sdk";
+const LOCAL_SDK_PATH = "file:../../../../artifacts/sdk";
 const PUBLISHED_SDK_VERSION = "^0.0.2";
 
 interface PackageJson {
@@ -25,7 +25,7 @@ interface PackageJson {
 }
 
 function getAppDir(appName: string): string {
-  return path.join(__dirname, "..", "artifacts", "mcp-apps", appName);
+  return path.join(__dirname, "..", "src", "electron", "mcps", appName);
 }
 
 function readPackageJson(appDir: string): PackageJson {

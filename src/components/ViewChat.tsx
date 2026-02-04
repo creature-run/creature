@@ -680,7 +680,7 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
                             <div
                               key={i}
                               className={cn(
-                                "bg-background-secondary border border-border-primary rounded-md px-3.5 py-2.5 my-2 text-xs overflow-hidden",
+                                "bg-background-secondary border border-border-primary rounded-md px-3.5 py-2.5 my-2 text-sm overflow-hidden",
                                 isError && "border-l-2 border-l-red-400"
                               )}
                             >
@@ -742,7 +742,7 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
                     Monthly Usage Limit Reached
                   </h5>
                 </div>
-                <p className="text-xs text-text-secondary mb-4">
+                <p className="text-sm text-text-secondary mb-4">
                   You&apos;ve used your free plan&apos;s monthly AI allowance.
                   Upgrade to Starter for $4/month with AI usage billed at provider rates.
                 </p>

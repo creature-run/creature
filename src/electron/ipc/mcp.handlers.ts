@@ -34,8 +34,8 @@ const findTemplatePath = (templateName: string = "todos"): string | null => {
     return null;
   }
 
-  // Development: check mcp-apps location
-  const devPath = path.resolve(findWorkspaceRoot() || "", `desktop/artifacts/mcp-apps/${templateName}`);
+  // Development: check mcps location
+  const devPath = path.resolve(findWorkspaceRoot() || "", `desktop/src/electron/mcps/${templateName}`);
   if (fs.existsSync(path.join(devPath, "package.json"))) {
     return devPath;
   }

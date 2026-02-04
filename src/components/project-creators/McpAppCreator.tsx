@@ -208,7 +208,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         <div className="fixed z-50 flex items-center justify-center w-full max-w-lg border border-border-primary bg-background-primary p-12 shadow-lg rounded-lg dialog-content" data-state="open">
           <div className="flex items-center gap-3">
             <Spinner size={16} />
-            <span className="text-sm text-text-primary">{statusMessage}</span>
+            <span className="text-base text-text-primary">{statusMessage}</span>
           </div>
         </div>
       </>
@@ -232,7 +232,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-sm font-medium text-text-primary">
+            <h2 className="text-lg font-medium text-text-primary">
               Create a new MCP App
             </h2>
             <button
@@ -245,7 +245,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
           </div>
 
           {error && (
-            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-xs rounded-md p-3 mb-6">
+            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-sm rounded-md p-3 mb-6">
               {error}
             </div>
           )}
@@ -271,7 +271,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                 type="button"
                 onClick={() => handleModeChange("create")}
                 className={cn(
-                  "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+                  "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
                   mode === "create"
                     ? "text-text-primary border-text-primary"
                     : "text-text-secondary border-transparent hover:text-text-primary"
@@ -283,7 +283,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                 type="button"
                 onClick={() => handleModeChange("existing")}
                 className={cn(
-                  "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+                  "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
                   mode === "existing"
                     ? "text-text-primary border-text-primary"
                     : "text-text-secondary border-transparent hover:text-text-primary"
@@ -327,7 +327,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                   </Button>
                 </div>
                 {createFolderLocation && (
-                  <p className="text-xs text-text-secondary mt-2">
+                  <p className="text-sm text-text-secondary mt-2">
                     Will create new MCP in subfolder "{folderName}"
                   </p>
                 )}
@@ -345,7 +345,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                   onChange={(e) => handleFolderNameChange(e.target.value)}
                   placeholder="new-mcp-app"
                 />
-                <p className="text-xs text-text-secondary mt-2">
+                <p className="text-sm text-text-secondary mt-2">
                   Lowercase letters, numbers, and hyphens only
                 </p>
               </div>

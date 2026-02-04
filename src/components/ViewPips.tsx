@@ -416,7 +416,7 @@ export function ViewPips({ width, onWidthChange, showContent, isVisible }: ViewP
     if (tabbedPips.length === 0) {
       return (
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-text-secondary text-sm">No active apps</p>
+          <p className="text-text-secondary text-base">No active apps</p>
         </div>
       );
     }

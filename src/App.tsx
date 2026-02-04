@@ -6,7 +6,7 @@ import { ViewLogin } from "./components/ViewLogin";
 import { ProjectList } from "./components/ProjectList";
 import { ModalMcpSettings } from "./components/ModalMcpSettings";
 import { ViewProjectSettings } from "./components/ViewProjectSettings";
-import { ViewAppSettings } from "./components/ViewAppSettings";
+import { ViewOrgSettings } from "./components/ViewOrgSettings";
 import { Toaster } from "./components/Sonner";
 import { useApp } from "./contexts/AppContext";
 import { Spinner } from "./components/Spinner";
@@ -407,9 +407,9 @@ function App() {
             <ViewProjectSettings onClose={() => setProjectSettingsOpen(false)} />
           )}
 
-          {/* App Settings Overlay - covers chat and pips area, not sidebar */}
+          {/* Org Settings Overlay - covers chat and pips area, not sidebar */}
           {ui.appSettingsOpen && (
-            <ViewAppSettings
+            <ViewOrgSettings
               onClose={() => setAppSettingsOpen(false)}
               currentProviderType={auth.providerType}
             />

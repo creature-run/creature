@@ -1,0 +1,45 @@
+{
+  "name": "todos",
+  "version": "0.0.1",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite build --watch\" \"nodemon -q --ext ts --watch src/server --exec 'npx tsx src/server/index.ts'\"",
+    "build": "npm run build:ui && npm run build:server",
+    "build:ui": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@milkdown/kit": "^7.8.0",
+    "@milkdown/plugin-listener": "^7.8.0",
+    "@milkdown/react": "^7.8.0",
+    "open-mcp-app": "file:../../../../artifacts/sdk",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^3.24.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/creature-run/creature.git",
+    "directory": "template-todos"
+  },
+  "homepage": "https://creature.run/docs",
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^9.1.2",
+    "nodemon": "^3.1.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.0.3"
+  }
+}

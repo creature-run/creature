@@ -630,7 +630,7 @@ export function ChatInput({
       {messageQueue.length > 0 && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-[-10px] w-[calc(100%-10px)] pb-2 flex flex-col rounded-t-md bg-background-primary chat-input-container chat-input-container-focused">
           <div className="px-5 pt-[5px] pb-1 border-b border-border-primary relative shadow-[0_1px_3px_0_rgba(0,0,0,0.1)] flex items-center justify-between">
-            <span className="text-xs font-medium text-text-secondary">Queue</span>
+            <span className="text-sm font-medium text-text-secondary">Queue</span>
             {onClearQueue && (
               <button
                 type="button"
@@ -657,7 +657,7 @@ export function ChatInput({
                 >
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
-                <span className="flex-1 text-xs font-medium text-text-primary truncate">
+                <span className="flex-1 text-sm font-medium text-text-primary truncate">
                   {queuedMessage}
                 </span>
                 {onRemoveFromQueue && (
@@ -693,7 +693,7 @@ export function ChatInput({
             <button
               key={ref.id}
               type="button"
-              className="flex items-center gap-1 rounded-full bg-background-tertiary px-2 py-1 text-xs text-text-secondary hover:bg-background-secondary transition-colors"
+              className="flex items-center gap-1 rounded-full bg-background-tertiary px-2 py-1 text-sm text-text-secondary hover:bg-background-secondary transition-colors"
               onClick={() => removeFileRef(ref.id)}
               title={`Remove ${ref.type === "folder" ? "folder" : "file"}: ${ref.path}`}
             >
@@ -840,7 +840,7 @@ export function ChatInput({
               <div className="px-5">
                 <textarea
                   ref={inputRef}
-                  className="w-full py-4 pr-12 bg-transparent border-none outline-none text-text-primary font-inherit text-sm placeholder:text-text-secondary placeholder:text-[12px] resize-none overflow-hidden"
+                  className="w-full py-4 pr-12 bg-transparent border-none outline-none text-text-primary font-inherit text-base placeholder:text-text-secondary placeholder:text-sm resize-none overflow-hidden"
                   style={{ minHeight: `${MIN_HEIGHT}px` }}
                   value={input}
                   onChange={handleInputChange}
@@ -895,7 +895,7 @@ export function ChatInput({
               </div>
             ))}
             {imageAttachments.length >= 20 && (
-              <div className="text-xs text-text-secondary px-2 py-1">
+              <div className="text-sm text-text-secondary px-2 py-1">
                 Max 20 images
               </div>
             )}

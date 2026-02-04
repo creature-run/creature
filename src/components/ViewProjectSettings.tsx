@@ -320,7 +320,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
       {/* Header */}
       <div className="shrink-0 border-b border-border-secondary">
         <div className="flex items-center justify-between px-6 py-4">
-          <h1 className="text-sm font-semibold text-text-primary">Project Settings</h1>
+          <h1 className="text-base font-semibold text-text-primary">Project Settings</h1>
           <button
             onClick={onClose}
             className="p-1 rounded-md hover:bg-background-tertiary text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
@@ -338,8 +338,8 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
             {/* Page Title */}
             <div className="mb-12 flex items-start justify-between">
               <div>
-                <h2 className="text-sm font-medium text-text-primary">Context</h2>
-                <p className="text-xs text-text-secondary mt-1">Configure instructions, MCPs and resources for the AI agent in this project</p>
+                <h2 className="text-base font-medium text-text-primary">Context</h2>
+                <p className="text-sm text-text-secondary mt-1">Configure instructions, MCPs and resources for the AI agent in this project</p>
               </div>
               <Button onClick={handleSaveChanges} disabled={isSaving}>
                 {isSaving ? "Saving..." : "Save Changes"}
@@ -406,7 +406,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-text-tertiary mt-2">
+              <p className="text-sm text-text-tertiary mt-2">
                 {(session.project?.profile === "dev-general" || session.project?.profile === "dev-mcp")
                   ? "Required for development projects. The agent can read and write files in this directory."
                   : "Optional. Select a folder for the agent to access files."}
@@ -417,11 +417,11 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
             <div>
               <div className="mb-4 flex items-start justify-between">
                 <div>
-                  <h2 className="text-xs font-medium text-text-primary flex items-center gap-2">
-                    <Cube size={14} weight="regular" />
+                  <h2 className="text-base font-medium text-text-primary flex items-center gap-2">
+                    <Cube size={16} weight="regular" />
                     <span>MCPs</span>
                   </h2>
-                  <p className="text-xs text-text-secondary mt-1">Manage the MCP Servers that are available in this project</p>
+                  <p className="text-sm text-text-secondary mt-1">Manage the MCP Servers that are available in this project</p>
                 </div>
                 <Button variant="secondary" size="sm" onClick={handleOpenAddDialog}>
                   Add MCPs
@@ -437,9 +437,9 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
               {/* MCP List */}
               <div className="mb-4">
                 {isLoadingMcps ? (
-                  <p className="text-sm text-text-secondary">Loading MCPs...</p>
+                  <p className="text-base text-text-secondary">Loading MCPs...</p>
                 ) : mcpServers.length === 0 && mcpsToAdd.size === 0 ? (
-                  <p className="text-sm text-text-secondary">
+                  <p className="text-base text-text-secondary">
                     No MCPs configured.
                   </p>
                 ) : (
@@ -477,7 +477,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
                                 </TableCell>
                                 <TableCell className="w-[120px] text-right">
                                   <button
-                                    className="text-xs text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
+                                    className="text-sm text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
                                     onClick={() => {
                                       const newSet = new Set(mcpsToAdd);
                                       newSet.delete(mcpName);
@@ -529,7 +529,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
                                   <div className="flex items-center justify-end gap-2">
                                     {isMarkedForDeletion ? (
                                       <button
-                                        className="text-xs text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
+                                        className="text-sm text-text-secondary hover:text-text-primary transition-colors focus:outline-none"
                                         onClick={() => handleUndoMcpDeletion(mcp.name)}
                                         title="Undo"
                                       >
@@ -636,7 +636,7 @@ function AddMcpDialog({ availableBuiltinMcps, existingNames, onAddBuiltin, onAdd
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-4">
-          <h2 className="text-sm font-medium text-text-primary">Add MCPs</h2>
+          <h2 className="text-lg font-medium text-text-primary">Add MCPs</h2>
           <button
             className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"
             onClick={onClose}
@@ -649,7 +649,7 @@ function AddMcpDialog({ availableBuiltinMcps, existingNames, onAddBuiltin, onAdd
         <div className="flex gap-1 border-b border-border-secondary mb-6">
           <button
             className={cn(
-              "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+              "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
               activeTab === "mcps"
                 ? "text-text-primary border-ring-primary"
                 : "text-text-secondary border-transparent hover:text-text-primary"
@@ -660,7 +660,7 @@ function AddMcpDialog({ availableBuiltinMcps, existingNames, onAddBuiltin, onAdd
           </button>
           <button
             className={cn(
-              "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+              "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
               activeTab === "custom"
                 ? "text-text-primary border-ring-primary"
                 : "text-text-secondary border-transparent hover:text-text-primary"
@@ -708,7 +708,7 @@ interface BuiltinMcpListProps {
 function BuiltinMcpList({ mcps, onAdd }: BuiltinMcpListProps) {
   if (mcps.length === 0) {
     return (
-      <div className="text-center py-8 text-text-secondary text-xs">
+      <div className="text-center py-8 text-text-secondary text-base">
         All built-in MCPs are already in this project.
       </div>
     );
@@ -724,8 +724,8 @@ function BuiltinMcpList({ mcps, onAdd }: BuiltinMcpListProps) {
           <div className="flex items-center gap-3">
             <Cube size={16} className="text-ring-primary flex-shrink-0" />
             <div>
-              <div className="text-sm font-medium text-text-primary">{mcp.name}</div>
-              <div className="text-xs text-text-secondary">{mcp.description}</div>
+              <div className="text-base font-medium text-text-primary">{mcp.name}</div>
+              <div className="text-sm text-text-secondary">{mcp.description}</div>
             </div>
           </div>
           <Button variant="secondary" size="sm" onClick={() => onAdd(mcp.name)}>
@@ -836,7 +836,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
   return (
     <div>
       {error && (
-        <div className="border border-border-danger bg-background-danger/10 text-text-danger text-xs rounded-md p-3 mb-4">
+        <div className="border border-border-danger bg-background-danger/10 text-text-danger text-sm rounded-md p-3 mb-4">
           {error}
         </div>
       )}
@@ -856,7 +856,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
       <div className="mb-4">
         <Label>Transport</Label>
         <div className="flex gap-4">
-          <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="radio"
               name="transport-inline"
@@ -869,7 +869,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
               <span>HTTP</span>
             </span>
           </label>
-          <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="radio"
               name="transport-inline"
@@ -901,7 +901,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
             <Label>Headers</Label>
             <div className="max-h-[120px] overflow-y-auto border border-border-secondary rounded-md p-2">
               {headers.length === 0 ? (
-                <p className="text-xs text-text-tertiary py-2 text-center">No headers</p>
+                <p className="text-sm text-text-tertiary py-2 text-center">No headers</p>
               ) : (
                 headers.map((h, i) => (
                   <div key={i} className="flex gap-2 mb-2 last:mb-0">
@@ -931,7 +931,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
             </div>
             <button
               onClick={addHeader}
-              className="text-xs text-text-secondary hover:text-text-primary transition-colors mt-2"
+              className="text-sm text-text-secondary hover:text-text-primary transition-colors mt-2"
             >
               + Add header
             </button>
@@ -964,7 +964,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
             <Label>Environment Variables</Label>
             <div className="max-h-[120px] overflow-y-auto border border-border-secondary rounded-md p-2">
               {envVars.length === 0 ? (
-                <p className="text-xs text-text-tertiary py-2 text-center">No environment variables</p>
+                <p className="text-sm text-text-tertiary py-2 text-center">No environment variables</p>
               ) : (
                 envVars.map((v, i) => (
                   <div key={i} className="flex gap-2 mb-2 last:mb-0">
@@ -994,7 +994,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
             </div>
             <button
               onClick={addEnvVar}
-              className="text-xs text-text-secondary hover:text-text-primary transition-colors mt-2"
+              className="text-sm text-text-secondary hover:text-text-primary transition-colors mt-2"
             >
               + Add variable
             </button>
@@ -1129,7 +1129,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-4">
-          <h2 className="text-sm font-medium text-text-primary">Edit MCP</h2>
+          <h2 className="text-lg font-medium text-text-primary">Edit MCP</h2>
           <button
             className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"
             onClick={onCancel}
@@ -1161,7 +1161,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
           <div className="mb-4">
             <Label>Transport</Label>
             <div className="flex gap-4">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="radio"
                   name="transport-edit"
@@ -1174,7 +1174,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
                   <span>HTTP</span>
                 </span>
               </label>
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="radio"
                   name="transport-edit"
@@ -1206,7 +1206,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
                 <Label>Headers</Label>
                 <div className="max-h-[120px] overflow-y-auto border border-border-secondary rounded-md p-2">
                   {headers.length === 0 ? (
-                    <p className="text-xs text-text-tertiary py-2 text-center">No headers</p>
+                    <p className="text-sm text-text-tertiary py-2 text-center">No headers</p>
                   ) : (
                     headers.map((h, i) => (
                       <div key={i} className="flex gap-2 mb-2 last:mb-0">
@@ -1236,7 +1236,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
                 </div>
                 <button
                   onClick={addHeader}
-                  className="text-xs text-text-secondary hover:text-text-primary transition-colors mt-2"
+                  className="text-sm text-text-secondary hover:text-text-primary transition-colors mt-2"
                 >
                   + Add header
                 </button>
@@ -1269,7 +1269,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
                 <Label>Environment Variables</Label>
                 <div className="max-h-[120px] overflow-y-auto border border-border-secondary rounded-md p-2">
                   {envVars.length === 0 ? (
-                    <p className="text-xs text-text-tertiary py-2 text-center">No environment variables</p>
+                    <p className="text-sm text-text-tertiary py-2 text-center">No environment variables</p>
                   ) : (
                     envVars.map((v, i) => (
                       <div key={i} className="flex gap-2 mb-2 last:mb-0">
@@ -1299,7 +1299,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
                 </div>
                 <button
                   onClick={addEnvVar}
-                  className="text-xs text-text-secondary hover:text-text-primary transition-colors mt-2"
+                  className="text-sm text-text-secondary hover:text-text-primary transition-colors mt-2"
                 >
                   + Add variable
                 </button>

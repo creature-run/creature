@@ -1270,13 +1270,13 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
           env: { ...config.env, MCP_PORT: String(port) },
         };
       } else {
-        // Development: run from artifacts/mcp-apps/{name}/
+        // Development: run from src/electron/mcps/{name}/
         const workspaceRoot = findWorkspaceRoot();
         if (!workspaceRoot) {
           console.warn(`[MCP] Could not find workspace root for ${serverName}`);
           config = undefined;
         } else {
-          const mcpAppPath = path.join(workspaceRoot, "desktop", "artifacts", "mcp-apps", serverName);
+          const mcpAppPath = path.join(workspaceRoot, "desktop", "src", "electron", "mcps", serverName);
           if (!fs.existsSync(mcpAppPath)) {
             console.warn(`[MCP] App MCP not found at ${mcpAppPath}`);
             config = undefined;

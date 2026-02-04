@@ -172,10 +172,10 @@ export function ProjectList({
             style={{ animation: "divider-grow-left 0.3s ease-out 0.11s backwards" }}
           />
           <span
-            className="px-5 text-xs text-text-primary"
+            className="px-5 text-sm text-text-primary"
             style={{ animation: "fade-in 0.22s ease-out backwards" }}
           >
-            What are you building?
+            What Are You Building?
           </span>
           <div
             className="flex-1 border-t border-border-secondary origin-left"
@@ -193,7 +193,7 @@ export function ProjectList({
               <CardTitle className="mb-1 text-base">
                 <span className="text-[13px]">New MCP App</span>
               </CardTitle>
-              <CardDescription className="text-xs leading-relaxed">
+              <CardDescription className="text-sm leading-relaxed">
                 Build a visual AI tool from scratch.
               </CardDescription>
             </CardHeader>
@@ -209,7 +209,7 @@ export function ProjectList({
               <CardTitle className="mb-1 text-base">
                 <span className="text-[13px]">Existing Codebase</span>
               </CardTitle>
-              <CardDescription className="text-xs leading-relaxed">
+              <CardDescription className="text-sm leading-relaxed">
                 Code with help from MCP Apps.
               </CardDescription>
             </CardHeader>
@@ -225,7 +225,7 @@ export function ProjectList({
               <CardTitle className="mb-1 text-base">
                 <span className="text-[13px]">Playground</span>
               </CardTitle>
-              <CardDescription className="text-xs leading-relaxed">
+              <CardDescription className="text-sm leading-relaxed">
                 Do anything with MCP Apps.
               </CardDescription>
             </CardHeader>
@@ -239,7 +239,7 @@ export function ProjectList({
             style={{ animation: "divider-grow-left 0.3s ease-out 0.6s backwards" }}
           />
           <span
-            className="px-5 text-xs text-text-primary"
+            className="px-5 text-sm text-text-primary"
             style={{ animation: "fade-in 0.22s ease-out 0.5s backwards" }}
           >
             Existing Projects
@@ -251,7 +251,7 @@ export function ProjectList({
         </div>
 
         {/* Error message */}
-        {error && <div className="mb-4 text-text-danger text-xs">{error}</div>}
+        {error && <div className="mb-4 text-text-danger text-sm">{error}</div>}
 
         {/* Projects list - scrollable */}
         {projects.length > 0 && (
@@ -276,7 +276,7 @@ export function ProjectList({
                     className="flex-1 text-left px-2 py-2 min-w-0"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-sm text-text-primary truncate">
+                      <span className="text-base text-text-primary truncate">
                         {project.name}
                       </span>
                     </div>
@@ -351,7 +351,7 @@ export function ProjectList({
         {/* Empty state */}
         {projects.length === 0 && (
           <div
-            className="text-xs text-text-secondary pt-4 text-center"
+            className="text-base text-text-secondary pt-4 text-center"
             style={{ animation: "fade-in 0.3s ease-out 0.75s backwards" }}
           >
             No projects yet
