@@ -908,9 +908,8 @@ export function ChatInput({
       <div className="flex items-center justify-between px-5 py-2.5 border-t border-border-secondary">
         {/* Left side - Context icons */}
         <div className="flex items-center -ml-1.5">
-          {/* Folder icon - opens project settings (hidden for playground projects) */}
-          {project?.profile !== "playground" && (
-            <HoverCard openDelay={200}>
+          {/* Folder icon - opens project settings */}
+          <HoverCard openDelay={200}>
               <HoverCardTrigger asChild>
                 <button
                   type="button"
@@ -923,7 +922,7 @@ export function ChatInput({
                   onClick={() => setProjectSettingsOpen(true)}
                   disabled={!project}
                 >
-                  <Folder size={14} weight="regular" />
+                  <Folder size={18} weight="regular" />
                 </button>
               </HoverCardTrigger>
               <HoverCardContent side="top" align="start">
@@ -947,7 +946,6 @@ export function ChatInput({
                 )}
               </HoverCardContent>
             </HoverCard>
-          )}
           
           {/* FileText icon - opens project settings */}
           <HoverCard openDelay={200}>
@@ -963,7 +961,7 @@ export function ChatInput({
                 onClick={() => setProjectSettingsOpen(true)}
                 disabled={!project}
               >
-                <FileText size={14} weight="regular" />
+                <FileText size={18} weight="regular" />
               </button>
             </HoverCardTrigger>
             <HoverCardContent side="top" align="start">
@@ -978,7 +976,7 @@ export function ChatInput({
               ) : (
                 <div className="flex gap-3">
                   <FileText size={18} weight="regular" className="shrink-0 mt-0.5" />
-                  <div>
+                  <div className="text-sm">
                     Click to add custom instructions to your project for the agent to follow
                   </div>
                 </div>
@@ -988,7 +986,7 @@ export function ChatInput({
         </div>
 
         {/* Right side - Model and token stats */}
-        <div className="flex items-center gap-2 text-text-secondary text-[10px]">
+        <div className="flex items-center gap-2 text-text-secondary text-xs">
           <span>Sonnet 4.5</span>
           {tokenUsage && tokenUsage.totalTokens > 0 && (
             <>

@@ -194,7 +194,7 @@ export function ProjectList({
                 <span className="text-[13px]">New MCP App</span>
               </CardTitle>
               <CardDescription className="text-sm leading-relaxed">
-                Build a visual AI tool from scratch.
+                Build a new MCP App from scratch.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -281,7 +281,7 @@ export function ProjectList({
                       </span>
                     </div>
                     {showFolderPath && (
-                      <div className="flex items-center gap-1 text-[10px] text-text-secondary mt-0.5">
+                      <div className="flex items-center gap-1 text-xs text-text-secondary mt-0.5">
                         <span className="truncate">
                           {truncatePathLeft(
                             project.context.local_directory?.path || "",
@@ -301,7 +301,7 @@ export function ProjectList({
 
                   {/* Time and delete button */}
                   <div className="flex items-center gap-1 mr-1 shrink-0">
-                    <div className="flex items-center gap-1 text-[10px] text-text-secondary">
+                    <div className="flex items-center gap-1 text-xs text-text-secondary">
                       <Clock size={10} />
                       <span>
                         {formatRelativeTime(project.last_accessed_at)}
@@ -316,7 +316,7 @@ export function ProjectList({
                           className="p-1.5 rounded opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary hover:text-text-danger"
                           title="Delete project"
                         >
-                          <Trash size={12} />
+                          <Trash size={14} />
                         </button>
                       </AlertDialogTrigger>
                       <AlertDialogContent className="max-w-md">
