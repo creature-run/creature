@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useApp } from "../contexts/AppContext";
-import { X, ArrowClockwise, PencilSimple, Trash, Cube, FileText, Folder, Briefcase, Laptop, Globe, Plus } from "@phosphor-icons/react";
+import { X, ArrowClockwise, PencilSimple, Trash, Cube, FileText, Folder, Briefcase, Laptop, Globe, Plus, GitBranch } from "@phosphor-icons/react";
 import { Button } from "./Button";
 import { Input } from "./Input";
 import { Label } from "./Label";
@@ -25,6 +25,7 @@ interface HeaderVar {
 }
 
 type MCPTransportType = "stdio" | "streamable-http";
+type MCPSourceType = MCPTransportType | "git";
 
 /**
  * Built-in MCP definitions with descriptions.
@@ -37,6 +38,18 @@ const BUILTIN_MCPS = [
   { name: "ide", description: "Read and write files within the project directory" },
   { name: "terminal", description: "Execute terminal commands" },
 ];
+
+const formatGitDescription = (git: { url: string; ref?: string; subdir?: string }): string => {
+  let description = git.url;
+  if (git.ref) {
+    description += `@${git.ref}`;
+  }
+  if (git.subdir) {
+    const normalized = git.subdir.replace(/^\/+/, "");
+    description += `/${normalized}`;
+  }
+  return description;
+};
 
 /**
  * ViewProjectSettings Component
@@ -88,6 +101,21 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
     }
   }, [session.project]);
 
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.mcp.onStatus((data) => {
+      setMcpServers((prev) =>
+        prev.map((server) =>
+          server.name === data.name
+            ? { ...server, status: data.status, lastError: data.error }
+            : server
+        )
+      );
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   // Load MCPs on mount
   useEffect(() => {
     loadMcpServers();
@@ -120,7 +148,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
     setIsSaving(true);
     try {
       // Build the flat MCP list - all MCPs that should be active
-      const projectMcps: Array<{ name: string; transport?: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; cwd?: string; env?: Record<string, string>; enabled: boolean }> = [];
+      const projectMcps: Array<{ name: string; transport?: string; url?: string; headers?: Record<string, string>; git?: { url: string; ref?: string; subdir?: string }; command?: string; args?: string[]; cwd?: string; env?: Record<string, string>; enabled: boolean }> = [];
 
       // Add existing MCPs (not marked for deletion)
       for (const mcp of mcpServers) {
@@ -128,7 +156,14 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
 
         if (mcp.scope === "custom") {
           // Custom MCPs need full config
-          if (mcp.transport === "streamable-http") {
+          if (mcp.git?.url) {
+            projectMcps.push({
+              name: mcp.name,
+              transport: mcp.git.transport ?? "streamable-http",
+              git: mcp.git,
+              enabled: true,
+            });
+          } else if (mcp.transport === "streamable-http") {
             projectMcps.push({
               name: mcp.name,
               transport: mcp.transport,
@@ -495,12 +530,15 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
                           {/* Show existing MCPs */}
                           {mcpServers.map((mcp) => {
                             const isMarkedForDeletion = mcpsToDelete.has(mcp.name);
+                            const hasError = mcp.status === "error";
 
                             // Generate description based on MCP type
                             let description = "";
                             if (mcp.scope === "builtin") {
                               const builtinDef = BUILTIN_MCPS.find(b => b.name === mcp.name);
                               description = builtinDef?.description || "";
+                            } else if (mcp.git?.url) {
+                              description = formatGitDescription(mcp.git);
                             } else if (mcp.transport === "streamable-http" && mcp.url) {
                               description = mcp.url;
                             } else {
@@ -517,12 +555,22 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
                                 </TableCell>
                                 <TableCell className="text-text-secondary w-auto">
                                   <div className="break-words">{description}</div>
+                                  {hasError && (
+                                    <div className="text-[11px] text-text-danger mt-1 break-words">
+                                      Failed to start{mcp.lastError ? `: ${mcp.lastError}` : "."}
+                                    </div>
+                                  )}
                                 </TableCell>
                                 <TableCell className="w-[120px]">
                                   <div className="flex items-center gap-1">
                                     <span className="text-[9px] px-1.5 py-0.5 rounded border bg-background-tertiary border-border-primary text-text-secondary whitespace-nowrap">
                                       {mcp.scope === "builtin" ? "built-in" : mcp.scope === "development" ? "dev" : "custom"}
                                     </span>
+                                    {hasError && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded border border-border-danger text-text-danger bg-background-danger/10 whitespace-nowrap">
+                                        error
+                                      </span>
+                                    )}
                                   </div>
                                 </TableCell>
                                 <TableCell className="w-[120px] text-right">
@@ -749,10 +797,16 @@ interface CustomMcpFormInlineProps {
 
 function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormInlineProps) {
   const [name, setName] = useState("");
-  const [transport, setTransport] = useState<MCPTransportType>("streamable-http");
+  const [source, setSource] = useState<MCPSourceType>("streamable-http");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
+  const [gitUrl, setGitUrl] = useState("");
+  const [gitRef, setGitRef] = useState("");
+  const [gitSubdir, setGitSubdir] = useState("");
+  const [gitTransport, setGitTransport] = useState<MCPTransportType>("streamable-http");
+  const [gitSetupCommand, setGitSetupCommand] = useState("");
+  const [gitStartCommand, setGitStartCommand] = useState("");
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [headers, setHeaders] = useState<HeaderVar[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -768,13 +822,23 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
       return;
     }
 
-    if (transport === "stdio" && !command.trim()) {
+    if (source === "stdio" && !command.trim()) {
       setError("Command is required for Local transport");
       return;
     }
 
-    if (transport === "streamable-http" && !url.trim()) {
+    if (source === "streamable-http" && !url.trim()) {
       setError("URL is required for HTTP transport");
+      return;
+    }
+
+    if (source === "git" && !gitUrl.trim()) {
+      setError("Repo URL is required for Git source");
+      return;
+    }
+
+    if (source === "git" && gitTransport === "stdio" && !gitStartCommand.trim()) {
+      setError("Start command is required for stdio Git MCPs");
       return;
     }
 
@@ -794,14 +858,23 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
 
     const config: MCPServerConfigForRenderer = {
       name: name.trim(),
-      transport,
+      transport: source === "git" ? gitTransport : source,
       enabled: true,
       scope: "custom",
       command: "",
       args: [],
     };
 
-    if (transport === "stdio") {
+    if (source === "git") {
+      config.git = {
+        url: gitUrl.trim(),
+        ref: gitRef.trim() || undefined,
+        subdir: gitSubdir.trim() || undefined,
+        transport: gitTransport,
+        setupCommand: gitSetupCommand.trim() || undefined,
+        startCommand: gitStartCommand.trim() || undefined,
+      };
+    } else if (source === "stdio") {
       config.command = command.trim();
       config.args = args.trim() ? args.trim().split(/\s+/) : [];
       if (Object.keys(envObj).length > 0) {
@@ -852,16 +925,16 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
         />
       </div>
 
-      {/* Transport */}
+      {/* Source */}
       <div className="mb-4">
-        <Label>Transport</Label>
+        <Label>Source</Label>
         <div className="flex gap-4">
           <label className="flex items-center gap-2 text-xs cursor-pointer">
             <input
               type="radio"
-              name="transport-inline"
-              checked={transport === "streamable-http"}
-              onChange={() => setTransport("streamable-http")}
+              name="source-inline"
+              checked={source === "streamable-http"}
+              onChange={() => setSource("streamable-http")}
               className="cursor-pointer"
             />
             <span className="flex items-center gap-1">
@@ -872,21 +945,34 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
           <label className="flex items-center gap-2 text-xs cursor-pointer">
             <input
               type="radio"
-              name="transport-inline"
-              checked={transport === "stdio"}
-              onChange={() => setTransport("stdio")}
+              name="source-inline"
+              checked={source === "stdio"}
+              onChange={() => setSource("stdio")}
               className="cursor-pointer"
             />
             <span className="flex items-center gap-1">
               <Laptop size={14} />
-              <span>Local</span>
+              <span>Stdio</span>
+            </span>
+          </label>
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="radio"
+              name="source-inline"
+              checked={source === "git"}
+              onChange={() => setSource("git")}
+              className="cursor-pointer"
+            />
+            <span className="flex items-center gap-1">
+              <GitBranch size={14} />
+              <span>Git</span>
             </span>
           </label>
         </div>
       </div>
 
       {/* HTTP-specific fields */}
-      {transport === "streamable-http" && (
+      {source === "streamable-http" && (
         <>
           <div className="mb-4">
             <Label>URL</Label>
@@ -940,7 +1026,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
       )}
 
       {/* stdio-specific fields */}
-      {transport === "stdio" && (
+      {source === "stdio" && (
         <>
           <div className="mb-4">
             <Label>Command</Label>
@@ -1002,6 +1088,87 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
         </>
       )}
 
+      {source === "git" && (
+        <>
+          <div className="mb-4">
+            <Label>Transport</Label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="radio"
+                  name="git-transport-inline"
+                  checked={gitTransport === "streamable-http"}
+                  onChange={() => setGitTransport("streamable-http")}
+                  className="cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <Globe size={14} />
+                  <span>HTTP</span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="radio"
+                  name="git-transport-inline"
+                  checked={gitTransport === "stdio"}
+                  onChange={() => setGitTransport("stdio")}
+                  className="cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <Laptop size={14} />
+                  <span>Stdio</span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div className="mb-4">
+            <Label>Repo URL</Label>
+            <Input
+              type="text"
+              value={gitUrl}
+              onChange={(e) => setGitUrl(e.target.value)}
+              placeholder="https://github.com/org/repo.git"
+            />
+          </div>
+          <div className="mb-4">
+            <Label>Ref (optional)</Label>
+            <Input
+              type="text"
+              value={gitRef}
+              onChange={(e) => setGitRef(e.target.value)}
+              placeholder="main"
+            />
+          </div>
+          <div className="mb-4">
+            <Label>Subdir (optional)</Label>
+            <Input
+              type="text"
+              value={gitSubdir}
+              onChange={(e) => setGitSubdir(e.target.value)}
+              placeholder="packages/my-mcp"
+            />
+          </div>
+          <div className="mb-4">
+            <Label>Setup Command (optional)</Label>
+            <Input
+              type="text"
+              value={gitSetupCommand}
+              onChange={(e) => setGitSetupCommand(e.target.value)}
+              placeholder="npm install"
+            />
+          </div>
+          <div className="mb-4">
+            <Label>Start Command {gitTransport === "stdio" ? "(required)" : "(optional)"}</Label>
+            <Input
+              type="text"
+              value={gitStartCommand}
+              onChange={(e) => setGitStartCommand(e.target.value)}
+              placeholder="npm run dev"
+            />
+          </div>
+        </>
+      )}
+
       {/* Footer */}
       <div className="flex justify-end gap-2 pt-4">
         <Button variant="secondary" onClick={onCancel}>
@@ -1027,10 +1194,20 @@ interface CustomMcpFormProps {
 
 function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormProps) {
   const [name, setName] = useState(mcp.name);
-  const [transport, setTransport] = useState<MCPTransportType>(mcp.transport || "streamable-http");
+  const [source, setSource] = useState<MCPSourceType>(
+    mcp.git?.url ? "git" : mcp.transport || "streamable-http"
+  );
   const [command, setCommand] = useState(mcp.command || "");
   const [args, setArgs] = useState(mcp.args?.join(" ") || "");
   const [url, setUrl] = useState(mcp.url || "");
+  const [gitUrl, setGitUrl] = useState(mcp.git?.url || "");
+  const [gitRef, setGitRef] = useState(mcp.git?.ref || "");
+  const [gitSubdir, setGitSubdir] = useState(mcp.git?.subdir || "");
+  const [gitTransport, setGitTransport] = useState<MCPTransportType>(
+    mcp.git?.transport || "streamable-http"
+  );
+  const [gitSetupCommand, setGitSetupCommand] = useState(mcp.git?.setupCommand || "");
+  const [gitStartCommand, setGitStartCommand] = useState(mcp.git?.startCommand || "");
   const [envVars, setEnvVars] = useState<EnvVar[]>(
     Object.entries(mcp.env || {}).map(([key, value]) => ({ key, value }))
   );
@@ -1050,13 +1227,23 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
       return;
     }
 
-    if (transport === "stdio" && !command.trim()) {
+    if (source === "stdio" && !command.trim()) {
       setError("Command is required for Local transport");
       return;
     }
 
-    if (transport === "streamable-http" && !url.trim()) {
+    if (source === "streamable-http" && !url.trim()) {
       setError("URL is required for HTTP transport");
+      return;
+    }
+
+    if (source === "git" && !gitUrl.trim()) {
+      setError("Repo URL is required for Git source");
+      return;
+    }
+
+    if (source === "git" && gitTransport === "stdio" && !gitStartCommand.trim()) {
+      setError("Start command is required for stdio Git MCPs");
       return;
     }
 
@@ -1076,14 +1263,23 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
 
     const config: MCPServerConfigForRenderer = {
       name: name.trim(),
-      transport,
+      transport: source === "git" ? gitTransport : source,
       enabled: true,
       scope: "custom",
       command: "",
       args: [],
     };
 
-    if (transport === "stdio") {
+    if (source === "git") {
+      config.git = {
+        url: gitUrl.trim(),
+        ref: gitRef.trim() || undefined,
+        subdir: gitSubdir.trim() || undefined,
+        transport: gitTransport,
+        setupCommand: gitSetupCommand.trim() || undefined,
+        startCommand: gitStartCommand.trim() || undefined,
+      };
+    } else if (source === "stdio") {
       config.command = command.trim();
       config.args = args.trim() ? args.trim().split(/\s+/) : [];
       if (Object.keys(envObj).length > 0) {
@@ -1157,16 +1353,16 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
             />
           </div>
 
-          {/* Transport */}
+          {/* Source */}
           <div className="mb-4">
-            <Label>Transport</Label>
+            <Label>Source</Label>
             <div className="flex gap-4">
               <label className="flex items-center gap-2 text-xs cursor-pointer">
                 <input
                   type="radio"
-                  name="transport-edit"
-                  checked={transport === "streamable-http"}
-                  onChange={() => setTransport("streamable-http")}
+                  name="source-edit"
+                  checked={source === "streamable-http"}
+                  onChange={() => setSource("streamable-http")}
                   className="cursor-pointer"
                 />
                 <span className="flex items-center gap-1">
@@ -1177,21 +1373,34 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
               <label className="flex items-center gap-2 text-xs cursor-pointer">
                 <input
                   type="radio"
-                  name="transport-edit"
-                  checked={transport === "stdio"}
-                  onChange={() => setTransport("stdio")}
+                  name="source-edit"
+                  checked={source === "stdio"}
+                  onChange={() => setSource("stdio")}
                   className="cursor-pointer"
                 />
                 <span className="flex items-center gap-1">
                   <Laptop size={14} />
-                  <span>Local</span>
+                  <span>Stdio</span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="radio"
+                  name="source-edit"
+                  checked={source === "git"}
+                  onChange={() => setSource("git")}
+                  className="cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <GitBranch size={14} />
+                  <span>Git</span>
                 </span>
               </label>
             </div>
           </div>
 
           {/* HTTP-specific fields */}
-          {transport === "streamable-http" && (
+          {source === "streamable-http" && (
             <>
               <div className="mb-4">
                 <Label>URL</Label>
@@ -1245,7 +1454,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
           )}
 
           {/* stdio-specific fields */}
-          {transport === "stdio" && (
+          {source === "stdio" && (
             <>
               <div className="mb-4">
                 <Label>Command</Label>
@@ -1303,6 +1512,87 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
                 >
                   + Add variable
                 </button>
+              </div>
+            </>
+          )}
+
+          {source === "git" && (
+            <>
+              <div className="mb-4">
+                <Label>Transport</Label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="radio"
+                      name="git-transport-edit"
+                      checked={gitTransport === "streamable-http"}
+                      onChange={() => setGitTransport("streamable-http")}
+                      className="cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1">
+                      <Globe size={14} />
+                      <span>HTTP</span>
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="radio"
+                      name="git-transport-edit"
+                      checked={gitTransport === "stdio"}
+                      onChange={() => setGitTransport("stdio")}
+                      className="cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1">
+                      <Laptop size={14} />
+                      <span>Stdio</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+              <div className="mb-4">
+                <Label>Repo URL</Label>
+                <Input
+                  type="text"
+                  value={gitUrl}
+                  onChange={(e) => setGitUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo.git"
+                />
+              </div>
+              <div className="mb-4">
+                <Label>Ref (optional)</Label>
+                <Input
+                  type="text"
+                  value={gitRef}
+                  onChange={(e) => setGitRef(e.target.value)}
+                  placeholder="main"
+                />
+              </div>
+              <div className="mb-4">
+                <Label>Subdir (optional)</Label>
+                <Input
+                  type="text"
+                  value={gitSubdir}
+                  onChange={(e) => setGitSubdir(e.target.value)}
+                  placeholder="packages/my-mcp"
+                />
+              </div>
+              <div className="mb-4">
+                <Label>Setup Command (optional)</Label>
+                <Input
+                  type="text"
+                  value={gitSetupCommand}
+                  onChange={(e) => setGitSetupCommand(e.target.value)}
+                  placeholder="npm install"
+                />
+              </div>
+              <div className="mb-4">
+                <Label>Start Command {gitTransport === "stdio" ? "(required)" : "(optional)"}</Label>
+                <Input
+                  type="text"
+                  value={gitStartCommand}
+                  onChange={(e) => setGitStartCommand(e.target.value)}
+                  placeholder="npm run dev"
+                />
               </div>
             </>
           )}
