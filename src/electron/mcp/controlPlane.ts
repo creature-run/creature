@@ -107,6 +107,19 @@ export interface PipInstance {
 const pipInstances = new Map<string, PipInstance>();
 
 /**
+ * Tracks in-flight pip creation for single-instance resources.
+ * Prevents duplicate pips when concurrent tool calls target the same resource.
+ *
+ * Key: "serverName:resourceUri"
+ * Value: The instanceId being created by the first call
+ *
+ * Set before the tool call executes, cleared after createPipInstance completes.
+ * Concurrent calls find the reservation and reuse the instanceId instead of
+ * generating a new one, so only one pip is ever created per resource.
+ */
+const pendingSingleModePips = new Map<string, string>();
+
+/**
  * Event emitted when a new Pip Instance is created.
  * Used to inject into the agent's conversation history so it knows about new pips.
  */
@@ -400,19 +413,37 @@ export const markPipReady = (instanceId: string): boolean => {
 
 /**
  * Wait for a Pip Instance to be ready.
- * Times out after 10 seconds.
+ *
+ * If the pip doesn't exist yet in the registry, polls briefly for it to
+ * appear. This handles the race where a concurrent tool call is still
+ * creating the pip (see pendingSingleModePips). Once the pip exists,
+ * waits for its readyPromise to resolve (renderer sends pip:ready).
+ *
+ * Times out after 15 seconds total (appearance + ready).
  */
 const waitForPipReady = async (instanceId: string): Promise<void> => {
-  const pip = pipInstances.get(instanceId);
+  let pip = pipInstances.get(instanceId);
+
+  // Pip may not exist yet if a concurrent call is still creating it.
+  // Poll briefly for it to appear before throwing.
   if (!pip) {
-    throw new Error(`Pip not found: ${instanceId}`);
+    const MAX_APPEAR_WAIT = 15000;
+    const POLL_MS = 50;
+    const start = Date.now();
+    while (!pip && Date.now() - start < MAX_APPEAR_WAIT) {
+      await new Promise(r => setTimeout(r, POLL_MS));
+      pip = pipInstances.get(instanceId);
+    }
+    if (!pip) {
+      throw new Error(`Pip not found: ${instanceId}`);
+    }
   }
 
   if (pip.ready) {
     return;
   }
 
-  const TIMEOUT = 10000;
+  const TIMEOUT = 15000;
   let timeoutId: ReturnType<typeof setTimeout>;
   let resolved = false;
   
@@ -1045,6 +1076,32 @@ export const handleToolCall = async ({
     }
   }
 
+  // Guard against duplicate pips for single-instance resources.
+  // When parallel tool calls all resolve to "create new pip", only the first
+  // one should actually create it. Subsequent calls reuse the in-flight instanceId.
+  let ownsPendingReservation = false;
+
+  if (isNewPip && shouldManagePip && resourceUri && targetInstanceId) {
+    const resourceMeta = getResourceMetadata({ serverName, uri: resourceUri });
+    const instanceMode = resourceMeta?.instanceMode ?? "single";
+
+    if (instanceMode === "single") {
+      const key = `${serverName}:${resourceUri}`;
+      const pendingId = pendingSingleModePips.get(key);
+
+      if (pendingId) {
+        // Another call is already creating a pip for this resource — piggyback
+        targetInstanceId = pendingId;
+        isNewPip = false;
+        isReusingReadyPip = false;
+      } else {
+        // First concurrent call — claim the reservation
+        pendingSingleModePips.set(key, targetInstanceId);
+        ownsPendingReservation = true;
+      }
+    }
+  }
+
   // Execute tool on MCP server with instanceId in args
   // SPECIAL HANDLING: Browser MCP tools are executed by the Host
   let result: unknown;
@@ -1078,14 +1135,23 @@ export const handleToolCall = async ({
   });
 
   // Create pip if needed (for new instanceIds)
-  if (shouldManagePip && resourceUri && targetInstanceId && isNewPip) {
-    await createPipInstance({
-      resourceUri,
-      serverName,
-      toolName,
-      instanceId: targetInstanceId,
-      creatureAuth: toolDef?.creatureAuth,
-    });
+  try {
+    if (shouldManagePip && resourceUri && targetInstanceId && isNewPip) {
+      await createPipInstance({
+        resourceUri,
+        serverName,
+        toolName,
+        instanceId: targetInstanceId,
+        creatureAuth: toolDef?.creatureAuth,
+      });
+    }
+  } finally {
+    // Release the single-mode reservation so future calls find the real pip
+    // in pipInstances. Must run even if createPipInstance throws, otherwise
+    // the stale reservation would block all future calls for this resource.
+    if (ownsPendingReservation && resourceUri) {
+      pendingSingleModePips.delete(`${serverName}:${resourceUri}`);
+    }
   }
 
   // Per MCP Apps spec, Host MUST send ui/notifications/tool-input after Guest's

@@ -271,8 +271,8 @@ app.tool(
         command,
         displayMode: mode,
       },
-      text: `Terminal started: ${command}`,
-      title: command,
+      text: `Terminal started: ${command || "shell"}`,
+      title: command || "Terminal",
     };
   }
 );
