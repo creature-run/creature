@@ -18,12 +18,13 @@ import { spawn, exec, type ChildProcess } from "node:child_process";
 import { injectCSP, type CspConfig } from "./csp";
 import { injectConsoleOverride } from "./consoleCapture";
 import { getMainWindow } from "../window/mainWindow";
-import { getExtendedPath, resolveBundledCommand } from "../utils/env";
+import { buildSpawnEnv, getExtendedPath, resolveBundledCommand } from "../utils/env";
 import { refreshPipsForMcp, closeAllPips } from "./controlPlane";
 import { logAggregator, type LogLevel } from "../logging";
 import { portManager } from "./portManager";
 import { findWorkspaceRoot } from "../utils/workspace";
 import { getMcpStorageDir } from "../storage/mcpStorageDir";
+import { getMcpRepoDir } from "../storage/mcpRepoDir";
 import { dispatchStorageMethod, isStorageMethod, STORAGE_METHODS } from "./storage";
 import * as telemetry from "../telemetry";
 import type { ResourceIcon } from "../../shared/types";
@@ -157,6 +158,10 @@ export interface MCPServerConfig {
    * Headers to include in streamable-http requests (e.g., Authorization).
    */
   headers?: Record<string, string>;
+  /**
+   * Git source metadata for cloning MCPs.
+   */
+  git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: MCPTransportType };
   path?: string;
   port?: number;
   portEnvVar?: string;
@@ -198,12 +203,18 @@ export interface MCPServerConfigForRenderer {
    * Headers for streamable-http transport (e.g., Authorization).
    */
   headers?: Record<string, string>;
+  /**
+   * Git source metadata for cloning MCPs.
+   */
+  git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: MCPTransportType };
   command: string;
   args: string[];
   cwd?: string;
   env?: Record<string, string>;
   enabled: boolean;
   scope?: MCPScope;
+  status?: "ok" | "error";
+  lastError?: string;
   /**
    * Registry package metadata for display/tracking.
    * Format: "package-name" or "package-name@version"
@@ -297,6 +308,16 @@ const connectionPromises = new Map<string, Promise<McpConnection>>();
 
 // Store user MCPs (registry + custom) from cloud project record
 let userMcpConfigs: MCPServerConfigForRenderer[] = [];
+
+const mcpStatusByName = new Map<string, { status: "ok" | "error"; error?: string; updatedAt: number }>();
+
+const setMcpStatus = (name: string, status: "ok" | "error", error?: string) => {
+  mcpStatusByName.set(name, { status, error, updatedAt: Date.now() });
+  const mainWindow = getMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("mcp:status", { name, status, error });
+  }
+};
 
 /**
  * Workspace root information for multi-root project support.
@@ -530,6 +551,9 @@ interface PackageJson {
   description?: string;
   version: string;
   creature?: CreatureConfig;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
 }
 
 
@@ -546,6 +570,354 @@ const parseRegistryRef = (ref: string): { name: string; version?: string } => {
     };
   }
   return { name: ref };
+};
+
+const readPackageJson = (dirPath: string): PackageJson | null => {
+  try {
+    const packageJsonPath = path.join(dirPath, "package.json");
+    if (!fs.existsSync(packageJsonPath)) {
+      return null;
+    }
+    const data = fs.readFileSync(packageJsonPath, "utf-8");
+    return JSON.parse(data) as PackageJson;
+  } catch {
+    return null;
+  }
+};
+
+const isMcpAppPackage = (pkg: PackageJson | null): boolean => {
+  if (!pkg) return false;
+  const deps = pkg.dependencies || {};
+  const devDeps = pkg.devDependencies || {};
+  return Boolean(
+    deps["open-mcp-app"] ||
+      devDeps["open-mcp-app"] ||
+      deps["@modelcontextprotocol/ext-apps"] ||
+      devDeps["@modelcontextprotocol/ext-apps"]
+  );
+};
+
+const splitCommandLine = (input: string): string[] => {
+  const result: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+  let escape = false;
+
+  for (const char of input.trim()) {
+    if (escape) {
+      current += char;
+      escape = false;
+      continue;
+    }
+
+    if (char === "\\" && quote !== "'") {
+      escape = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        result.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    result.push(current);
+  }
+
+  return result;
+};
+
+const parseCommandLine = (input: string): { command: string; args: string[] } => {
+  const parts = splitCommandLine(input);
+  if (parts.length === 0) {
+    throw new Error("Command is empty.");
+  }
+  return { command: parts[0], args: parts.slice(1) };
+};
+
+const runGitCommand = async ({
+  args,
+  cwd,
+}: {
+  args: string[];
+  cwd?: string;
+}): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("git", args, {
+      cwd,
+      env: buildSpawnEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+
+    proc.stderr?.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on("error", (err) => {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        reject(new Error("Git is not installed or not in PATH."));
+        return;
+      }
+      reject(err);
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const message = stderr.trim() || `Git command failed (exit code ${code ?? "unknown"})`;
+      reject(new Error(message));
+    });
+  });
+};
+
+const runSetupCommand = async ({
+  commandLine,
+  cwd,
+}: {
+  commandLine: string;
+  cwd: string;
+}): Promise<void> => {
+  const { command, args } = parseCommandLine(commandLine);
+  const resolved = resolveBundledCommand(command, args);
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(resolved.command, resolved.args, {
+      cwd,
+      env: buildSpawnEnv(),
+      shell: !resolved.useBundled,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+
+    proc.stdout?.on("data", (data) => {
+      console.log(`[MCP] setup: ${data}`);
+    });
+
+    proc.stderr?.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on("error", (err) => {
+      reject(err);
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const message = stderr.trim() || `Setup command failed (exit code ${code ?? "unknown"})`;
+      reject(new Error(message));
+    });
+  });
+};
+
+const runNpmInstall = async (cwd: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const resolved = resolveBundledCommand("npm", ["install"]);
+    const proc = spawn(resolved.command, resolved.args, {
+      cwd,
+      env: buildSpawnEnv({ npm_config_yes: "true" }),
+      shell: !resolved.useBundled,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+
+    proc.stdout?.on("data", (data) => {
+      console.log(`[MCP] npm install: ${data}`);
+    });
+
+    proc.stderr?.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on("error", (err) => {
+      reject(err);
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const message = stderr.trim() || `npm install failed (exit code ${code ?? "unknown"})`;
+      reject(new Error(message));
+    });
+  });
+};
+
+const ensureNodeModules = async (appDir: string): Promise<void> => {
+  const nodeModulesDir = path.join(appDir, "node_modules");
+  if (fs.existsSync(nodeModulesDir)) {
+    return;
+  }
+
+  const pkg = readPackageJson(appDir);
+  if (!pkg) {
+    throw new Error("package.json not found for MCP app.");
+  }
+
+  try {
+    await runNpmInstall(appDir);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to install dependencies: ${message}`);
+  }
+};
+
+const getGitSetupMarkerPath = (repoDir: string): string => {
+  return path.join(repoDir, ".creature", "git-setup.json");
+};
+
+const writeGitSetupMarker = (repoDir: string, command: string) => {
+  const markerPath = getGitSetupMarkerPath(repoDir);
+  const markerDir = path.dirname(markerPath);
+  if (!fs.existsSync(markerDir)) {
+    fs.mkdirSync(markerDir, { recursive: true });
+  }
+  fs.writeFileSync(markerPath, JSON.stringify({ setupCommand: command, completedAt: new Date().toISOString() }, null, 2));
+};
+
+const ensureGitRepo = async ({
+  repoDir,
+  url,
+  ref,
+}: {
+  repoDir: string;
+  url: string;
+  ref?: string;
+}): Promise<boolean> => {
+  const gitDir = path.join(repoDir, ".git");
+  if (fs.existsSync(repoDir)) {
+    if (fs.existsSync(gitDir)) {
+      return false;
+    }
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+
+  fs.mkdirSync(path.dirname(repoDir), { recursive: true });
+
+  const args = ["clone", "--depth", "1"];
+  if (ref) {
+    args.push("--branch", ref);
+  }
+  args.push(url, repoDir);
+
+  try {
+    await runGitCommand({ args });
+  } catch (error) {
+    if (fs.existsSync(repoDir)) {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to clone repo: ${message}`);
+  }
+
+  return true;
+};
+
+const findGitMcpAppDir = (repoDir: string, subdir?: string): string => {
+  const repoRoot = path.resolve(repoDir);
+
+  if (subdir) {
+    const resolved = path.resolve(repoRoot, subdir);
+    if (!resolved.startsWith(repoRoot + path.sep) && resolved !== repoRoot) {
+      throw new Error("Subdir is outside repo.");
+    }
+    const pkg = readPackageJson(resolved);
+    if (!pkg || !isMcpAppPackage(pkg)) {
+      throw new Error(`No MCP App found at subdir: ${subdir}`);
+    }
+    return resolved;
+  }
+
+  const matches: string[] = [];
+  const shouldSkipDir = (name: string) => {
+    return (
+      name.startsWith(".") ||
+      name === "node_modules" ||
+      name === "dist" ||
+      name === "build" ||
+      name === "out"
+    );
+  };
+
+  const scan = (dir: string, depth: number) => {
+    if (depth > 2) return;
+
+    const pkg = readPackageJson(dir);
+    if (pkg && isMcpAppPackage(pkg)) {
+      matches.push(dir);
+    }
+
+    if (depth === 2) return;
+
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (shouldSkipDir(entry.name)) continue;
+        scan(path.join(dir, entry.name), depth + 1);
+      }
+    } catch {
+      return;
+    }
+  };
+
+  scan(repoRoot, 0);
+
+  if (matches.length === 0) {
+    throw new Error("No MCP App found; set subdir.");
+  }
+  if (matches.length > 1) {
+    throw new Error("Multiple MCP Apps found; set subdir.");
+  }
+
+  return matches[0];
+};
+
+const detectGitMcpRunConfig = (appDir: string): { command: string; args: string[]; nodeEnv: string } => {
+  const pkg = readPackageJson(appDir);
+  if (!pkg || !isMcpAppPackage(pkg)) {
+    throw new Error("No MCP App found; set subdir.");
+  }
+
+  const scripts = pkg.scripts || {};
+  if (scripts.dev) {
+    return { command: "npm", args: ["run", "dev"], nodeEnv: "development" };
+  }
+  if (scripts.start) {
+    return { command: "npm", args: ["run", "start"], nodeEnv: "production" };
+  }
+
+  throw new Error("No runnable script found. Add a dev or start script in package.json.");
 };
 
 /**
@@ -789,6 +1161,7 @@ const userConfigToInternal = (config: MCPServerConfigForRenderer): MCPServerConf
     transport: config.transport,
     url: config.url,
     headers: config.headers,
+    git: config.git,
     command: config.command,
     args: config.args,
     cwd: config.cwd,
@@ -806,6 +1179,12 @@ const userConfigToInternal = (config: MCPServerConfigForRenderer): MCPServerConf
 export const getMcpServerConfigs = (): MCPServerConfigForRenderer[] => {
   const configs: MCPServerConfigForRenderer[] = [];
 
+  const withStatus = (config: MCPServerConfigForRenderer): MCPServerConfigForRenderer => {
+    const status = mcpStatusByName.get(config.name);
+    if (!status) return config;
+    return { ...config, status: status.status, lastError: status.error };
+  };
+
   // Development MCPs - one for each MCP app root
   // These take precedence and are detected from workspace
   const devMcpNames: Set<string> = new Set();
@@ -816,7 +1195,7 @@ export const getMcpServerConfigs = (): MCPServerConfigForRenderer[] => {
     if (mcpDef) {
       devMcpNames.add(mcpDef.name);
       const port = portManager.getAssigned({ serverName: mcpDef.name }) || 3000;
-      configs.push({
+      configs.push(withStatus({
         name: mcpDef.name,
         transport: "streamable-http",
         url: `http://localhost:${port}/mcp`,
@@ -825,14 +1204,14 @@ export const getMcpServerConfigs = (): MCPServerConfigForRenderer[] => {
         cwd: root.path,
         enabled: true,
         scope: "development" as MCPScope,
-      });
+      }));
     }
   }
 
   // Built-in MCPs that are in the project's MCP list
   for (const server of BUILTIN_MCP_SERVERS) {
     if (projectMcpNames.has(server.name) && !devMcpNames.has(server.name)) {
-      configs.push({
+      configs.push(withStatus({
         name: server.name,
         command: server.command || "",
         args: server.args || [],
@@ -840,7 +1219,7 @@ export const getMcpServerConfigs = (): MCPServerConfigForRenderer[] => {
         env: server.env,
         enabled: true,
         scope: "builtin" as MCPScope,
-      });
+      }));
     }
   }
 
@@ -848,7 +1227,7 @@ export const getMcpServerConfigs = (): MCPServerConfigForRenderer[] => {
   const customConfigs = userMcpConfigs
     .filter((c) => !devMcpNames.has(c.name))
     .filter((c) => !isBuiltinMcp(c.name))
-    .map((c) => ({
+    .map((c) => withStatus({
       ...c,
       scope: "custom" as MCPScope,
     }));
@@ -1373,56 +1752,120 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     throw new Error(`MCP server not found: ${serverName}`);
   }
 
-  // Determine transport type (default to stdio for backwards compatibility)
-  const transportType: MCPTransportType = config.transport ?? "stdio";
-
   // Wrap the rest in try-catch to ensure port cleanup on failure
   let transport: StdioClientTransport | StreamableHTTPClientTransport;
   let spawnedProcess: ChildProcess | undefined;
 
   try {
-  // Resolve registry reference first (if present) to determine transport type
-  let resolvedConfig: ResolvedDistributionConfig | null = null;
-  if (config.registryPackage && (!config.command || config.command === "")) {
-    resolvedConfig = await resolveRegistryPackage(config.registryPackage);
+    if (config.git?.url) {
+      if (!currentProjectId) {
+        throw new Error("Project ID is required for Git MCPs.");
+    }
+
+    const repoDir = getMcpRepoDir({ projectId: currentProjectId, serverName });
+    const wasCloned = await ensureGitRepo({ repoDir, url: config.git.url, ref: config.git.ref });
+    const appDir = findGitMcpAppDir(repoDir, config.git.subdir);
+    const setupCommand = config.git.setupCommand?.trim();
+    const startCommand = config.git.startCommand?.trim();
+    const gitTransport: MCPTransportType = config.git.transport ?? "streamable-http";
+
+    if (setupCommand) {
+      const markerPath = getGitSetupMarkerPath(repoDir);
+      if (!fs.existsSync(markerPath)) {
+        await runSetupCommand({ commandLine: setupCommand, cwd: appDir });
+        writeGitSetupMarker(repoDir, setupCommand);
+      }
+    } else if (wasCloned || !fs.existsSync(path.join(appDir, "node_modules"))) {
+      await ensureNodeModules(appDir);
+    }
+
+    let runCommand: string;
+    let runArgs: string[];
+    let nodeEnv: string | undefined;
+
+    if (startCommand) {
+      const parsed = parseCommandLine(startCommand);
+      runCommand = parsed.command;
+      runArgs = parsed.args;
+    } else {
+      if (gitTransport === "stdio") {
+        throw new Error("Start command is required for stdio Git MCPs.");
+      }
+      const detected = detectGitMcpRunConfig(appDir);
+      runCommand = detected.command;
+      runArgs = detected.args;
+      nodeEnv = detected.nodeEnv;
+    }
+
+    const env: Record<string, string> = {
+      ...config.env,
+      ...(nodeEnv ? { NODE_ENV: nodeEnv } : {}),
+    };
+
+    let url: string | undefined;
+    if (gitTransport === "streamable-http") {
+      const port = await portManager.allocate({ serverName });
+      portAllocated = true;
+      env.MCP_PORT = String(port);
+      url = `http://localhost:${port}/mcp`;
+    }
+
+    config = {
+      ...config,
+      transport: gitTransport,
+      command: runCommand,
+      args: runArgs,
+      cwd: appDir,
+      env,
+      url,
+    };
   }
 
-  // Determine actual transport type:
-  // - remote/cloud → streamable-http (connect to URL)
-  // - npm → stdio (run locally)
-  // - Otherwise use config.transport or default to stdio
-  const isRemoteOrCloud = resolvedConfig?.type === "remote" || resolvedConfig?.type === "cloud";
-  const actualTransportType: MCPTransportType = isRemoteOrCloud ? "streamable-http" : transportType;
+    // Determine transport type (default to stdio for backwards compatibility)
+    const transportType: MCPTransportType = config.transport ?? "stdio";
 
-  if (actualTransportType === "streamable-http") {
-    // For HTTP MCPs, either use resolved URL or spawn local process
-    if (isRemoteOrCloud && resolvedConfig) {
-      // Remote/cloud registry MCP - connect directly to URL
-      config = { ...config, url: resolvedConfig.url, transport: "streamable-http" };
-    } else if (config.command && config.cwd) {
-      // Local HTTP MCP - spawn the process first
-      spawnedProcess = await spawnHttpServerProcess(config, serverName);
-    }
-    transport = createStreamableHttpTransport(config);
-  } else {
-    // Stdio transport - resolve command/args from registry if needed
-    let command = config.command;
-    let args = config.args;
-
-    if (resolvedConfig?.type === "npm") {
-      command = resolvedConfig.command;
-      args = resolvedConfig.args;
+    // Resolve registry reference first (if present) to determine transport type
+    let resolvedConfig: ResolvedDistributionConfig | null = null;
+    if (config.registryPackage && (!config.command || config.command === "")) {
+      resolvedConfig = await resolveRegistryPackage(config.registryPackage);
     }
 
-    transport = await createStdioTransport(config, serverName, command, args);
+    // Determine actual transport type:
+    // - remote/cloud → streamable-http (connect to URL)
+    // - npm → stdio (run locally)
+    // - Otherwise use config.transport or default to stdio
+    const isRemoteOrCloud = resolvedConfig?.type === "remote" || resolvedConfig?.type === "cloud";
+    const actualTransportType: MCPTransportType = isRemoteOrCloud ? "streamable-http" : transportType;
+
+    if (actualTransportType === "streamable-http") {
+      // For HTTP MCPs, either use resolved URL or spawn local process
+      if (isRemoteOrCloud && resolvedConfig) {
+        // Remote/cloud registry MCP - connect directly to URL
+        config = { ...config, url: resolvedConfig.url, transport: "streamable-http" };
+      } else if (config.command && config.cwd) {
+        // Local HTTP MCP - spawn the process first
+        spawnedProcess = await spawnHttpServerProcess(config, serverName);
+      }
+      transport = createStreamableHttpTransport(config);
+    } else {
+      // Stdio transport - resolve command/args from registry if needed
+      let command = config.command;
+      let args = config.args;
+
+      if (resolvedConfig?.type === "npm") {
+        command = resolvedConfig.command;
+        args = resolvedConfig.args;
+      }
+
+      transport = await createStdioTransport(config, serverName, command, args);
       // Stdio transport also allocates a port for MCP_ASSIGNED_PORT
       portAllocated = true;
-  }
+    }
 
-  const client = new Client({
-    name: "creature",
-    version: "1.0.0",
-  });
+    const client = new Client({
+      name: "creature",
+      version: "1.0.0",
+    });
 
   // Set up MCP protocol logging notification handler.
   // Per MCP spec, servers can send notifications/message for structured logging.
@@ -1609,10 +2052,13 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   };
 
   connections.set(config.name, connection);
+  setMcpStatus(serverName, "ok");
 
   return connection;
   } catch (error) {
-    // Clean up on failure: release ports and kill spawned process
+    const message = error instanceof Error ? error.message : String(error);
+    setMcpStatus(serverName, "error", message);
+    // Clean up on failure: release port and kill spawned process
     if (portAllocated) {
       portManager.release({ serverName });
       portManager.release({ serverName: `${serverName}-hmr` });
@@ -1633,6 +2079,7 @@ interface ProjectMcpConfigInput {
   transport?: MCPTransportType;
   url?: string;
   headers?: Record<string, string>;
+  git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: MCPTransportType };
   registryPackage?: string;
   command?: string;
   args?: string[];
@@ -1684,6 +2131,7 @@ export const initMcpsForProject = async ({
       transport: m.transport,
       url: m.url,
       headers: m.headers,
+      git: m.git,
       command: m.command,
       args: m.args,
       cwd: m.cwd,
@@ -1747,6 +2195,7 @@ export const closeMcpsForProject = async (): Promise<void> => {
   userMcpConfigs = [];
   projectMcpNames = new Set();
   devMcpPathToName.clear();
+  mcpStatusByName.clear();
 };
 
 /**
@@ -1777,6 +2226,7 @@ export const restartMcp = async ({ name, config }: {
       transport: config.transport,
       url: config.url,
       headers: config.headers,
+      git: config.git,
       command: config.command,
       args: config.args,
       cwd: config.cwd,
@@ -1881,6 +2331,7 @@ export const disableMcp = async ({ name }: { name: string }): Promise<void> => {
   connectionPromises.delete(name);
 
   console.log(`[MCP] Disconnected from ${name}`);
+  mcpStatusByName.delete(name);
 
   // Notify renderer so sidebar can refresh UI resources
   const mainWindow = getMainWindow();
@@ -2555,4 +3006,3 @@ export const callTool = async ({
     throw error;
   }
 };
-

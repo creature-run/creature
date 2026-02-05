@@ -46,12 +46,15 @@ export interface MCPServerConfigForRenderer {
   transport?: "stdio" | "streamable-http";
   url?: string;
   headers?: Record<string, string>;
+  git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: "stdio" | "streamable-http" };
   command?: string;
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
   enabled?: boolean;
   scope?: "builtin" | "registry" | "custom" | "development";
+  status?: "ok" | "error";
+  lastError?: string;
 }
 
 /**
@@ -68,6 +71,7 @@ export interface ProjectMcpConfig {
   transport?: "stdio" | "streamable-http";
   url?: string;
   headers?: Record<string, string>;
+  git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: "stdio" | "streamable-http" };
   command?: string;
   args?: string[];
   cwd?: string;
@@ -323,6 +327,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       const handler = (_event: Electron.IpcRendererEvent, data: { name: string }) => callback(data);
       ipcRenderer.on("mcp:disabled", handler);
       return () => ipcRenderer.removeListener("mcp:disabled", handler);
+    },
+    onStatus: (callback: (data: { name: string; status: "ok" | "error"; error?: string }) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { name: string; status: "ok" | "error"; error?: string }) =>
+        callback(data);
+      ipcRenderer.on("mcp:status", handler);
+      return () => ipcRenderer.removeListener("mcp:status", handler);
     },
     /**
      * Get all UI resources from connected MCP servers.
@@ -853,6 +863,7 @@ declare global {
           transport?: "stdio" | "streamable-http";
           url?: string;
           headers?: Record<string, string>;
+          git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: "stdio" | "streamable-http" };
           command?: string;
           args?: string[];
           cwd?: string;
@@ -863,6 +874,7 @@ declare global {
         closeAll: () => Promise<{ success: boolean; error?: string }>;
         onRestarted: (callback: (data: { name: string }) => void) => () => void;
         onDisabled: (callback: (data: { name: string }) => void) => () => void;
+        onStatus: (callback: (data: { name: string; status: "ok" | "error"; error?: string }) => void) => () => void;
         getUIResources: () => Promise<Array<{ serverName: string; uri: string; name: string; icon?: ResourceIcon }>>;
         launchResourcePip: (serverName: string, resourceUri: string) => Promise<{
           success: boolean;

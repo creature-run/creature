@@ -22,6 +22,7 @@ export interface ProjectMcpConfig {
   transport?: "stdio" | "streamable-http";
   url?: string;
   headers?: Record<string, string>;
+  git?: { url: string; ref?: string; subdir?: string; setupCommand?: string; startCommand?: string; transport?: "stdio" | "streamable-http" };
   command?: string;
   args?: string[];
   cwd?: string;

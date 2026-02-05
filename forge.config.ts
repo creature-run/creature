@@ -11,6 +11,7 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import path from 'path';
 import fs from 'fs';
+import { getBuildIdentity } from './appIdentity';
 
 /**
  * Recursively remove all .bin directories and broken symlinks from node_modules.
@@ -287,6 +288,11 @@ const copyNativeDeps = (resourcesPath: string) => {
  * - linux/x64 -> linux/x64
  */
 const generateAppUpdateConfig = (resourcesPath: string) => {
+  if (buildIdentity.variant !== 'prod') {
+    console.log('[Forge] Skipping app-update.yml for non-prod build');
+    return;
+  }
+
   const platform = process.platform;
   const arch = process.arch;
   
@@ -294,7 +300,7 @@ const generateAppUpdateConfig = (resourcesPath: string) => {
   
   const appUpdateYml = `provider: generic
 url: ${updateUrl}
-updaterCacheDirName: Creature
+updaterCacheDirName: ${buildIdentity.updaterCacheDirName}
 `;
 
   const destPath = path.join(resourcesPath, 'app-update.yml');
@@ -311,6 +317,8 @@ const hasAppleCredentials = !!(
   process.env.APPLE_TEAM_ID
 );
 
+const buildIdentity = getBuildIdentity();
+
 if (hasAppleCredentials) {
   console.log('[Forge] Apple credentials detected - signing enabled');
 } else {
@@ -320,10 +328,10 @@ if (hasAppleCredentials) {
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    name: 'Creature',
-    executableName: 'Creature',
+    name: buildIdentity.packagerName,
+    executableName: buildIdentity.executableName,
     icon: path.join(__dirname, 'icons', 'icon'),
-    appBundleId: 'run.creature.desktop',
+    appBundleId: buildIdentity.bundleId,
     appCategoryType: 'public.app-category.developer-tools',
 
     // Note: app-update.yml is generated dynamically in packageAfterCopy hook
@@ -381,7 +389,7 @@ const config: ForgeConfig = {
   },
   makers: [
     new MakerSquirrel({
-      name: 'Creature',
+      name: buildIdentity.squirrelName,
       setupIcon: path.join(__dirname, 'icons', 'icon.ico'),
       iconUrl: 'https://www.creature.run/favicon.ico',
       // Windows code signing via Azure Trusted Signing (passed through from packagerConfig)
@@ -399,9 +407,9 @@ const config: ForgeConfig = {
     }),
     new MakerDeb({
       options: {
-        name: 'creature',
-        bin: 'Creature',
-        productName: 'Creature',
+        name: buildIdentity.linuxPackageName,
+        bin: buildIdentity.linuxBin,
+        productName: buildIdentity.appName,
         genericName: 'AI Development Environment',
         description: 'Desktop app for AI agents with rich, interactive components',
         categories: ['Development', 'Utility'],
@@ -410,9 +418,9 @@ const config: ForgeConfig = {
     }),
     new MakerRpm({
       options: {
-        name: 'creature',
-        bin: 'Creature',
-        productName: 'Creature',
+        name: buildIdentity.linuxPackageName,
+        bin: buildIdentity.linuxBin,
+        productName: buildIdentity.appName,
         genericName: 'AI Development Environment',
         description: 'Desktop app for AI agents with rich, interactive components',
         categories: ['Development', 'Utility'],
@@ -421,7 +429,7 @@ const config: ForgeConfig = {
     }),
     new MakerAppImage({
       options: {
-        bin: 'Creature',
+        bin: buildIdentity.linuxBin,
         categories: ['Development', 'Utility'],
         icon: path.join(__dirname, 'icons', 'icon.png'),
       },

@@ -91,11 +91,12 @@ export const createMainWindow = () => {
  */
 export const createAppMenu = () => {
   const isMac = process.platform === "darwin";
+  const appName = app.getName();
 
   // Set About panel options (macOS)
   if (isMac) {
     app.setAboutPanelOptions({
-      applicationName: "Creature",
+      applicationName: appName,
       applicationVersion: app.getVersion(),
       version: "",
       credits: "This is a beta release. Things may break.",
@@ -108,7 +109,7 @@ export const createAppMenu = () => {
     ...(isMac
       ? [
           {
-            label: "Creature",
+            label: appName,
             submenu: [
               { role: "about" as const },
               { type: "separator" as const },
@@ -244,4 +245,3 @@ export const setupDockIcon = () => {
     app.dock.setIcon(iconPath);
   }
 };
-

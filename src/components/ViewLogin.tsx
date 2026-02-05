@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Eye, EyeSlash, ArrowRight, CaretDown, Upload } from "@phosphor-icons/react";
 import { Button } from "./Button";
 import { Input } from "./Input";
@@ -50,6 +50,7 @@ const HELP_URLS: Record<ProviderType, string> = {
  * Supports Anthropic API, AWS Bedrock, and Google Vertex AI.
  */
 export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
+  const [appName, setAppName] = useState("Creature");
   const [providerType, setProviderType] = useState<ProviderType>("anthropic");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +77,19 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
   const { isDarkMode, toggleTheme } = useTheme();
 
   const selectedProvider = PROVIDERS.find((p) => p.type === providerType)!;
+
+  useEffect(() => {
+    window.electronAPI.settings
+      .get()
+      .then((settings) => {
+        if (settings?.branding?.appName) {
+          setAppName(settings.branding.appName);
+        }
+      })
+      .catch(() => {
+        // Ignore settings errors on startup
+      });
+  }, []);
 
   /**
    * Build credentials based on current provider and form state.
@@ -412,7 +426,7 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
           className="text-foreground text-4xl font-semibold select-none tracking-tight"
           style={{ fontFamily: "'Sora', sans-serif", animation: "fade-in 0.5s ease-out 0.2s backwards" }}
         >
-          Creature
+          {appName}
         </h1>
 
         {/* Beta notice */}

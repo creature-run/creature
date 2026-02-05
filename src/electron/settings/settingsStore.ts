@@ -9,6 +9,7 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { getRuntimeAppName } from "../utils/appIdentity";
 
 /**
  * Logo configuration for branding.
@@ -219,10 +220,10 @@ const STORAGE_VERSION = 1;
 /**
  * Default branding settings.
  */
-const DEFAULT_BRANDING: BrandingSettings = {
-  appName: "Creature",
+const getDefaultBranding = (): BrandingSettings => ({
+  appName: getRuntimeAppName(),
   logo: null,
-};
+});
 
 /**
  * Default dark mode theme.
@@ -473,10 +474,10 @@ const DEFAULT_THEME: ThemeSettings = {
 /**
  * Default settings.
  */
-const DEFAULT_SETTINGS: Settings = {
-  branding: DEFAULT_BRANDING,
+const getDefaultSettings = (): Settings => ({
+  branding: getDefaultBranding(),
   theme: DEFAULT_THEME,
-};
+});
 
 /**
  * Get the path to the settings storage file.
@@ -587,7 +588,7 @@ const mergePartialSettings = (base: Settings, partial: Partial<SettingsFile> | n
 export const getSettings = (): Settings => {
   const storage = loadStorage();
 
-  let settings = { ...DEFAULT_SETTINGS };
+  let settings = getDefaultSettings();
   settings = mergePartialSettings(settings, storage.enterprise);
   settings = mergePartialSettings(settings, storage.user);
 
