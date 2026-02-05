@@ -25,8 +25,8 @@ export interface ImageAttachment {
 
 export type SamplingApproval = {
   event: SamplingEvent;
-  onApprove: (params: { requestId: string; stage: "request" | "review"; editedText: string }) => void;
-  onReject: (params: { requestId: string; stage: "request" | "review" }) => void;
+  onApprove: (params: { requestId: string; stage: "request"; editedText: string }) => void;
+  onReject: (params: { requestId: string; stage: "request" }) => void;
 };
 
 interface SearchResult {
@@ -59,6 +59,10 @@ interface ProjectWithValidation {
     env?: Record<string, string>;
     enabled: boolean;
   }>;
+  sampling?: {
+    approvalMode: "per_request" | "allowlist" | "allow_all";
+    allowlist: string[];
+  };
   deleted_at?: string;
   created_at: string;
   updated_at: string;
@@ -111,13 +115,37 @@ export function ChatInput({
   onStop,
   tokenUsage,
   project,
-  onProjectUpdate,
   messageQueue = [],
   onRemoveFromQueue,
   onClearQueue,
   samplingApproval,
 }: ChatInputProps) {
   const { setProjectSettingsOpen } = useApp();
+
+  const ensureSamplingAllowlist = useCallback(
+    async (serverName: string) => {
+      if (!project) return;
+      const sampling = project.sampling ?? { approvalMode: "allowlist", allowlist: [] };
+      if (sampling.approvalMode !== "allowlist") return;
+      if (sampling.allowlist.includes(serverName)) return;
+      const nextAllowlist = Array.from(new Set([...sampling.allowlist, serverName]));
+      try {
+        const result = await window.electronAPI.project.update({
+          projectId: project.id,
+          sampling: {
+            approvalMode: sampling.approvalMode,
+            allowlist: nextAllowlist,
+          },
+        });
+        if (!result.success) {
+          console.warn("[Sampling] Allowlist update failed:", result.error || "unknown error");
+        }
+      } catch (error) {
+        console.error("[Sampling] Failed to update allowlist:", error);
+      }
+    },
+    [project]
+  );
   const [pendingFileRefs, setPendingFileRefs] = useState<FileReference[]>([]);
   const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -671,6 +699,7 @@ export function ChatInput({
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              void ensureSamplingAllowlist(event.serverName);
               onApprove({ requestId: event.requestId, stage: event.stage, editedText: samplingText });
             }}
             className="relative"

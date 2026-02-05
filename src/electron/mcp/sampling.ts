@@ -1,17 +1,16 @@
 import type {
   CreateMessageRequestParams,
   ModelPreferences,
-  SamplingMessageContentBlock,
   Tool,
   ToolChoice,
 } from "@modelcontextprotocol/sdk/types.js";
 import { getMainWindow } from "../window/mainWindow";
 
-export type SamplingStage = "request" | "review";
+export type SamplingStage = "request";
 
 export type SamplingRequestEvent = {
   requestId: string;
-  stage: "request";
+  stage: SamplingStage;
   serverName: string;
   modelId: string;
   systemPrompt?: string;
@@ -27,15 +26,7 @@ export type SamplingRequestEvent = {
   metadata?: Record<string, unknown>;
 };
 
-export type SamplingReviewEvent = {
-  requestId: string;
-  stage: "review";
-  serverName: string;
-  modelId: string;
-  content: SamplingMessageContentBlock[];
-};
-
-export type SamplingEvent = SamplingRequestEvent | SamplingReviewEvent;
+export type SamplingEvent = SamplingRequestEvent;
 
 export type SamplingResponse = {
   requestId: string;
@@ -43,7 +34,6 @@ export type SamplingResponse = {
   action: "approve" | "reject";
   editedSystemPrompt?: string;
   editedMessages?: CreateMessageRequestParams["messages"];
-  editedContent?: SamplingMessageContentBlock[];
   reason?: string;
 };
 

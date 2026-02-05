@@ -109,6 +109,11 @@ export interface ProjectContext {
   custom_instructions?: string;
 }
 
+export interface SamplingSettings {
+  approvalMode: "per_request" | "allowlist" | "allow_all";
+  allowlist: string[];
+}
+
 /**
  * Local project (no cloud fields).
  */
@@ -118,6 +123,7 @@ export interface Project {
   profile: ProjectProfile;
   context: ProjectContext;
   mcps: ProjectMcpConfig[];
+  sampling?: SamplingSettings;
   created_at: string;
   updated_at: string;
   last_accessed_at: string;
@@ -439,6 +445,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       profile: ProjectProfile;
       context?: ProjectContext;
       mcps?: ProjectMcpConfig[];
+      sampling?: SamplingSettings;
     }): Promise<{
       success: boolean;
       project?: Project;
@@ -454,6 +461,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       profile?: ProjectProfile;
       context?: ProjectContext;
       mcps?: ProjectMcpConfig[];
+      sampling?: SamplingSettings;
     }): Promise<{
       success: boolean;
       project?: ProjectWithValidation;
@@ -981,6 +989,7 @@ declare global {
           profile: ProjectProfile;
           context?: ProjectContext;
           mcps?: ProjectMcpConfig[];
+          sampling?: SamplingSettings;
         }) => Promise<{
           success: boolean;
           project?: Project;
@@ -992,6 +1001,7 @@ declare global {
           profile?: ProjectProfile;
           context?: ProjectContext;
           mcps?: ProjectMcpConfig[];
+          sampling?: SamplingSettings;
         }) => Promise<{
           success: boolean;
           project?: ProjectWithValidation;

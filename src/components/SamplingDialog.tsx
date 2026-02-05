@@ -9,11 +9,11 @@ import type {
 import { Button } from "./Button";
 import { Textarea } from "./Textarea";
 
-export type SamplingStage = "request" | "review";
+export type SamplingStage = "request";
 
 export type SamplingRequestEvent = {
   requestId: string;
-  stage: "request";
+  stage: SamplingStage;
   serverName: string;
   modelId: string;
   systemPrompt?: string;
@@ -29,15 +29,7 @@ export type SamplingRequestEvent = {
   metadata?: Record<string, unknown>;
 };
 
-export type SamplingReviewEvent = {
-  requestId: string;
-  stage: "review";
-  serverName: string;
-  modelId: string;
-  content: SamplingMessageContentBlock[];
-};
-
-export type SamplingEvent = SamplingRequestEvent | SamplingReviewEvent;
+export type SamplingEvent = SamplingRequestEvent;
 
 type SamplingDialogProps = {
   event: SamplingEvent;
@@ -46,7 +38,6 @@ type SamplingDialogProps = {
     stage: SamplingStage;
     editedSystemPrompt?: string;
     editedMessages?: CreateMessageRequestParams["messages"];
-    editedContent?: SamplingMessageContentBlock[];
   }) => void;
   onReject: (params: { requestId: string; stage: SamplingStage }) => void;
 };
@@ -56,27 +47,19 @@ type EditableSamplingMessage = Omit<CreateMessageRequestParams["messages"][numbe
 };
 
 export const SamplingDialog = ({ event, onApprove, onReject }: SamplingDialogProps) => {
-  const isRequest = event.stage === "request";
-
   const [systemPrompt, setSystemPrompt] = useState("");
   const [messages, setMessages] = useState<EditableSamplingMessage[]>([]);
-  const [content, setContent] = useState<SamplingMessageContentBlock[]>([]);
   const [editableText, setEditableText] = useState("");
 
   useEffect(() => {
-    if (isRequest) {
-      const req = event as SamplingRequestEvent;
-      setSystemPrompt(req.systemPrompt || "");
-      const normalized = req.messages.map((message) => ({
-        ...message,
-        content: Array.isArray(message.content) ? message.content : [message.content],
-      }));
-      setMessages(structuredClone(normalized));
-    } else {
-      const review = event as SamplingReviewEvent;
-      setContent(structuredClone(review.content));
-    }
-  }, [event, isRequest]);
+    const req = event as SamplingRequestEvent;
+    setSystemPrompt(req.systemPrompt || "");
+    const normalized = req.messages.map((message) => ({
+      ...message,
+      content: Array.isArray(message.content) ? message.content : [message.content],
+    }));
+    setMessages(structuredClone(normalized));
+  }, [event]);
 
   useEffect(() => {
     const { style } = document.body;
@@ -88,21 +71,14 @@ export const SamplingDialog = ({ event, onApprove, onReject }: SamplingDialogPro
   }, []);
 
   const editableSeed = useMemo(() => {
-    if (isRequest) {
-      const req = event as SamplingRequestEvent;
-      const textBlocks = req.messages
-        .flatMap((message) => (Array.isArray(message.content) ? message.content : [message.content]))
-        .filter((block) => block && typeof block === "object" && "type" in block && (block as { type?: string }).type === "text")
-        .map((block) => (block as { text?: string }).text)
-        .filter((text): text is string => typeof text === "string");
-      return textBlocks.join("\n\n");
-    }
-    const review = event as SamplingReviewEvent;
-    const textBlocks = review.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text);
+    const req = event as SamplingRequestEvent;
+    const textBlocks = req.messages
+      .flatMap((message) => (Array.isArray(message.content) ? message.content : [message.content]))
+      .filter((block) => block && typeof block === "object" && "type" in block && (block as { type?: string }).type === "text")
+      .map((block) => (block as { text?: string }).text)
+      .filter((text): text is string => typeof text === "string");
     return textBlocks.join("\n\n");
-  }, [event, isRequest]);
+  }, [event]);
 
   useEffect(() => {
     setEditableText(editableSeed);
@@ -126,36 +102,13 @@ export const SamplingDialog = ({ event, onApprove, onReject }: SamplingDialogPro
     });
   };
 
-  const applyTextToContent = (value: string) => {
-    let applied = false;
-    const nextContent = content.map((block) => {
-      if (!applied && block.type === "text") {
-        applied = true;
-        return { ...block, text: value };
-      }
-      return block;
-    });
-    if (!applied) {
-      nextContent.push({ type: "text", text: value });
-    }
-    return nextContent;
-  };
-
   const handleApprove = () => {
-    if (isRequest) {
-      onApprove({
-        requestId: event.requestId,
-        stage: event.stage,
-        editedSystemPrompt: systemPrompt,
-        editedMessages: applyTextToMessages(editableText),
-      });
-    } else {
-      onApprove({
-        requestId: event.requestId,
-        stage: event.stage,
-        editedContent: applyTextToContent(editableText),
-      });
-    }
+    onApprove({
+      requestId: event.requestId,
+      stage: event.stage,
+      editedSystemPrompt: systemPrompt,
+      editedMessages: applyTextToMessages(editableText),
+    });
   };
 
   const handleReject = () => {
@@ -175,7 +128,7 @@ export const SamplingDialog = ({ event, onApprove, onReject }: SamplingDialogPro
             value={editableText}
             onChange={(event) => setEditableText(event.target.value)}
             className="min-h-[120px] text-sm"
-            placeholder={isRequest ? "Edit the prompt before it runs..." : "Edit the response before it returns..."}
+            placeholder="Edit the prompt before it runs..."
           />
           <div className="flex items-center justify-end gap-3">
             <Button variant="secondary" onClick={handleReject}>

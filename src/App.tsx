@@ -13,7 +13,7 @@ import { useApp } from "./contexts/AppContext";
 import { Spinner } from "./components/Spinner";
 import { toast } from "sonner";
 import type { ProjectWithValidation } from "./electron/preload";
-import type { CreateMessageRequestParams, SamplingMessageContentBlock } from "@modelcontextprotocol/sdk/types.js";
+import type { CreateMessageRequestParams } from "@modelcontextprotocol/sdk/types.js";
 
 /** Duration of the pip slide animation in milliseconds */
 const PIP_ANIMATION_DURATION = 250;
@@ -75,39 +75,19 @@ function App() {
     []
   );
 
-  const applyTextToContent = useCallback((blocks: SamplingMessageContentBlock[], text: string) => {
-    let applied = false;
-    const next = blocks.map((block) => {
-      if (!applied && block.type === "text") {
-        applied = true;
-        return { ...block, text };
-      }
-      return block;
-    });
-    if (!applied) {
-      next.push({ type: "text", text });
-    }
-    return next;
-  }, []);
-
   const handleSamplingApprove = useCallback(
     async (payload: {
       requestId: string;
-      stage: "request" | "review";
+      stage: "request";
       editedSystemPrompt?: string;
       editedMessages?: CreateMessageRequestParams["messages"];
-      editedContent?: SamplingMessageContentBlock[];
       editedText?: string;
     }) => {
       let editedMessages = payload.editedMessages;
-      let editedContent = payload.editedContent;
 
       if (payload.editedText && activeSampling) {
         if (activeSampling.stage === "request" && "messages" in activeSampling) {
           editedMessages = applyTextToMessages(activeSampling.messages, payload.editedText);
-        }
-        if (activeSampling.stage === "review" && "content" in activeSampling) {
-          editedContent = applyTextToContent(activeSampling.content, payload.editedText);
         }
       }
 
@@ -117,14 +97,13 @@ function App() {
         action: "approve",
         editedSystemPrompt: payload.editedSystemPrompt,
         editedMessages,
-        editedContent,
       });
       setSamplingQueue((queue) => queue.slice(1));
     },
-    [activeSampling, applyTextToContent, applyTextToMessages]
+    [activeSampling, applyTextToMessages]
   );
 
-  const handleSamplingReject = useCallback(async (payload: { requestId: string; stage: "request" | "review" }) => {
+  const handleSamplingReject = useCallback(async (payload: { requestId: string; stage: "request" }) => {
     await window.electronAPI.sampling.respond({
       requestId: payload.requestId,
       stage: payload.stage,

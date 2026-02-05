@@ -30,6 +30,7 @@ import {
   type ProjectMcpConfig,
   type ProjectWithValidation,
 } from "../storage/projectStore";
+import type { SamplingSettings } from "../storage/projectSettings";
 
 // Re-export types for use by other modules
 export type { ProjectProfile, ProjectContext, ProjectMcpConfig, ProjectWithValidation };
@@ -198,6 +199,7 @@ interface CreateProjectRequest {
   profile: ProjectProfile;
   context?: ProjectContext;
   mcps?: ProjectMcpConfig[];
+  sampling?: SamplingSettings;
 }
 
 /**
@@ -208,6 +210,7 @@ interface UpdateProjectRequest {
   profile?: ProjectProfile;
   context?: ProjectContext;
   mcps?: ProjectMcpConfig[];
+  sampling?: SamplingSettings;
 }
 
 /**

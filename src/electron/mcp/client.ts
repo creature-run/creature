@@ -36,6 +36,7 @@ import { portManager } from "./portManager";
 import { findWorkspaceRoot } from "../utils/workspace";
 import { getMcpStorageDir } from "../storage/mcpStorageDir";
 import { getMcpRepoDir } from "../storage/mcpRepoDir";
+import { DEFAULT_SAMPLING_SETTINGS, readUserDataProjectConfig, type SamplingSettings } from "../storage/projectSettings";
 import { dispatchStorageMethod, isStorageMethod, STORAGE_METHODS } from "./storage";
 import { requestSamplingApproval } from "./sampling";
 import * as telemetry from "../telemetry";
@@ -653,6 +654,12 @@ let currentProjectId: string | null = null;
  * Used by storage helpers to scope per-project data.
  */
 export const getCurrentProjectId = (): string | null => currentProjectId;
+
+const getSamplingSettingsForProject = (): SamplingSettings => {
+  if (!currentProjectId) return DEFAULT_SAMPLING_SETTINGS;
+  const config = readUserDataProjectConfig(currentProjectId);
+  return config?.sampling ?? DEFAULT_SAMPLING_SETTINGS;
+};
 
 // Flag to prevent MCP re-initialization during shutdown
 // Set true when closing MCPs, false when initializing new project
@@ -2112,32 +2119,42 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     const { provider, modelId } = createProvider(credentials);
     const contextText = buildSamplingContextText(params.includeContext, serverName);
 
-    let approval;
-    try {
-      approval = await requestSamplingApproval({
-        requestId: randomUUID(),
-        stage: "request",
-        serverName,
-        modelId,
-        systemPrompt: params.systemPrompt,
-        includeContext: params.includeContext,
-        contextText,
-        messages: params.messages,
-        tools: params.tools,
-        toolChoice: params.toolChoice,
-        maxTokens: params.maxTokens,
-        temperature: params.temperature,
-        stopSequences: params.stopSequences,
-        modelPreferences: params.modelPreferences as ModelPreferences | undefined,
-        metadata: params.metadata as Record<string, unknown> | undefined,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Sampling request rejected";
-      throw new McpError(ErrorCode.InvalidRequest, message);
+    const samplingSettings = getSamplingSettingsForProject();
+    const isAllowlisted = samplingSettings.allowlist.includes(serverName);
+    const shouldRequestApproval =
+      samplingSettings.approvalMode === "per_request" ||
+      (samplingSettings.approvalMode === "allowlist" && !isAllowlisted);
+
+    let systemPrompt = params.systemPrompt;
+    let messages = params.messages;
+
+    if (shouldRequestApproval) {
+      try {
+        const approval = await requestSamplingApproval({
+          requestId: randomUUID(),
+          stage: "request",
+          serverName,
+          modelId,
+          systemPrompt: params.systemPrompt,
+          includeContext: params.includeContext,
+          contextText,
+          messages: params.messages,
+          tools: params.tools,
+          toolChoice: params.toolChoice,
+          maxTokens: params.maxTokens,
+          temperature: params.temperature,
+          stopSequences: params.stopSequences,
+          modelPreferences: params.modelPreferences as ModelPreferences | undefined,
+          metadata: params.metadata as Record<string, unknown> | undefined,
+        });
+        systemPrompt = approval.editedSystemPrompt ?? systemPrompt;
+        messages = approval.editedMessages ?? messages;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Sampling request rejected";
+        throw new McpError(ErrorCode.InvalidRequest, message);
+      }
     }
 
-    const systemPrompt = approval.editedSystemPrompt ?? params.systemPrompt;
-    const messages = approval.editedMessages ?? params.messages;
     const prompt = buildSamplingPrompt({ systemPrompt, contextText, messages });
 
     const tools = params.tools?.map(mapMcpToolToModelTool);
@@ -2158,23 +2175,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       providerOptions,
     });
 
-    const outputBlocks = modelContentToMcpBlocks(result.content);
-
-    let review;
-    try {
-      review = await requestSamplingApproval({
-        requestId: approval.requestId,
-        stage: "review",
-        serverName,
-        modelId,
-        content: outputBlocks,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Sampling response rejected";
-      throw new McpError(ErrorCode.InvalidRequest, message);
-    }
-
-    const finalBlocks = review.editedContent ?? outputBlocks;
+    const finalBlocks = modelContentToMcpBlocks(result.content);
     const stopReason = (() => {
       const unified = result.finishReason?.unified;
       if (!unified) return undefined;
