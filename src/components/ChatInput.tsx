@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { cn, truncatePathLeft } from "../lib/utils";
 import { Folder, FileText, PaperPlaneRight, Stop } from "@phosphor-icons/react";
 import { useApp } from "../contexts/AppContext";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./HoverCard";
 import { Button } from "./Button";
+import type { SamplingEvent } from "./SamplingDialog";
 
 export interface FileReference {
   id: string;
@@ -21,6 +22,12 @@ export interface ImageAttachment {
   uploading: boolean;
   error?: string;
 }
+
+export type SamplingApproval = {
+  event: SamplingEvent;
+  onApprove: (params: { requestId: string; stage: "request" | "review"; editedText: string }) => void;
+  onReject: (params: { requestId: string; stage: "request" | "review" }) => void;
+};
 
 interface SearchResult {
   path: string;
@@ -76,6 +83,7 @@ interface ChatInputProps {
   messageQueue?: string[];
   onRemoveFromQueue?: (index: number) => void;
   onClearQueue?: () => void;
+  samplingApproval?: SamplingApproval;
 }
 
 /**
@@ -107,12 +115,15 @@ export function ChatInput({
   messageQueue = [],
   onRemoveFromQueue,
   onClearQueue,
+  samplingApproval,
 }: ChatInputProps) {
   const { setProjectSettingsOpen } = useApp();
   const [pendingFileRefs, setPendingFileRefs] = useState<FileReference[]>([]);
   const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const isSampling = samplingApproval?.event != null;
+  const [samplingText, setSamplingText] = useState("");
 
   // @-mention state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -207,6 +218,29 @@ export function ChatInput({
     textarea.style.height = `${MIN_HEIGHT}px`;
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [inputRef]);
+
+  const samplingSeed = useMemo(() => {
+    if (!samplingApproval) return "";
+    const event = samplingApproval.event;
+    if (event.stage === "request") {
+      const textBlocks = event.messages
+        .flatMap((message) => (Array.isArray(message.content) ? message.content : [message.content]))
+        .filter((block) => block && typeof block === "object" && "type" in block && (block as { type?: string }).type === "text")
+        .map((block) => (block as { text?: string }).text)
+        .filter((text): text is string => typeof text === "string");
+      return textBlocks.join("\n\n");
+    }
+    const textBlocks = event.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text);
+    return textBlocks.join("\n\n");
+  }, [samplingApproval]);
+
+  useEffect(() => {
+    if (!isSampling) return;
+    setSamplingText(samplingSeed);
+    autoResize();
+  }, [isSampling, samplingSeed, autoResize]);
 
   // Detect @ mentions in input
   const handleInputChange = useCallback(
@@ -623,6 +657,77 @@ export function ChatInput({
     },
     [input, pendingFileRefs, imageAttachments, onSubmit, setInput]
   );
+
+  if (isSampling && samplingApproval) {
+    const { event, onApprove, onReject } = samplingApproval;
+    const placeholder =
+      event.stage === "request"
+        ? "Edit the prompt before it runs..."
+        : "Edit the response before it returns...";
+
+    return (
+      <div className="relative">
+        <div className="flex flex-col rounded-md relative bg-background-primary chat-input-container chat-input-container-focused">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              onApprove({ requestId: event.requestId, stage: event.stage, editedText: samplingText });
+            }}
+            className="relative"
+          >
+            <div className="absolute right-5 top-4 z-10 flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => onReject({ requestId: event.requestId, stage: event.stage })}
+                className="shrink-0 !h-7 !px-2 text-xs"
+              >
+                Reject
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!samplingText.trim()}
+                className="shrink-0 !h-7 !px-2 text-xs"
+              >
+                Approve
+              </Button>
+            </div>
+
+            <div
+              className="overflow-y-auto show-scrollbar input-row cursor-text"
+              style={{ maxHeight: `${MAX_HEIGHT}px` }}
+              onClick={(e) => {
+                if (e.target !== inputRef.current) {
+                  inputRef.current?.focus();
+                }
+              }}
+            >
+              <div className="px-5">
+                <textarea
+                  ref={inputRef}
+                  className="w-full py-4 pr-24 bg-transparent border-none outline-none text-text-primary font-inherit text-sm placeholder:text-text-secondary placeholder:text-[12px] resize-none overflow-hidden"
+                  style={{ minHeight: `${MIN_HEIGHT}px` }}
+                  value={samplingText}
+                  onChange={(event) => {
+                    setSamplingText(event.target.value);
+                    autoResize();
+                  }}
+                  placeholder={placeholder}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  rows={1}
+                />
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">

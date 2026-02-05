@@ -8,26 +8,48 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CreateMessageRequestSchema, ErrorCode, LoggingMessageNotificationSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  ContentBlock,
+  CreateMessageRequestParams,
+  ModelPreferences,
+  SamplingMessageContentBlock,
+  Tool,
+  ToolChoice,
+  ToolResultContent,
+  ToolUseContent,
+} from "@modelcontextprotocol/sdk/types.js";
 import { tool } from "ai";
 import { z } from "zod";
 import path from "node:path";
 import { app } from "electron";
 import fs from "node:fs";
 import { spawn, exec, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { injectCSP, type CspConfig } from "./csp";
 import { injectConsoleOverride } from "./consoleCapture";
 import { getMainWindow } from "../window/mainWindow";
 import { buildSpawnEnv, getExtendedPath, resolveBundledCommand } from "../utils/env";
-import { refreshPipsForMcp, closeAllPips } from "./controlPlane";
+import { closeAllPips, getPipInstances, refreshPipsForMcp } from "./controlPlane";
 import { logAggregator, type LogLevel } from "../logging";
 import { portManager } from "./portManager";
 import { findWorkspaceRoot } from "../utils/workspace";
 import { getMcpStorageDir } from "../storage/mcpStorageDir";
 import { getMcpRepoDir } from "../storage/mcpRepoDir";
 import { dispatchStorageMethod, isStorageMethod, STORAGE_METHODS } from "./storage";
+import { requestSamplingApproval } from "./sampling";
 import * as telemetry from "../telemetry";
 import type { ResourceIcon } from "../../shared/types";
+import { createProvider } from "../agent/provider";
+import { getCredentials } from "../ipc/auth.handlers";
+import type {
+  LanguageModelV3Content,
+  LanguageModelV3FunctionTool,
+  LanguageModelV3Prompt,
+  LanguageModelV3ToolChoice,
+  LanguageModelV3ToolResultOutput,
+  SharedV3ProviderOptions,
+} from "@ai-sdk/provider";
 
 // =============================================================================
 // Storage Request Schemas (for server→client RPC)
@@ -80,6 +102,31 @@ const StorageKvSearchRequestSchema = createStorageRequestSchema(
     query: z.string(),
     prefix: z.string().optional(),
     limit: z.number().optional(),
+  })
+);
+
+const StorageVectorUpsertRequestSchema = createStorageRequestSchema(
+  STORAGE_METHODS.VECTOR_UPSERT,
+  z.object({
+    key: z.string(),
+    text: z.string(),
+    metadata: z.unknown().optional(),
+  })
+);
+
+const StorageVectorSearchRequestSchema = createStorageRequestSchema(
+  STORAGE_METHODS.VECTOR_SEARCH,
+  z.object({
+    query: z.string(),
+    prefix: z.string().optional(),
+    limit: z.number().optional(),
+  })
+);
+
+const StorageVectorDeleteRequestSchema = createStorageRequestSchema(
+  STORAGE_METHODS.VECTOR_DELETE,
+  z.object({
+    key: z.string(),
   })
 );
 
@@ -304,11 +351,261 @@ interface McpConnection {
   sessionId?: string;
   /** Spawned process for HTTP-based MCPs that need local process management */
   spawnedProcess?: import("child_process").ChildProcess;
+  instructions?: string;
 }
 
 // Store MCP connections (keyed by server name)
 const connections = new Map<string, McpConnection>();
 const connectionPromises = new Map<string, Promise<McpConnection>>();
+
+const mapMcpToolToModelTool = (toolDef: Tool): LanguageModelV3FunctionTool => ({
+  type: "function",
+  name: toolDef.name,
+  description: toolDef.description,
+  parameters: toolDef.inputSchema as Record<string, unknown>,
+});
+
+const mapMcpToolChoice = (toolChoice?: ToolChoice): LanguageModelV3ToolChoice | undefined => {
+  if (!toolChoice?.mode) return undefined;
+  if (toolChoice.mode === "required") return { type: "required" };
+  if (toolChoice.mode === "none") return { type: "none" };
+  return { type: "auto" };
+};
+
+const normalizeFileData = (data: unknown): string => {
+  if (typeof data === "string") return data;
+  if (data instanceof URL) return data.toString();
+  if (data instanceof Uint8Array) {
+    return Buffer.from(data).toString("base64");
+  }
+  return JSON.stringify(data);
+};
+
+const toolResultToOutput = (toolResult: ToolResultContent): LanguageModelV3ToolResultOutput => {
+  const onlyText =
+    toolResult.content?.length === 1 &&
+    toolResult.content[0]?.type === "text" &&
+    typeof (toolResult.content[0] as { text?: string }).text === "string";
+  if (onlyText) {
+    return { type: "text", value: (toolResult.content[0] as { text: string }).text };
+  }
+  return {
+    type: "json",
+    value: {
+      content: toolResult.content,
+      structuredContent: toolResult.structuredContent,
+      isError: toolResult.isError,
+      _meta: toolResult._meta,
+    },
+  };
+};
+
+const buildSamplingPrompt = (params: {
+  systemPrompt?: string;
+  contextText?: string;
+  messages: CreateMessageRequestParams["messages"];
+}): LanguageModelV3Prompt => {
+  const prompt: LanguageModelV3Prompt = [];
+  if (params.systemPrompt) {
+    prompt.push({ role: "system", content: params.systemPrompt });
+  }
+  if (params.contextText) {
+    prompt.push({ role: "system", content: params.contextText });
+  }
+
+  const toolNameById = new Map<string, string>();
+
+  for (const message of params.messages) {
+    const role = message.role;
+    const contentBlocks = Array.isArray(message.content) ? message.content : [message.content];
+    let currentParts: LanguageModelV3Content[] = [];
+
+    const flush = () => {
+      if (currentParts.length > 0) {
+        prompt.push({ role, content: currentParts });
+        currentParts = [];
+      }
+    };
+
+    for (const block of contentBlocks) {
+      if (typeof block === "string") {
+        currentParts.push({ type: "text", text: block });
+        continue;
+      }
+      if (block.type === "tool_result") {
+        flush();
+        const toolResult = block as ToolResultContent;
+        const toolName = toolNameById.get(toolResult.toolUseId) || "tool";
+        prompt.push({
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: toolResult.toolUseId,
+              toolName,
+              output: toolResultToOutput(toolResult),
+            },
+          ],
+        });
+        continue;
+      }
+
+      if (block.type === "text") {
+        currentParts.push({ type: "text", text: block.text });
+        continue;
+      }
+
+      if (block.type === "image" || block.type === "audio") {
+        currentParts.push({
+          type: "file",
+          data: block.data,
+          mediaType: block.mimeType,
+        });
+        continue;
+      }
+
+      if (block.type === "tool_use") {
+        const toolUse = block as ToolUseContent;
+        toolNameById.set(toolUse.id, toolUse.name);
+        if (role !== "assistant") {
+          currentParts.push({ type: "text", text: JSON.stringify(block) });
+          continue;
+        }
+        currentParts.push({
+          type: "tool-call",
+          toolCallId: toolUse.id,
+          toolName: toolUse.name,
+          input: toolUse.input ?? {},
+        });
+        continue;
+      }
+
+      currentParts.push({ type: "text", text: JSON.stringify(block) });
+    }
+
+    flush();
+  }
+
+  return prompt;
+};
+
+const outputToToolResultContent = (toolCallId: string, output: LanguageModelV3ToolResultOutput): ToolResultContent => {
+  if (output.type === "text") {
+    return {
+      type: "tool_result",
+      toolUseId: toolCallId,
+      content: [{ type: "text", text: output.value }],
+    };
+  }
+
+  const value = output.value as unknown;
+  let content: ContentBlock[] | undefined;
+  let structuredContent: Record<string, unknown> | undefined;
+  let isError: boolean | undefined;
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const v = value as Record<string, unknown>;
+    if (Array.isArray(v.content)) {
+      content = v.content as ContentBlock[];
+    }
+    if (v.structuredContent && typeof v.structuredContent === "object") {
+      structuredContent = v.structuredContent as Record<string, unknown>;
+    }
+    if (typeof v.isError === "boolean") {
+      isError = v.isError;
+    }
+  }
+
+  if (!content) {
+    content = [{ type: "text", text: JSON.stringify(value) }];
+  }
+
+  return {
+    type: "tool_result",
+    toolUseId: toolCallId,
+    content,
+    structuredContent,
+    isError,
+  };
+};
+
+const modelContentToMcpBlocks = (content: LanguageModelV3Content[]): SamplingMessageContentBlock[] => {
+  const blocks: SamplingMessageContentBlock[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      blocks.push({ type: "text", text: part.text });
+      continue;
+    }
+    if (part.type === "tool-call") {
+      blocks.push({
+        type: "tool_use",
+        id: part.toolCallId,
+        name: part.toolName,
+        input: (part.input ?? {}) as Record<string, unknown>,
+      });
+      continue;
+    }
+    if (part.type === "file") {
+      const mediaType = part.mediaType || "application/octet-stream";
+      const data = normalizeFileData(part.data);
+      if (mediaType.startsWith("image/")) {
+        blocks.push({ type: "image", data, mimeType: mediaType });
+      } else if (mediaType.startsWith("audio/")) {
+        blocks.push({ type: "audio", data, mimeType: mediaType });
+      } else {
+        blocks.push({ type: "text", text: JSON.stringify({ mediaType, data }) });
+      }
+      continue;
+    }
+    if (part.type === "tool-result") {
+      blocks.push(outputToToolResultContent(part.toolCallId, part.output));
+      continue;
+    }
+  }
+  return blocks;
+};
+
+const collapseSamplingBlocks = (blocks: SamplingMessageContentBlock[]): SamplingMessageContentBlock => {
+  if (blocks.length === 1) {
+    return blocks[0];
+  }
+  const text = blocks
+    .map((block) => {
+      if (block.type === "text") return block.text;
+      if (block.type === "image") return `[image:${block.mimeType}]`;
+      if (block.type === "audio") return `[audio:${block.mimeType}]`;
+      if (block.type === "tool_use") return `[tool_use:${block.name}]`;
+      if (block.type === "tool_result") return `[tool_result:${block.toolUseId}]`;
+      return JSON.stringify(block);
+    })
+    .join("\n");
+  return { type: "text", text };
+};
+
+const buildSamplingContextText = (includeContext: "none" | "thisServer" | "allServers" | undefined, serverName: string): string | undefined => {
+  if (!includeContext || includeContext === "none") return undefined;
+  const targetServers = includeContext === "thisServer" ? [serverName] : Array.from(connections.keys());
+  const sections: string[] = [];
+  for (const name of targetServers) {
+    const conn = connections.get(name);
+    const instructions = conn?.instructions?.trim();
+    const pips = getPipInstances().filter((pip) => pip.serverName === name && pip.widgetState?.modelContent != null);
+    const widgetText = pips
+      .map((pip) => {
+        const content = pip.widgetState?.modelContent;
+        const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+        return `Pip ${pip.instanceId}:\n${text}`;
+      })
+      .join("\n\n");
+
+    if (!instructions && !widgetText) continue;
+    const sectionParts = [`Server: ${name}`];
+    if (instructions) sectionParts.push(`Instructions:\n${instructions}`);
+    if (widgetText) sectionParts.push(`Widget State:\n${widgetText}`);
+    sections.push(sectionParts.join("\n"));
+  }
+  return sections.length ? sections.join("\n\n") : undefined;
+};
 
 // Store user MCPs (registry + custom) from cloud project record
 let userMcpConfigs: MCPServerConfigForRenderer[] = [];
@@ -1728,10 +2025,20 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       portAllocated = true;
     }
 
-    const client = new Client({
-      name: "creature",
-      version: "1.0.0",
-    });
+    const client = new Client(
+      {
+        name: "creature",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          sampling: {
+            tools: {},
+            context: {},
+          },
+        },
+      }
+    );
 
   // Set up MCP protocol logging notification handler.
   // Per MCP spec, servers can send notifications/message for structured logging.
@@ -1780,12 +2087,121 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   client.setRequestHandler(StorageKvListRequestSchema, createStorageHandler(STORAGE_METHODS.KV_LIST));
   client.setRequestHandler(StorageKvListWithValuesRequestSchema, createStorageHandler(STORAGE_METHODS.KV_LIST_WITH_VALUES));
   client.setRequestHandler(StorageKvSearchRequestSchema, createStorageHandler(STORAGE_METHODS.KV_SEARCH));
+  client.setRequestHandler(StorageVectorUpsertRequestSchema, createStorageHandler(STORAGE_METHODS.VECTOR_UPSERT));
+  client.setRequestHandler(StorageVectorSearchRequestSchema, createStorageHandler(STORAGE_METHODS.VECTOR_SEARCH));
+  client.setRequestHandler(StorageVectorDeleteRequestSchema, createStorageHandler(STORAGE_METHODS.VECTOR_DELETE));
 
   // Register Blob storage handlers
   client.setRequestHandler(StorageBlobPutRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_PUT));
   client.setRequestHandler(StorageBlobGetRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_GET));
   client.setRequestHandler(StorageBlobDeleteRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_DELETE));
   client.setRequestHandler(StorageBlobListRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_LIST));
+
+  client.setRequestHandler(CreateMessageRequestSchema, async (request) => {
+    const params = request.params;
+
+    if (params.task) {
+      throw new McpError(ErrorCode.InvalidParams, "Task-based sampling is not supported");
+    }
+
+    const credentials = getCredentials();
+    if (!credentials) {
+      throw new McpError(ErrorCode.InternalError, "No credentials configured");
+    }
+
+    const { provider, modelId } = createProvider(credentials);
+    const contextText = buildSamplingContextText(params.includeContext, serverName);
+
+    let approval;
+    try {
+      approval = await requestSamplingApproval({
+        requestId: randomUUID(),
+        stage: "request",
+        serverName,
+        modelId,
+        systemPrompt: params.systemPrompt,
+        includeContext: params.includeContext,
+        contextText,
+        messages: params.messages,
+        tools: params.tools,
+        toolChoice: params.toolChoice,
+        maxTokens: params.maxTokens,
+        temperature: params.temperature,
+        stopSequences: params.stopSequences,
+        modelPreferences: params.modelPreferences as ModelPreferences | undefined,
+        metadata: params.metadata as Record<string, unknown> | undefined,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sampling request rejected";
+      throw new McpError(ErrorCode.InvalidRequest, message);
+    }
+
+    const systemPrompt = approval.editedSystemPrompt ?? params.systemPrompt;
+    const messages = approval.editedMessages ?? params.messages;
+    const prompt = buildSamplingPrompt({ systemPrompt, contextText, messages });
+
+    const tools = params.tools?.map(mapMcpToolToModelTool);
+    const toolChoice = mapMcpToolChoice(params.toolChoice);
+
+    const model = provider(modelId);
+    const providerOptions =
+      params.metadata && typeof params.metadata === "object"
+        ? (params.metadata as SharedV3ProviderOptions)
+        : undefined;
+    const result = await model.doGenerate({
+      prompt,
+      maxOutputTokens: params.maxTokens,
+      temperature: params.temperature,
+      stopSequences: params.stopSequences,
+      tools,
+      toolChoice,
+      providerOptions,
+    });
+
+    const outputBlocks = modelContentToMcpBlocks(result.content);
+
+    let review;
+    try {
+      review = await requestSamplingApproval({
+        requestId: approval.requestId,
+        stage: "review",
+        serverName,
+        modelId,
+        content: outputBlocks,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sampling response rejected";
+      throw new McpError(ErrorCode.InvalidRequest, message);
+    }
+
+    const finalBlocks = review.editedContent ?? outputBlocks;
+    const stopReason = (() => {
+      const unified = result.finishReason?.unified;
+      if (!unified) return undefined;
+      if (unified === "length") return "maxTokens";
+      if (unified === "tool-calls") return "toolUse";
+      if (unified === "stop") {
+        return params.stopSequences && params.stopSequences.length > 0 ? "stopSequence" : "endTurn";
+      }
+      return unified;
+    })();
+
+    if (params.tools || params.toolChoice) {
+      return {
+        model: modelId,
+        role: "assistant",
+        content: finalBlocks,
+        stopReason,
+      };
+    }
+
+    return {
+      model: modelId,
+      role: "assistant",
+      content: collapseSamplingBlocks(finalBlocks),
+      stopReason,
+    };
+  });
 
 
   // Connect with retry and exponential backoff.
@@ -1906,6 +2322,8 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   const toolNames = Array.from(tools.keys()).join(", ");
   console.log(`[MCP] Connected to ${serverName} (${tools.size} tools: ${toolNames})`);
 
+  const instructions = client.getInstructions();
+
   const connection: McpConnection = {
     client,
     transport,
@@ -1915,6 +2333,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     resourceCache: new Map(),
     sessionId,
     spawnedProcess,
+    instructions,
   };
 
   connections.set(config.name, connection);

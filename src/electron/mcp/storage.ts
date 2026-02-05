@@ -35,6 +35,13 @@ import {
   kvSearch,
   type KvSearchResult,
 } from "../storage/kvSqlite";
+import {
+  vectorUpsert,
+  vectorDelete,
+  vectorSearch,
+  type VectorSearchResult,
+} from "../storage/vectorSqlite";
+import { embedText } from "../embeddings/openai";
 
 // =============================================================================
 // Constants
@@ -57,6 +64,9 @@ export const STORAGE_METHODS = {
   KV_LIST: "creature/storage/kv/list",
   KV_LIST_WITH_VALUES: "creature/storage/kv/listWithValues",
   KV_SEARCH: "creature/storage/kv/search",
+  VECTOR_UPSERT: "creature/storage/vector/upsert",
+  VECTOR_SEARCH: "creature/storage/vector/search",
+  VECTOR_DELETE: "creature/storage/vector/delete",
   BLOB_PUT: "creature/storage/blob/put",
   BLOB_GET: "creature/storage/blob/get",
   BLOB_DELETE: "creature/storage/blob/delete",
@@ -92,6 +102,22 @@ const KvSearchSchema = z.object({
   query: z.string().min(1).max(1000),
   prefix: z.string().max(MAX_KEY_LENGTH).optional(),
   limit: z.number().int().min(1).max(100).optional(),
+});
+
+const VectorUpsertSchema = z.object({
+  key: z.string().max(MAX_KEY_LENGTH),
+  text: z.string().min(1).max(20000),
+  metadata: z.unknown().optional(),
+});
+
+const VectorSearchSchema = z.object({
+  query: z.string().min(1).max(20000),
+  prefix: z.string().max(MAX_KEY_LENGTH).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+const VectorDeleteSchema = z.object({
+  key: z.string().max(MAX_KEY_LENGTH),
 });
 
 const BlobPutSchema = z.object({
@@ -251,6 +277,44 @@ export const handleKvSearch = async (
     limit,
   });
   return { matches };
+};
+
+export const handleVectorUpsert = async (
+  serverName: string,
+  params: unknown
+): Promise<{ success: true }> => {
+  const { key, text, metadata } = VectorUpsertSchema.parse(params);
+  const sanitizedKey = sanitizeKey(key);
+  const storageDir = getStorageDirForServer(serverName);
+  const { embedding } = await embedText(text);
+  await vectorUpsert(storageDir, sanitizedKey, embedding, metadata);
+  return { success: true };
+};
+
+export const handleVectorSearch = async (
+  serverName: string,
+  params: unknown
+): Promise<{ matches: VectorSearchResult[] }> => {
+  const { query, prefix, limit } = VectorSearchSchema.parse(params);
+  const storageDir = getStorageDirForServer(serverName);
+  const sanitizedPrefix = prefix ? sanitizeKey(prefix) : undefined;
+  const { embedding } = await embedText(query);
+  const matches = await vectorSearch(storageDir, embedding, {
+    prefix: sanitizedPrefix,
+    limit,
+  });
+  return { matches };
+};
+
+export const handleVectorDelete = async (
+  serverName: string,
+  params: unknown
+): Promise<{ deleted: boolean }> => {
+  const { key } = VectorDeleteSchema.parse(params);
+  const sanitizedKey = sanitizeKey(key);
+  const storageDir = getStorageDirForServer(serverName);
+  const deleted = await vectorDelete(storageDir, sanitizedKey);
+  return { deleted };
 };
 
 // =============================================================================
@@ -419,6 +483,12 @@ export const dispatchStorageMethod = async (
       return handleKvListWithValues(serverName, params);
     case STORAGE_METHODS.KV_SEARCH:
       return handleKvSearch(serverName, params);
+    case STORAGE_METHODS.VECTOR_UPSERT:
+      return handleVectorUpsert(serverName, params);
+    case STORAGE_METHODS.VECTOR_SEARCH:
+      return handleVectorSearch(serverName, params);
+    case STORAGE_METHODS.VECTOR_DELETE:
+      return handleVectorDelete(serverName, params);
     case STORAGE_METHODS.BLOB_PUT:
       return handleBlobPut(serverName, params);
     case STORAGE_METHODS.BLOB_GET:
@@ -452,5 +522,11 @@ export const CREATURE_STORAGE_CAPABILITIES = {
     kvSearch: true,
     blobs: true,
     maxBlobBytes: MAX_BLOB_SIZE,
+    vector: {
+      enabled: true,
+      provider: "openai",
+      maxTextLength: 20000,
+      maxResults: 100,
+    },
   },
 };

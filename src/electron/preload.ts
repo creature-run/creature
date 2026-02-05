@@ -1,8 +1,17 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ResourceIcon, WidgetState } from "../shared/types";
 import type { ProviderCredentials, ProviderType } from "../shared/credentials";
+import type { SamplingEvent, SamplingResponse } from "./mcp/sampling";
+import type { EmbeddingsCredentials, EmbeddingsProviderType } from "../shared/embeddings";
 
-export type { ResourceIcon, WidgetState, ProviderCredentials, ProviderType };
+export type {
+  ResourceIcon,
+  WidgetState,
+  ProviderCredentials,
+  ProviderType,
+  EmbeddingsCredentials,
+  EmbeddingsProviderType,
+};
 
 export type LogLevel = "debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency";
 
@@ -39,6 +48,12 @@ export interface AuthState {
   providerType?: ProviderType;
   // Legacy compatibility
   hasApiKey: boolean;
+}
+
+export interface EmbeddingsState {
+  hasCredentials: boolean;
+  providerType?: EmbeddingsProviderType;
+  model?: string;
 }
 
 export interface MCPServerConfigForRenderer {
@@ -320,6 +335,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("auth:clearApiKey"),
   },
 
+  embeddings: {
+    getState: (): Promise<EmbeddingsState> => ipcRenderer.invoke("embeddings:getState"),
+    saveCredentials: (credentials: EmbeddingsCredentials): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("embeddings:saveCredentials", { credentials }),
+    clearCredentials: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("embeddings:clearCredentials"),
+  },
+
   // MCP server configuration
   mcp: {
     getConfigs: (): Promise<MCPServerConfigForRenderer[]> => ipcRenderer.invoke("mcp:getConfigs"),
@@ -376,6 +399,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       isExisting?: boolean;
       error?: string;
     }> => ipcRenderer.invoke("mcp:launchResourcePip", { serverName, resourceUri }),
+  },
+
+  sampling: {
+    onEvent: (callback: (event: SamplingEvent) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: SamplingEvent) => callback(data);
+      ipcRenderer.on("sampling:event", handler);
+      return () => ipcRenderer.removeListener("sampling:event", handler);
+    },
+    respond: (response: SamplingResponse): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("sampling:respond", response),
   },
 
   // Projects API
@@ -895,6 +928,11 @@ declare global {
         saveApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>;
         clearApiKey: () => Promise<{ success: boolean }>;
       };
+      embeddings: {
+        getState: () => Promise<EmbeddingsState>;
+        saveCredentials: (credentials: EmbeddingsCredentials) => Promise<{ success: boolean; error?: string }>;
+        clearCredentials: () => Promise<{ success: boolean; error?: string }>;
+      };
       mcp: {
         getConfigs: () => Promise<MCPServerConfigForRenderer[]>;
         createFromTemplate: (targetPath: string, name: string) => Promise<{ success: boolean; error?: string }>;
@@ -922,6 +960,10 @@ declare global {
           isExisting?: boolean;
           error?: string;
         }>;
+      };
+      sampling: {
+        onEvent: (callback: (event: SamplingEvent) => void) => () => void;
+        respond: (response: SamplingResponse) => Promise<{ success: boolean; error?: string }>;
       };
       project: {
         list: () => Promise<{
