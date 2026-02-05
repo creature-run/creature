@@ -25,7 +25,7 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         value={value}
         onChange={(e) => onValueChange?.(e.target.value)}
         className={cn(
-          "flex h-9 w-full items-center rounded-md border border-border-primary bg-background-primary px-3 py-2 text-xs text-text-primary transition-colors",
+          "flex h-[38px] w-full items-center rounded-md border border-border-primary bg-background-primary px-3 py-2 text-base text-text-primary transition-colors",
           "focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary",
           "disabled:cursor-not-allowed disabled:opacity-50",
           "appearance-none pr-9",

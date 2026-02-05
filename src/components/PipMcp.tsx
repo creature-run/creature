@@ -8,6 +8,7 @@ import {
 } from "../lib/appBridge";
 import { widgetStateStore } from "../lib/widgetStateStore";
 import type { McpUiTheme, McpUiDisplayMode } from "@modelcontextprotocol/ext-apps";
+import { Copy } from "@phosphor-icons/react";
 
 /** Minimal placeholder HTML to initialize iframe before injecting real content */
 const PLACEHOLDER_HTML = `<!DOCTYPE html><html><head></head><body></body></html>`;
@@ -17,6 +18,17 @@ interface PipMcpContentProps {
   pip: Pip;
   /** Theme colors for consistent styling */
   colors: ThemeColors;
+}
+
+interface UiRuntimeError {
+  name?: string;
+  message?: string;
+  stack?: string;
+  source?: string;
+  filename?: string;
+  lineno?: number;
+  colno?: number;
+  timestamp?: string;
 }
 
 /**
@@ -46,6 +58,7 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [initialized, setInitialized] = useState(false);
+  const [uiError, setUiError] = useState<UiRuntimeError | null>(null);
   const { isDarkMode, specStyleVariables } = useTheme();
   const { session, auth } = useApp();
 
@@ -81,6 +94,65 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
   const getTheme = useCallback((): McpUiTheme => {
     return isDarkMode ? "dark" : "light";
   }, [isDarkMode]);
+
+  /**
+   * Format a UI runtime error for logging and clipboard copy.
+   * Provides a consistent, readable error output for developers and debugging tools.
+   */
+  const formatUiError = useCallback(({ error }: { error: UiRuntimeError }): string => {
+    const headerParts = [
+      error.name || "Error",
+      error.message || "Unknown error",
+    ].filter(Boolean);
+    const header = headerParts.join(": ");
+    const location = error.filename
+      ? `${error.filename}${error.lineno ? `:${error.lineno}` : ""}${error.colno ? `:${error.colno}` : ""}`
+      : "";
+    const source = error.source ? `Source: ${error.source}` : "";
+    const timestamp = error.timestamp ? `Time: ${error.timestamp}` : "";
+    const stack = error.stack ? `\n${error.stack}` : "";
+    const extras = [location, source, timestamp].filter(Boolean).join("\n");
+    return [header, extras].filter(Boolean).join("\n") + stack;
+  }, []);
+
+  /**
+   * Handle UI error messages posted from the iframe.
+   * Captures runtime errors and forwards them to the Dev Console logs.
+   */
+  const handleUiErrorMessage = useCallback(
+    ({ event }: { event: MessageEvent }) => {
+      const iframe = iframeRef.current;
+      if (!iframe || event.source !== iframe.contentWindow) return;
+
+      const data = event.data as { method?: string; params?: UiRuntimeError } | null;
+      if (!data || data.method !== "ui/error") return;
+
+      const errorPayload = data.params || {};
+      setUiError(errorPayload);
+
+      window.electronAPI.logs.fromUI({
+        instanceId: pip.instanceId || "",
+        mcpServer: pip.mcpServer,
+        level: "error",
+        message: formatUiError({ error: errorPayload }),
+        timestamp: errorPayload.timestamp || new Date().toISOString(),
+      });
+    },
+    [formatUiError, pip.instanceId, pip.mcpServer]
+  );
+
+  /**
+   * Copy the latest UI error details to the clipboard for easy sharing.
+   */
+  const handleCopyUiError = useCallback(async () => {
+    if (!uiError) return;
+    const text = formatUiError({ error: uiError });
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Ignore clipboard failures to avoid blocking the UI error overlay
+    }
+  }, [formatUiError, uiError]);
 
   /**
    * Phase 1: Create AppBridge BEFORE loading real content.
@@ -226,6 +298,14 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
   }, [pip.htmlContent, pip.instanceId, pip.mcpServer, pip.refreshVersion, session.sessionId]);
 
   /**
+   * Reset UI error state when the pip refreshes or content changes.
+   * This avoids stale error overlays after a successful reload.
+   */
+  useEffect(() => {
+    setUiError(null);
+  }, [pip.htmlContent, pip.refreshVersion, pip.instanceId]);
+
+  /**
    * Phase 2: Inject real HTML content AFTER bridge is ready.
    * This ensures Host is listening before Guest sends ui/initialize.
    */
@@ -239,6 +319,18 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
     // Inject real content now that bridge is listening
     iframe.srcdoc = pip.htmlContent;
   }, [bridgeReady, pip.htmlContent, pip.instanceId]);
+
+  /**
+   * Listen for UI runtime errors posted from the iframe.
+   * These are captured by the injected console override script.
+   */
+  useEffect(() => {
+    const listener = (event: MessageEvent) => handleUiErrorMessage({ event });
+    window.addEventListener("message", listener);
+    return () => {
+      window.removeEventListener("message", listener);
+    };
+  }, [handleUiErrorMessage]);
 
   /**
    * Listen for tool-input notifications from main process.
@@ -419,7 +511,7 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
   const iframeKey = `${pip.instanceId}-v${pip.refreshVersion ?? 0}`;
 
   return (
-    <div ref={containerRef} className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full relative">
       <iframe
         key={iframeKey}
         ref={iframeRef}
@@ -430,6 +522,27 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
         title={pip.title}
         onLoad={handleIframeLoad}
       />
+      {uiError && (
+        <div
+          className="absolute inset-0 p-4 flex flex-col gap-3 overflow-auto"
+          style={{ backgroundColor: colors.backgroundPrimary, color: colors.textPrimary }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-medium">UI Error</div>
+            <button
+              type="button"
+              onClick={handleCopyUiError}
+              className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded-md border border-bdr-secondary text-txt-secondary hover:text-txt-primary"
+            >
+              <Copy size={14} weight="regular" />
+              Copy
+            </button>
+          </div>
+          <div className="text-sm text-txt-secondary whitespace-pre-wrap">
+            {formatUiError({ error: uiError })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

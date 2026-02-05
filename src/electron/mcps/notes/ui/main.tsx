@@ -1,0 +1,15 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./app";
+
+/**
+ * React Entry Point
+ *
+ * Mounts the Notes app into the DOM.
+ * This runs inside an iframe hosted by the MCP Apps host.
+ */
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);

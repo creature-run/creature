@@ -85,8 +85,8 @@ const copyMcpUIs = (resourcesPath: string) => {
   const distDir = path.join(__dirname, 'dist');
   const destDir = path.join(resourcesPath, 'mcp-uis');
 
-  // Copy all MCP UIs (browser, terminal, ide)
-  const mcpNames = ['browser', 'terminal', 'ide'];
+  // Copy all MCP UIs
+  const mcpNames = ['browser', 'terminal', 'ide', 'todos', 'notes', 'crm'];
   for (const name of mcpNames) {
     const srcPath = path.join(distDir, name, 'ui');
     const destPath = path.join(destDir, name, 'ui');
@@ -309,77 +309,6 @@ updaterCacheDirName: ${buildIdentity.updaterCacheDirName}
 };
 
 /**
- * Copy MCP app templates for users to create new MCPs.
- * Source files use published npm version of open-mcp-app.
- *
- * For built-in MCP apps (todos, notes), also copies dist/ and node_modules/
- * so they can run as built-in MCPs for work projects.
- */
-const copyMcpApps = (resourcesPath: string) => {
-  const mcpApps = ['todos', 'notes', 'crm'];
-  // Built-in MCP apps that should be runnable (not just templates)
-  const builtinMcpApps = ['todos', 'notes'];
-
-  for (const name of mcpApps) {
-    const srcDir = path.join(__dirname, 'artifacts', 'mcp-apps', name);
-    const destDir = path.join(resourcesPath, `mcp-${name}`);
-
-    if (!fs.existsSync(srcDir)) {
-      console.warn(`[Forge] Warning: ${name} MCP app not found at`, srcDir);
-      continue;
-    }
-
-    fs.mkdirSync(destDir, { recursive: true });
-
-    // Copy config files
-    const filesToCopy = ['package.json', 'tsconfig.json', 'tsconfig.server.json', 'vite.config.ts', 'README.md'];
-    for (const file of filesToCopy) {
-      const srcFile = path.join(srcDir, file);
-      if (fs.existsSync(srcFile)) {
-        fs.copyFileSync(srcFile, path.join(destDir, file));
-      }
-    }
-
-    // Copy src directory
-    const templateSrcDir = path.join(srcDir, 'src');
-    if (fs.existsSync(templateSrcDir)) {
-      fs.cpSync(templateSrcDir, path.join(destDir, 'src'), { recursive: true });
-    }
-
-    // For built-in MCP apps, also copy dist/ and node_modules/
-    // so they can run as built-in MCPs for work projects
-    if (builtinMcpApps.includes(name)) {
-      // Copy dist directory (built server code)
-      const distDir = path.join(srcDir, 'dist');
-      if (fs.existsSync(distDir)) {
-        fs.cpSync(distDir, path.join(destDir, 'dist'), { recursive: true });
-        console.log(`[Forge] Copied ${name} dist/ for built-in MCP support`);
-      } else {
-        console.warn(`[Forge] Warning: ${name} dist/ not found - run 'npm run build' in artifacts/mcp-apps/${name}`);
-      }
-
-      // Copy node_modules (runtime dependencies)
-      const nodeModulesDir = path.join(srcDir, 'node_modules');
-      if (fs.existsSync(nodeModulesDir)) {
-        const destNodeModules = path.join(destDir, 'node_modules');
-        fs.cpSync(nodeModulesDir, destNodeModules, { recursive: true });
-        
-        // Clean node_modules for macOS code signing
-        // Removes all .bin directories and broken/external symlinks recursively
-        console.log(`[Forge] Cleaning ${name} node_modules for code signing...`);
-        cleanNodeModulesForSigning(destNodeModules);
-        
-        console.log(`[Forge] Copied ${name} node_modules/ for built-in MCP support`);
-      } else {
-        console.warn(`[Forge] Warning: ${name} node_modules/ not found - run 'npm install' in artifacts/mcp-apps/${name}`);
-      }
-    }
-
-    console.log(`[Forge] Copied ${name} MCP app to resources`);
-  }
-};
-
-/**
  * Check if Apple signing credentials are available.
  */
 const hasAppleCredentials = !!(
@@ -441,9 +370,8 @@ const config: ForgeConfig = {
      * Copy MCP assets after packaging.
      * - Node wrapper script for npm postinstall scripts
      * - Bundled npm for self-contained app (no system Node/npm required)
-     * - MCP UIs (browser, terminal, ide) as single-file HTML
+     * - MCP UIs (browser, terminal, ide, todos, notes, crm) as single-file HTML
      * - Native dependencies (@vscode/ripgrep)
-     * - MCP app templates for users to create new MCPs
      * - Generate platform-specific app-update.yml for auto-updater
      */
     packageAfterCopy: async (_config, buildPath) => {
@@ -454,7 +382,6 @@ const config: ForgeConfig = {
       copyBundledNpm(resourcesPath);
       copyMcpUIs(resourcesPath);
       copyNativeDeps(resourcesPath);
-      copyMcpApps(resourcesPath);
       generateAppUpdateConfig(resourcesPath);
       
       console.log('[Forge] MCP assets copied successfully');
@@ -538,6 +465,21 @@ const config: ForgeConfig = {
         },
         {
           entry: 'src/electron/mcps/browser/browser-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/mcps/todos/todos-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/mcps/notes/notes-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/mcps/crm/crm-server.ts',
           config: 'vite.main.config.mts',
           target: 'main',
         },

@@ -1,0 +1,439 @@
+/**
+ * MCP Notes Styles
+ *
+ * Minimal styles for elements that can't be styled with Tailwind classes.
+ * Primarily Milkdown editor theming and animations.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Spin animation for loading spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* =============================================================================
+   Note Title Input (needs custom styling)
+============================================================================= */
+
+.note-title {
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+/* =============================================================================
+   Editor Container
+============================================================================= */
+
+/* milkdown-wrapper base styles now in Tailwind classes on the component */
+
+/* Constrain content width for readability */
+.note-editor-container .milkdown-wrapper > .milkdown {
+  max-width: var(--container-prose);
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* =============================================================================
+   Milkdown Editor Theme
+
+   Styles the Milkdown WYSIWYG editor to match MCP spec design tokens.
+   The editor renders formatted markdown inline as you type.
+============================================================================= */
+
+/* Editor root container */
+.note-editor-container .milkdown {
+  outline: none;
+  font-size: var(--font-text-md-size);
+  line-height: var(--font-text-md-line-height);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/**
+ * ProseMirror editor element - the actual contenteditable area.
+ * Uses flex: 1 to fill available space, allowing clicks anywhere
+ * in the content area to focus the editor, even when empty.
+ */
+.note-editor-container .milkdown .editor {
+  outline: none;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/**
+ * ProseMirror paragraph - when editor is empty, this single paragraph
+ * fills the available space so the entire area is clickable.
+ */
+.note-editor-container .milkdown .editor > .paragraph:only-child,
+.note-editor-container .milkdown .editor > p:only-child {
+  flex: 1;
+}
+
+/* Placeholder text when editor is empty */
+.note-editor-container .milkdown .editor.ProseMirror-empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  position: absolute;
+  pointer-events: none;
+}
+
+.note-editor-container .milkdown-wrapper[data-placeholder] .milkdown .editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+/* =============================================================================
+   Typography - Headers
+============================================================================= */
+
+.note-editor-container .milkdown h1 {
+  font-size: var(--font-heading-lg-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--font-heading-lg-line-height);
+  margin-bottom: var(--spacing-4);
+  margin-top: var(--spacing-6);
+  color: var(--color-text-primary);
+}
+
+.note-editor-container .milkdown h1:first-child {
+  margin-top: 0;
+}
+
+.note-editor-container .milkdown h2 {
+  font-size: var(--font-heading-md-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--font-heading-md-line-height);
+  margin-top: var(--spacing-6);
+  margin-bottom: var(--spacing-3);
+  color: var(--color-text-primary);
+}
+
+.note-editor-container .milkdown h3 {
+  font-size: var(--font-heading-sm-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--font-heading-sm-line-height);
+  margin-top: var(--spacing-5);
+  margin-bottom: var(--spacing-2);
+  color: var(--color-text-primary);
+}
+
+.note-editor-container .milkdown h4,
+.note-editor-container .milkdown h5,
+.note-editor-container .milkdown h6 {
+  font-size: var(--font-text-md-size);
+  font-weight: var(--font-weight-medium);
+  margin-top: var(--spacing-4);
+  margin-bottom: var(--spacing-2);
+  color: var(--color-text-primary);
+}
+
+/* =============================================================================
+   Typography - Body
+============================================================================= */
+
+.note-editor-container .milkdown p {
+  margin-bottom: var(--spacing-3);
+  font-size: var(--font-text-md-size);
+  line-height: var(--font-text-md-line-height);
+}
+
+.note-editor-container .milkdown p:last-child {
+  margin-bottom: 0;
+}
+
+.note-editor-container .milkdown strong {
+  font-weight: var(--font-weight-semibold);
+}
+
+.note-editor-container .milkdown em {
+  font-style: italic;
+}
+
+.note-editor-container .milkdown del,
+.note-editor-container .milkdown s {
+  text-decoration: line-through;
+  color: var(--color-text-secondary);
+}
+
+/* =============================================================================
+   Links
+============================================================================= */
+
+.note-editor-container .milkdown a {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.note-editor-container .milkdown a:hover {
+  opacity: 0.8;
+}
+
+/* =============================================================================
+   Code - Inline and Block
+============================================================================= */
+
+.note-editor-container .milkdown code {
+  font-family: var(--font-mono);
+  font-size: var(--font-text-sm-size);
+  background: var(--color-background-secondary);
+  padding: var(--spacing-0-5) var(--spacing-1-5);
+  border-radius: var(--border-radius-sm);
+}
+
+.note-editor-container .milkdown pre {
+  background: var(--color-background-secondary);
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-3) var(--spacing-4);
+  margin-bottom: var(--spacing-3);
+  overflow-x: auto;
+}
+
+.note-editor-container .milkdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: var(--font-text-sm-size);
+  line-height: var(--font-text-sm-line-height);
+}
+
+/* Code block with language label */
+.note-editor-container .milkdown .code-fence {
+  position: relative;
+}
+
+.note-editor-container .milkdown .code-fence::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: var(--font-text-xs-size);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* =============================================================================
+   Lists
+============================================================================= */
+
+.note-editor-container .milkdown ul,
+.note-editor-container .milkdown ol {
+  margin-bottom: var(--spacing-3);
+  padding-left: var(--spacing-6);
+}
+
+.note-editor-container .milkdown li {
+  margin-bottom: var(--spacing-1);
+  font-size: var(--font-text-md-size);
+  line-height: var(--font-text-md-line-height);
+}
+
+.note-editor-container .milkdown li p {
+  margin-bottom: var(--spacing-1);
+}
+
+.note-editor-container .milkdown li:last-child {
+  margin-bottom: 0;
+}
+
+/* Nested lists */
+.note-editor-container .milkdown li ul,
+.note-editor-container .milkdown li ol {
+  margin-top: var(--spacing-1);
+  margin-bottom: var(--spacing-1);
+}
+
+/* Task lists (GFM) */
+.note-editor-container .milkdown li[data-item-type="task"] {
+  list-style: none;
+  position: relative;
+  padding-left: 24px;
+  margin-left: -4px;
+  cursor: pointer;
+}
+
+.note-editor-container .milkdown li[data-item-type="task"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 2px;
+  background: var(--color-background-primary);
+  pointer-events: none;
+}
+
+.note-editor-container .milkdown li[data-item-type="task"][data-checked="true"]::before {
+  background: var(--color-text-primary);
+  border-color: var(--color-text-primary);
+}
+
+.note-editor-container .milkdown li[data-item-type="task"][data-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--color-background-primary);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+/* =============================================================================
+   Blockquotes
+============================================================================= */
+
+.note-editor-container .milkdown blockquote {
+  border-left: 3px solid var(--color-border-primary);
+  padding-left: var(--spacing-4);
+  margin-bottom: var(--spacing-3);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.note-editor-container .milkdown blockquote p {
+  margin-bottom: var(--spacing-2);
+}
+
+.note-editor-container .milkdown blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* Nested blockquotes */
+.note-editor-container .milkdown blockquote blockquote {
+  margin-top: var(--spacing-2);
+}
+
+/* =============================================================================
+   Horizontal Rule
+============================================================================= */
+
+.note-editor-container .milkdown hr {
+  border: none;
+  border-top: var(--border-width-regular) solid var(--color-border-primary);
+  margin: var(--spacing-6) 0;
+}
+
+/* =============================================================================
+   Tables (GFM)
+============================================================================= */
+
+.note-editor-container .milkdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--spacing-3);
+  font-size: var(--font-text-sm-size);
+}
+
+.note-editor-container .milkdown th,
+.note-editor-container .milkdown td {
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+  padding: var(--spacing-2) var(--spacing-3);
+  text-align: left;
+}
+
+.note-editor-container .milkdown th {
+  background: var(--color-background-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.note-editor-container .milkdown tr:hover {
+  background: var(--color-background-secondary);
+}
+
+/* =============================================================================
+   Images
+============================================================================= */
+
+.note-editor-container .milkdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--border-radius-md);
+  margin: var(--spacing-2) 0;
+}
+
+/* =============================================================================
+   Selection
+============================================================================= */
+
+.note-editor-container .milkdown ::selection {
+  background: var(--color-text-primary);
+  color: var(--color-background-primary);
+}
+
+/* =============================================================================
+   ProseMirror Specific Styles
+============================================================================= */
+
+/* Cursor styles */
+.note-editor-container .milkdown .ProseMirror-cursor {
+  border-left: 2px solid var(--color-text-primary);
+}
+
+/* Selection highlight */
+.note-editor-container .milkdown .ProseMirror-selectednode {
+  outline: 2px solid var(--color-text-primary);
+  outline-offset: 2px;
+}
+
+/* Gap cursor (for navigating between blocks) */
+.note-editor-container .milkdown .ProseMirror-gapcursor {
+  display: none;
+  pointer-events: none;
+  position: absolute;
+}
+
+.note-editor-container .milkdown .ProseMirror-gapcursor::after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 2px solid var(--color-text-primary);
+}
+
+.note-editor-container .milkdown .ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
+}
+
+/* =============================================================================
+   Scrollbar
+============================================================================= */
+
+.note-editor-container .milkdown-wrapper::-webkit-scrollbar {
+  width: var(--spacing-2);
+}
+
+.note-editor-container .milkdown-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.note-editor-container .milkdown-wrapper::-webkit-scrollbar-thumb {
+  background: var(--color-border-primary);
+  border-radius: var(--border-radius-sm);
+}
+
+.note-editor-container .milkdown-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-secondary);
+}

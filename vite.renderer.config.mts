@@ -6,6 +6,11 @@ import path from "path";
 // https://vitejs.dev/config
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    watch: {
+      ignored: ['**/artifacts/**', '**/src/electron/mcps/**']
+    }
+  },
   resolve: {
     // Force all React imports to use the same instance.
     // Prevents "Invalid hook call" errors when dependencies have their own React.

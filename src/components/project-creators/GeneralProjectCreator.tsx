@@ -107,7 +107,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
         <div className="fixed z-50 flex items-center justify-center w-full max-w-lg border border-border-primary bg-background-primary p-12 shadow-lg rounded-lg dialog-content" data-state="open">
           <div className="flex items-center gap-3">
             <Spinner size={16} />
-            <span className="text-sm text-text-primary">{statusMessage}</span>
+            <span className="text-base text-text-primary">{statusMessage}</span>
           </div>
         </div>
       </>
@@ -127,7 +127,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-sm font-medium text-text-primary">Import an existing codebase</h2>
+            <h2 className="text-base font-medium text-text-primary">Import an existing codebase</h2>
             <button
               type="button"
               className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"
@@ -138,7 +138,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
           </div>
 
           {error && (
-            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-xs rounded-md p-3 mb-6">
+            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-sm rounded-md p-3 mb-6">
               {error}
             </div>
           )}
@@ -174,7 +174,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
                 Browse
               </Button>
             </div>
-            <p className="text-xs text-text-secondary mt-2">
+            <p className="text-sm text-text-secondary mt-2">
               Select a local folder for this project
             </p>
           </div>
