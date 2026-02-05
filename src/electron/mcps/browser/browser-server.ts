@@ -81,7 +81,7 @@ app.tool(
   async ({ url }) => ({
     data: { action: "create", url: url || "about:blank" },
     text: `Browser requested for ${url || "about:blank"}`,
-    title: "New Browser",
+    title: "Browser",
   })
 );
 

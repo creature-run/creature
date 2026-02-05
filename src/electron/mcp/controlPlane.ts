@@ -195,6 +195,7 @@ export const createPipInstance = async ({
   serverName,
   toolName,
   instanceId,
+  title,
   creatureAuth,
   triggeredByTool = true,
 }: {
@@ -202,6 +203,7 @@ export const createPipInstance = async ({
   serverName: string;
   toolName: string;
   instanceId: string;
+  title?: string;
   creatureAuth?: { managed?: boolean };
   triggeredByTool?: boolean;
 }): Promise<PipInstance> => {
@@ -222,7 +224,7 @@ export const createPipInstance = async ({
     resourceUri,
     serverName,
     toolName,
-    title: "",
+    title: title || "",
     htmlContent,
     icon,
     createdAt: Date.now(),
@@ -696,13 +698,16 @@ export const launchResourcePip = async ({
   try {
     // Extract resource name from URI for the title (e.g., "ui://server/dashboard" -> "dashboard")
     const resourceName = resourceUri.split("/").pop() || "App";
-    const title = resourceName.replace(/-/g, " ").replace(/_/g, " ");
+    // Capitalize first letter for a cleaner display title
+    const formattedName = resourceName.replace(/-/g, " ").replace(/_/g, " ");
+    const title = formattedName.charAt(0).toUpperCase() + formattedName.slice(1);
 
     const pip = await createPipInstance({
       resourceUri,
       serverName,
       toolName: resourceName,
       instanceId,
+      title,
       triggeredByTool: false,
     });
 

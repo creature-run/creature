@@ -437,15 +437,27 @@ export function PipBrowser({ pip, colors }: PipBrowserProps) {
     const webview = webviewRef.current;
     if (!webview || !isWebviewReady) return;
 
+    /**
+     * Sync the webview's page title to the pip tab.
+     * Filters out meaningless titles like "about:blank" so the tab
+     * always shows either a real page title or the default "Browser".
+     */
     const updateTitle = () => {
-      const title = webview.getTitle();
-      if (title && pip.instanceId && window.electronAPI?.controlPlane?.updatePipTitle) {
+      const rawTitle = webview.getTitle();
+      const isBlankTitle = !rawTitle || rawTitle === "about:blank";
+      const title = isBlankTitle ? "Browser" : rawTitle;
+
+      if (pip.instanceId && window.electronAPI?.controlPlane?.updatePipTitle) {
         window.electronAPI.controlPlane.updatePipTitle({
           instanceId: pip.instanceId,
           title,
         });
       }
     };
+
+    // Set title immediately when webview is ready (covers the case where
+    // about:blank already finished loading before event listeners were attached)
+    updateTitle();
 
     const handleDidNavigate = () => sendBrowserState();
     const handleDidNavigateInPage = () => sendBrowserState();

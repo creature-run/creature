@@ -92,6 +92,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const { isDarkMode } = useTheme();
   const { session, setProject } = useApp();
   const [input, setInput] = useState("");
+
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({
     inputTokens: 0,
@@ -203,6 +204,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
             const bOrder = msgB._order ?? orderMap.get(msgB.id) ?? Infinity;
             return aOrder - bOrder;
           });
+          
           return {
             ...options,
             body: {
