@@ -7,7 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 // Tailwind 4 integration - imports SDK theme mapping for host-provided variables
 import "open-mcp-app/styles/tailwind.css";
 import "./fonts.css";
-import "./app.css";
+import "./App.css";
 
 // =============================================================================
 // Types
