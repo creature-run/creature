@@ -534,7 +534,6 @@ export const registerProjectHandlers = () => {
               { name: "browser", enabled: true },
               { name: "todos", enabled: true },
               { name: "notes", enabled: true },
-              { name: "crm", enabled: true },
               { name: "ide", enabled: true },
               { name: "terminal", enabled: true },
             ],

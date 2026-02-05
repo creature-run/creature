@@ -3,7 +3,7 @@
  *
  * Creator for "playground" profile projects.
  * Simple project creation with no local directory - uses app-managed folder.
- * MCPs: browser, todos, notes
+ * MCPs: browser, todos, notes, crm
  */
 
 import { useState, useCallback } from "react";
@@ -50,6 +50,7 @@ export function PlaygroundProjectCreator({ onComplete, onCancel }: ProjectCreato
           { name: "browser", enabled: true },
           { name: "todos", enabled: true },
           { name: "notes", enabled: true },
+          { name: "crm", enabled: true },
         ],
       });
 

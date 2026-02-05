@@ -242,6 +242,15 @@ export const createFromTemplate = async ({
       fs.writeFileSync(serverIndexPath, serverContent);
     }
 
+    // Tools file: src/server/tools/items.ts - contains UI resource URI constant
+    const toolsPath = path.join(mcpDir, "src", "server", "tools", "items.ts");
+    if (fs.existsSync(toolsPath)) {
+      let toolsContent = fs.readFileSync(toolsPath, "utf-8");
+      // Replace ui:// URIs in the ITEMS_UI constant
+      toolsContent = toolsContent.replace(/ui:\/\/items\//g, `ui://${name}/`);
+      fs.writeFileSync(toolsPath, toolsContent);
+    }
+
     // UI entry: src/ui/app.tsx - contains HostProvider name
     const appTsxPath = path.join(mcpDir, "src", "ui", "app.tsx");
     if (fs.existsSync(appTsxPath)) {

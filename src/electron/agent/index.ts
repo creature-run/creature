@@ -468,7 +468,7 @@ export const handleChatRequest = async ({
   // This is the AI SDK's recommended way to manage context
   const prunedMessages = pruneMessages({
     messages: modelMessages,
-    toolCalls: "before-last-2-messages",
+    toolCalls: "before-last-10-messages",
     emptyMessages: "remove",
   });
 
