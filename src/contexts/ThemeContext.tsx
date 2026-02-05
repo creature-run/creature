@@ -53,7 +53,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
  * Button variants using MCP Apps spec color classes.
  */
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer select-none focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:shrink-0 group",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors duration-200 cursor-pointer select-none focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:shrink-0 group",
   {
     variants: {
       variant: {
@@ -71,10 +71,10 @@ export const buttonVariants = cva(
         link: "text-text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-[34px] px-3",
-        sm: "h-7 rounded-md px-2.5",
+        default: "h-[38px] px-4",
+        sm: "h-8 rounded-md px-3",
         lg: "h-11 rounded-md px-6",
-        icon: "h-[34px] w-[34px]",
+        icon: "h-[38px] w-[38px]",
       },
     },
     defaultVariants: {

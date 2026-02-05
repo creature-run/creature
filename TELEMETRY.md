@@ -93,11 +93,10 @@ Fired when a project is deleted.
 
 ### `mcp_create_from_template`
 
-Fired when creating a new MCP app from a template.
+Fired when creating a new MCP app from the example template.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `template` | string | Template name used (`"todos"`, `"notes"`, `"crm"`) |
 | `success` | boolean | Whether the creation succeeded |
 
 ### `mcp_restart`

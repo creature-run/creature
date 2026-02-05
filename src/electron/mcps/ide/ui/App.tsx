@@ -130,6 +130,7 @@ interface IdeWidgetState {
     activeFilePath: string | null;
     openFiles: Array<{ path: string; language: string }>;
     wsUrl: string | null;
+    expandedPaths: string[];
   };
 }
 
@@ -163,6 +164,7 @@ export const App = () => {
   const [currentTheme, setCurrentTheme] = useState<"light" | "dark">("dark");
   const [monacoTheme, setMonacoTheme] = useState<string>(CUSTOM_DARK_THEME);
   const [pendingDiffs, setPendingDiffs] = useState<Map<string, PendingDiff>>(new Map());
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   
   // Refs to access current state without causing re-renders/reconnections
   const openFilesRef = useRef<Map<string, OpenFile>>(openFiles);
@@ -348,14 +350,14 @@ export const App = () => {
 
   /**
    * Restore state from widget state on refresh/popout.
-   * Restores the active file path and opens saved files.
+   * Restores the active file path, open files, and expanded directories.
    */
   const hasRestoredFromWidgetState = useRef(false);
   useEffect(() => {
     if (hasRestoredFromWidgetState.current) return;
     if (!widgetState?.privateContent) return;
     
-    const { activeFilePath: savedActivePath, openFiles: savedOpenFiles, wsUrl: savedWsUrl } = widgetState.privateContent;
+    const { activeFilePath: savedActivePath, openFiles: savedOpenFiles, wsUrl: savedWsUrl, expandedPaths: savedExpandedPaths } = widgetState.privateContent;
     
     hasRestoredFromWidgetState.current = true;
     
@@ -367,6 +369,11 @@ export const App = () => {
     // Restore active file path
     if (savedActivePath) {
       setActiveFilePath(savedActivePath);
+    }
+    
+    // Restore expanded paths
+    if (savedExpandedPaths && savedExpandedPaths.length > 0) {
+      setExpandedPaths(new Set(savedExpandedPaths));
     }
     
     // Re-open saved files by calling the tool for each
@@ -397,9 +404,10 @@ export const App = () => {
         activeFilePath,
         openFiles: openFilesArray,
         wsUrl,
+        expandedPaths: Array.from(expandedPaths),
       },
     } satisfies IdeWidgetState);
-  }, [isReady, activeFilePath, openFiles, wsUrl, setWidgetState]);
+  }, [isReady, activeFilePath, openFiles, wsUrl, expandedPaths, setWidgetState]);
 
   /**
    * Update pip title when active file changes.
@@ -587,6 +595,23 @@ export const App = () => {
   const handleRefresh = useCallback(() => {
     ideDirList({ path: ".", recursive: true });
   }, [ideDirList]);
+
+  /**
+   * Toggle expansion state of a directory.
+   * This is the only way directories can be expanded/collapsed,
+   * ensuring agent tool calls cannot auto-expand the tree.
+   */
+  const handleToggleExpand = useCallback((path: string) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
 
   /**
    * Handle tab selection.
@@ -807,6 +832,8 @@ export const App = () => {
           onFileSelect={handleFileSelect}
           onRefresh={handleRefresh}
           selectedPath={activeFilePath || undefined}
+          expandedPaths={expandedPaths}
+          onToggleExpand={handleToggleExpand}
         />
       </div>
       <div className="ide-main">

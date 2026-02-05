@@ -342,7 +342,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-primary">
-            <h2 className="text-xs font-medium text-text-primary">MCP Servers</h2>
+            <h2 className="text-base font-medium text-text-primary">MCP Servers</h2>
             <button
               className="text-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none leading-none"
               onClick={handleSave}
@@ -351,7 +351,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <div className="text-center py-4 text-text-secondary text-xs">Loading...</div>
+            <div className="text-center py-4 text-text-secondary text-base">Loading...</div>
           </div>
         </div>
       </div>
@@ -389,7 +389,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
               >
                 <ArrowLeft size={12} />
               </button>
-              <h2 className="text-xs font-medium text-text-primary">MCP Registry</h2>
+              <h2 className="text-base font-medium text-text-primary">MCP Registry</h2>
             </div>
             <button
               className="text-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none leading-none"
@@ -431,7 +431,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
               >
                 <ArrowLeft size={12} />
               </button>
-              <h2 className="text-xs font-medium text-text-primary">Publish to Registry</h2>
+              <h2 className="text-base font-medium text-text-primary">Publish to Registry</h2>
             </div>
             <button
               className="text-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none leading-none"
@@ -472,7 +472,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
               >
                 <ArrowLeft size={12} />
               </button>
-              <h2 className="text-xs font-medium text-text-primary">Deploy MCP</h2>
+              <h2 className="text-base font-medium text-text-primary">Deploy MCP</h2>
             </div>
             <button
               className="text-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none leading-none"
@@ -528,7 +528,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4">
           {error && (
-            <div className="bg-background-danger/10 border border-border-danger text-text-danger px-2.5 py-2 rounded-md mb-3 text-xs">
+            <div className="bg-background-danger/10 border border-border-danger text-text-danger px-2.5 py-2 rounded-md mb-3 text-sm">
               {error}
             </div>
           )}
@@ -536,7 +536,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
           {/* Server list */}
           <div className="flex flex-col gap-1.5 mb-3">
             {servers.length === 0 ? (
-              <div className="text-center py-4 text-text-secondary text-xs">
+              <div className="text-center py-4 text-text-secondary text-base">
                 No MCP servers configured
               </div>
             ) : (
@@ -545,7 +545,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
                   key={server.name}
                   className="flex items-center justify-between px-2.5 py-1.5 bg-background-tertiary border border-border-primary rounded-md"
                 >
-                  <span className="text-xs font-medium text-text-primary truncate min-w-0">
+                  <span className="text-sm font-medium text-text-primary truncate min-w-0">
                     {server.name}
                   </span>
                   <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
@@ -613,21 +613,21 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
             {/* Add dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline-muted" className="text-xs" disabled={saving}>
+                <Button size="sm" variant="outline-muted" className="text-sm" disabled={saving}>
                   <Plus size={10} className="mr-1" />
                   Add MCPs
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top" className="min-w-[140px]">
-                <DropdownMenuItem onClick={handleShowRegistry} className="text-xs py-1.5">
+                <DropdownMenuItem onClick={handleShowRegistry} className="text-sm py-1.5">
                   <Cube size={12} />
                   From Registry
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleAddNew} className="text-xs py-1.5">
+                <DropdownMenuItem onClick={handleAddNew} className="text-sm py-1.5">
                   <Plus size={12} />
                   Add Manually
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleShowCreate} className="text-xs py-1.5">
+                <DropdownMenuItem onClick={handleShowCreate} className="text-sm py-1.5">
                   <FilePlus size={12} />
                   Create New
                 </DropdownMenuItem>
@@ -637,7 +637,7 @@ export function ModalMcpSettings({ onClose }: ModalMcpSettingsProps) {
 
           {/* Close/Save - right aligned */}
           <div className="flex gap-2">
-            <Button size="sm" onClick={handleSave} disabled={saving} className="text-xs">
+            <Button size="sm" onClick={handleSave} disabled={saving} className="text-sm">
               {saving ? "Saving..." : hasChanges() ? "Save" : "Close"}
             </Button>
           </div>
@@ -1200,7 +1200,7 @@ function CreateMcpForm({ existingNames, onComplete, onCancel }: CreateMcpFormPro
           )}
 
           <p className="text-sm text-text-secondary mb-4">
-            Create a new MCP from the template with a Todo List example.
+            Create a new MCP App from the example template.
             The template includes tools and a Pip UI.
           </p>
 

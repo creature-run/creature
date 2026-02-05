@@ -11,16 +11,8 @@ import { Button } from "../Button";
 import { Input } from "../Input";
 import { Label } from "../Label";
 import { Spinner } from "../Spinner";
-import { Select, SelectItem } from "../Select";
 import { cn } from "../../lib/utils";
 import type { ProjectCreatorProps } from "./types";
-
-/** Available MCP templates */
-const TEMPLATES = [
-  { value: "todos", label: "Todos — Single-instance todo list" },
-  { value: "notes", label: "Notes — Multi-instance markdown notes" },
-  { value: "crm", label: "CRM — Data tables + relational data" },
-] as const;
 
 type McpCreatorStatus = 
   | "idle"
@@ -43,7 +35,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   
   // Create mode state
   const [createFolderLocation, setCreateFolderLocation] = useState("");
-  const [selectedTemplate, setSelectedTemplate] = useState<string>("todos");
   
   // Existing mode state
   const [existingFolderPath, setExistingFolderPath] = useState("");
@@ -132,7 +123,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         : await window.electronAPI.project.createMcpApp({
             targetPath: createFolderLocation,
             name: folderName.trim(),
-            template: selectedTemplate,
             projectName: projectName.trim() || "New MCP App",
             projectRootMode: "app",
           });
@@ -151,7 +141,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
       setStatus("error");
       setStatusMessage(null);
     }
-  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, selectedTemplate, onComplete]);
+  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, onComplete]);
 
   /**
    * Generates a folder name from a project name.
@@ -208,7 +198,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         <div className="fixed z-50 flex items-center justify-center w-full max-w-lg border border-border-primary bg-background-primary p-12 shadow-lg rounded-lg dialog-content" data-state="open">
           <div className="flex items-center gap-3">
             <Spinner size={16} />
-            <span className="text-sm text-text-primary">{statusMessage}</span>
+            <span className="text-base text-text-primary">{statusMessage}</span>
           </div>
         </div>
       </>
@@ -232,7 +222,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-sm font-medium text-text-primary">
+            <h2 className="text-base font-medium text-text-primary">
               Create a new MCP App
             </h2>
             <button
@@ -245,7 +235,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
           </div>
 
           {error && (
-            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-xs rounded-md p-3 mb-6">
+            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-sm rounded-md p-3 mb-6">
               {error}
             </div>
           )}
@@ -271,7 +261,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                 type="button"
                 onClick={() => handleModeChange("create")}
                 className={cn(
-                  "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+                  "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
                   mode === "create"
                     ? "text-text-primary border-text-primary"
                     : "text-text-secondary border-transparent hover:text-text-primary"
@@ -283,7 +273,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                 type="button"
                 onClick={() => handleModeChange("existing")}
                 className={cn(
-                  "px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+                  "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
                   mode === "existing"
                     ? "text-text-primary border-text-primary"
                     : "text-text-secondary border-transparent hover:text-text-primary"
@@ -297,20 +287,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
           {/* Create Mode Content */}
           {mode === "create" && (
             <>
-              {/* Template selection */}
-              <div className="mb-4">
-                <Label htmlFor="template">
-                  Template
-                </Label>
-                <Select id="template" value={selectedTemplate} onValueChange={setSelectedTemplate}>
-                  {TEMPLATES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </Select>
-              </div>
-
               {/* Folder Location */}
               <div className="mb-4">
                 <Label>Folder Location</Label>
@@ -327,7 +303,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                   </Button>
                 </div>
                 {createFolderLocation && (
-                  <p className="text-xs text-text-secondary mt-2">
+                  <p className="text-sm text-text-secondary mt-2">
                     Will create new MCP in subfolder "{folderName}"
                   </p>
                 )}
@@ -345,7 +321,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
                   onChange={(e) => handleFolderNameChange(e.target.value)}
                   placeholder="new-mcp-app"
                 />
-                <p className="text-xs text-text-secondary mt-2">
+                <p className="text-sm text-text-secondary mt-2">
                   Lowercase letters, numbers, and hyphens only
                 </p>
               </div>

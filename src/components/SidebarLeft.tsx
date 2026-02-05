@@ -55,7 +55,7 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, {
         ref={ref}
         className={cn(
           "p-2.5 flex items-center justify-center rounded-lg transition-all cursor-pointer bg-transparent",
-          "[&_svg]:w-[18px] [&_svg]:h-[18px]",
+          "[&_svg]:w-[22px] [&_svg]:h-[22px]",
           !active && "text-text-secondary opacity-50 hover:opacity-100 hover:text-text-primary",
           active && "text-text-primary opacity-100",
           disabled && "opacity-30 cursor-not-allowed"
@@ -218,7 +218,7 @@ export function SidebarLeft() {
   };
 
   return (
-    <aside className="flex flex-col items-center w-[45px] shrink-0 pt-3 py-3 bg-background-primary border-r border-border-secondary">
+    <aside className="flex flex-col items-center w-[50px] shrink-0 pt-3 py-3 bg-background-primary border-r border-border-secondary">
       {/* Creature icon with dropdown menu */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -226,7 +226,7 @@ export function SidebarLeft() {
             className="w-8 h-8 my-2 flex items-center justify-center cursor-pointer focus:outline-none"
             title="Menu"
           >
-            <CreatureIcon isDarkMode={isDarkMode} showEyes={false} />
+            <CreatureIcon isDarkMode={isDarkMode} showEyes={false} width={32} height={32} />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="right">
@@ -317,7 +317,7 @@ export function SidebarLeft() {
                       onClick={() => handleResourceClick(resource)}
                       active={false}
                     >
-                      <UIResourceIcon resource={resource} className="w-[18px] h-[18px]" />
+                      <UIResourceIcon resource={resource} className="w-[22px] h-[22px]" />
                     </SidebarButton>
                   </TooltipTrigger>
                   <TooltipContent side="right">
@@ -334,7 +334,7 @@ export function SidebarLeft() {
             onClick={() => { setProjectSettingsOpen(!ui.projectSettingsOpen); }}
             active={ui.projectSettingsOpen}
           >
-            <Gear size={18} weight="regular" />
+            <Gear weight="regular" />
           </SidebarButton>
         </>
       )}

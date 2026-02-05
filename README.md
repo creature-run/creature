@@ -31,7 +31,7 @@ Creature uses the [open-mcp-app](./artifacts) SDK—build your MCP App once, run
 npm install open-mcp-app
 ```
 
-Check out the included examples in [/artifacts/mcp-apps](./artifacts/mcp-apps):
+Check out the included examples in [/src/electron/mcps](./src/electron/mcps):
 - **todos** - Simple todo list with CRUD operations
 - **notes** - Markdown notes with editor and list views
 - **crm** - Customer relationship manager with search

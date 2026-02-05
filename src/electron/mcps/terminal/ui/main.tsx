@@ -1,8 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import "./fonts.css";
-import "./App.css";
+import { App } from "./app";
 
 /**
  * React Entry Point

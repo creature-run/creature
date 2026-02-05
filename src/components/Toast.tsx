@@ -112,7 +112,7 @@ function Toast({ toast, onDismiss }: ToastProps) {
           <p className="text-sm text-text-secondary">{toast.message}</p>
         )}
         {toast.data && (
-          <pre className="mt-2 max-h-24 overflow-auto rounded bg-background-tertiary/50 p-2 text-xs text-text-secondary">
+          <pre className="mt-2 max-h-24 overflow-auto rounded bg-background-tertiary/50 p-2 text-sm text-text-secondary">
             {JSON.stringify(toast.data, null, 2)}
           </pre>
         )}

@@ -40,6 +40,17 @@ interface PopoutMetadata {
   widgetState?: Record<string, unknown> | null;
 }
 
+interface UiRuntimeError {
+  name?: string;
+  message?: string;
+  stack?: string;
+  source?: string;
+  filename?: string;
+  lineno?: number;
+  colno?: number;
+  timestamp?: string;
+}
+
 /**
  * Extended WebviewTag interface with Electron-specific methods.
  */
@@ -90,6 +101,97 @@ let browserWebviewReady = false;
 
 /** Queue of browser commands received before webview was ready */
 let pendingBrowserCommands: Array<{ command: string; params: Record<string, unknown> }> = [];
+
+/** Track the active iframe for UI error capture */
+let activeIframe: HTMLIFrameElement | null = null;
+
+/** UI error overlay elements */
+let uiErrorOverlay: HTMLDivElement | null = null;
+let uiErrorBody: HTMLDivElement | null = null;
+let uiErrorCopyButton: HTMLButtonElement | null = null;
+
+/**
+ * Initialize the UI error overlay elements.
+ * Captures references and wires the copy handler for fast access.
+ */
+const initializeUiErrorOverlay = (): void => {
+  if (uiErrorOverlay) return;
+  uiErrorOverlay = document.getElementById("ui-error-overlay") as HTMLDivElement | null;
+  uiErrorBody = document.getElementById("ui-error-body") as HTMLDivElement | null;
+  uiErrorCopyButton = document.getElementById("ui-error-copy") as HTMLButtonElement | null;
+
+  if (uiErrorCopyButton) {
+    uiErrorCopyButton.addEventListener("click", () => {
+      const text = uiErrorBody?.textContent || "";
+      if (!text) return;
+      navigator.clipboard.writeText(text).catch(() => {
+        // Ignore clipboard failures to avoid blocking the UI error overlay
+      });
+    });
+  }
+};
+
+/**
+ * Format UI runtime errors for display and logging.
+ * Ensures a consistent, readable error string in overlays and logs.
+ */
+const formatUiError = ({ error }: { error: UiRuntimeError }): string => {
+  const headerParts = [error.name || "Error", error.message || "Unknown error"].filter(Boolean);
+  const header = headerParts.join(": ");
+  const location = error.filename
+    ? `${error.filename}${error.lineno ? `:${error.lineno}` : ""}${error.colno ? `:${error.colno}` : ""}`
+    : "";
+  const source = error.source ? `Source: ${error.source}` : "";
+  const timestamp = error.timestamp ? `Time: ${error.timestamp}` : "";
+  const stack = error.stack ? `\n${error.stack}` : "";
+  const extras = [location, source, timestamp].filter(Boolean).join("\n");
+  return [header, extras].filter(Boolean).join("\n") + stack;
+};
+
+/**
+ * Show UI error overlay with formatted details.
+ * Keeps the app background while surfacing the failure clearly.
+ */
+const showUiErrorOverlay = ({ error }: { error: UiRuntimeError }): void => {
+  initializeUiErrorOverlay();
+  if (!uiErrorOverlay || !uiErrorBody) return;
+  uiErrorBody.textContent = formatUiError({ error });
+  uiErrorOverlay.classList.add("visible");
+};
+
+/**
+ * Hide the UI error overlay.
+ * Clears previous error content to avoid stale display after recovery.
+ */
+const clearUiErrorOverlay = (): void => {
+  if (!uiErrorOverlay || !uiErrorBody) return;
+  uiErrorBody.textContent = "";
+  uiErrorOverlay.classList.remove("visible");
+};
+
+/**
+ * Handle UI error messages posted from the iframe.
+ * Captures runtime errors and forwards them to the Dev Console logs.
+ */
+const handleUiErrorMessage = (event: MessageEvent): void => {
+  if (!activeIframe || event.source !== activeIframe.contentWindow) return;
+  const data = event.data as { method?: string; params?: UiRuntimeError } | null;
+  if (!data || data.method !== "ui/error") return;
+
+  const errorPayload = data.params || {};
+  showUiErrorOverlay({ error: errorPayload });
+
+  const metadata = window.__POPOUT_METADATA__;
+  if (!metadata) return;
+
+  window.electronAPI.logs.fromUI({
+    instanceId: metadata.instanceId,
+    mcpServer: metadata.mcpServer,
+    level: "error",
+    message: formatUiError({ error: errorPayload }),
+    timestamp: errorPayload.timestamp || new Date().toISOString(),
+  });
+};
 
 /**
  * Initialize the popout with AppBridge.
@@ -167,6 +269,11 @@ const initializePopout = async (): Promise<void> => {
     browserInstanceId = metadata.instanceId;
   }
 
+  // Track active iframe for UI error capture and reset overlay
+  activeIframe = iframe;
+  initializeUiErrorOverlay();
+  clearUiErrorOverlay();
+
   // Inject HTML content FIRST - this triggers iframe reload
   // The iframe needs to load with the real content so AppBridge gets the correct contentWindow
   iframe.srcdoc = htmlContent;
@@ -194,6 +301,7 @@ const initializePopout = async (): Promise<void> => {
   setupThemeChangeListener();
   setupTitleChangeListener(metadata.instanceId);
   setupPipRefreshListener(metadata.instanceId, iframe);
+  window.addEventListener("message", handleUiErrorMessage);
 
   try {
     // Create bridge AFTER content is loaded so we get the correct contentWindow
@@ -444,6 +552,10 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
       }
       bridgeInstance = null;
     }
+
+    // Reset UI error overlay for fresh content
+    activeIframe = iframe;
+    clearUiErrorOverlay();
 
     // Inject new HTML content
     iframe.srcdoc = data.htmlContent;

@@ -5,7 +5,7 @@
  * All business logic is delegated to specialized modules.
  */
 
-import { app, BrowserWindow, session } from "electron";
+import { app, BrowserWindow, ipcMain, session } from "electron";
 import started from "electron-squirrel-startup";
 
 // Module imports
@@ -83,6 +83,12 @@ app.on("ready", () => {
   // Initialize auto-updater (production only)
   if (app.isPackaged && isProdRuntime()) {
     initAutoUpdater();
+  } else {
+    // Register stub handler in dev to prevent console errors
+    ipcMain.handle("updater:getPendingInfo", () => ({
+      pending: false,
+      version: null,
+    }));
   }
 
   // MCPs are now initialized when a folder is opened (not on app startup)

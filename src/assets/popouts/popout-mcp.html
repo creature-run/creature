@@ -30,6 +30,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      position: relative;
     }
 
     /* Standard MCP: iframe fills the window */
@@ -76,6 +77,61 @@
       min-height: 0;
       background: #ffffff;
     }
+
+    .ui-error-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg-card);
+      color: var(--text);
+      padding: 16px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      overflow: auto;
+      z-index: 10;
+    }
+
+    .ui-error-overlay.visible {
+      display: flex;
+    }
+
+    .ui-error-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .ui-error-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    :root.light .ui-error-copy {
+      border-color: rgba(0, 0, 0, 0.1);
+    }
+
+    .ui-error-body {
+      white-space: pre-wrap;
+      font-size: 12px;
+      line-height: 1.4;
+      opacity: 0.9;
+    }
+
+    .ui-error-copy svg {
+      width: 14px;
+      height: 14px;
+    }
   </style>
 </head>
 <body>
@@ -88,6 +144,20 @@
   <div class="browser-container">
     <iframe id="browser-nav-frame" class="browser-nav-frame" srcdoc="<!DOCTYPE html><html><head></head><body></body></html>"></iframe>
     <webview id="browser-webview" class="browser-webview" src="about:blank" webpreferences="contextIsolation=yes, nodeIntegration=no"></webview>
+  </div>
+
+  <div id="ui-error-overlay" class="ui-error-overlay" aria-live="polite">
+    <div class="ui-error-header">
+      <span>UI Error</span>
+      <button id="ui-error-copy" class="ui-error-copy" type="button">
+        <svg viewBox="0 0 256 256" aria-hidden="true" focusable="false">
+          <rect x="40" y="72" width="144" height="144" rx="8" fill="none" stroke="currentColor" stroke-width="16"></rect>
+          <path d="M72 40h112a8 8 0 0 1 8 8v112" fill="none" stroke="currentColor" stroke-width="16"></path>
+        </svg>
+        Copy
+      </button>
+    </div>
+    <div id="ui-error-body" class="ui-error-body"></div>
   </div>
 
   <!-- Bundled AppBridge integration script -->

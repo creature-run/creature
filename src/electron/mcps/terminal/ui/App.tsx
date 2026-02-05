@@ -4,6 +4,10 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+// Tailwind 4 integration - imports SDK theme mapping for host-provided variables
+import "open-mcp-app/styles/tailwind.css";
+import "./fonts.css";
+import "./app.css";
 
 // =============================================================================
 // Types
@@ -439,3 +443,5 @@ export const App = () => {
     </div>
   );
 };
+
+export default App;

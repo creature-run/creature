@@ -107,32 +107,6 @@ export interface PipInstance {
 const pipInstances = new Map<string, PipInstance>();
 
 /**
- * Event emitted when a UI-initiated tool call completes.
- * Used to inject the tool call into the agent's conversation history.
- *
- * Per AI SDK v6, tool calls should be represented as assistant message parts
- * with type 'dynamic-tool' to maintain the correct conversation structure.
- */
-export interface UIToolExecutedEvent {
-  /** Unique identifier for this tool call */
-  toolCallId: string;
-  /** Instance ID that initiated the call */
-  instanceId: string;
-  /** UI Resource URI of the pip */
-  resourceUri: string;
-  /** MCP server that handled the call */
-  serverName: string;
-  /** Tool that was called */
-  toolName: string;
-  /** Arguments passed to the tool */
-  args: Record<string, unknown>;
-  /** Result from the tool execution */
-  result: unknown;
-  /** Timestamp of execution */
-  timestamp: number;
-}
-
-/**
  * Event emitted when a new Pip Instance is created.
  * Used to inject into the agent's conversation history so it knows about new pips.
  */
@@ -746,13 +720,6 @@ export const closeAllPips = async (): Promise<void> => {
   }
 };
 
-/**
- * Generate a unique tool call ID for UI-initiated calls.
- */
-const generateToolCallId = (): string => {
-  return `ui_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-};
-
 // =============================================================================
 // View-Based Routing Logic (imported from ./routing.ts)
 // =============================================================================
@@ -820,22 +787,6 @@ const extractTitle = (result: unknown): string | undefined => {
   }
 
   return undefined;
-};
-
-/**
- * Strip structuredContent from tool result for conversation history.
- *
- * Per MCP Apps spec, structuredContent is for UI rendering only,
- * not for model context. This prevents duplicate content in the
- * conversation history which bloats context and increases costs.
- *
- * The UI pip still receives the full result via pip:tool-result IPC.
- */
-const stripStructuredContent = (result: unknown): unknown => {
-  if (!result || typeof result !== "object") return result;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { structuredContent, ...rest } = result as Record<string, unknown>;
-  return rest;
 };
 
 /**
@@ -1254,23 +1205,10 @@ export const handleToolCall = async ({
     }
   }
 
-  // For UI-initiated calls, emit event so the renderer can inject into conversation history
-  // Agent-initiated calls are already in the history via AI SDK streaming
-  if (source === "ui" && callerInstanceId) {
-    const pip = pipInstances.get(callerInstanceId);
-    // Strip structuredContent per MCP Apps spec - it's for UI only, not model context
-    const event: UIToolExecutedEvent = {
-      toolCallId: generateToolCallId(),
-      instanceId: callerInstanceId,
-      resourceUri: pip?.resourceUri || "",
-      serverName,
-      toolName,
-      args,
-      result: stripStructuredContent(result),
-      timestamp: Date.now(),
-    };
-    sendToRenderer("ui-tool:executed", event);
-  }
+  // NOTE: UI-initiated tool calls are NOT injected into conversation history.
+  // Per MCP Apps spec, UI tool results stay in the UI. If the UI needs the model
+  // to know about user actions, it should use ui/update-model-context explicitly.
+  // This prevents context bloat from UI interactions (file browsing, pagination, etc.)
 
   // For inline mode, add metadata so the renderer knows to display inline widget.
   // IMPORTANT: Do NOT include htmlContent here - it would bloat conversation history

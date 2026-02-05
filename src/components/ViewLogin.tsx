@@ -206,7 +206,7 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
    * Standard select styling to match Input component.
    */
   const selectClassName = cn(
-    "flex h-[34px] w-full rounded-md border border-border-primary bg-background-primary px-3 py-2 text-xs text-text-primary transition-colors",
+    "flex h-[34px] w-full rounded-md border border-border-primary bg-background-primary px-3 py-2 text-base text-text-primary transition-colors",
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-primary focus-visible:border-ring-primary",
     "disabled:cursor-not-allowed disabled:opacity-50"
   );
@@ -352,14 +352,14 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                   </Button>
                 </div>
                 {clientEmail && (
-                  <div className="text-xs text-text-secondary truncate">
+                  <div className="text-sm text-text-secondary truncate">
                     Loaded: {clientEmail}
                   </div>
                 )}
                 <button
                   type="button"
                   onClick={() => setShowManualVertex(true)}
-                  className="w-full text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+                  className="w-full text-sm text-text-tertiary hover:text-text-secondary transition-colors"
                 >
                   Or enter credentials manually
                 </button>
@@ -387,7 +387,7 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                     disabled={isLoading}
                     rows={3}
                     className={cn(
-                      "flex w-full rounded-md border border-border-primary bg-background-primary px-3 py-2 text-xs text-text-primary transition-colors",
+                      "flex w-full rounded-md border border-border-primary bg-background-primary px-3 py-2 text-base text-text-primary transition-colors",
                       "placeholder:text-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-primary focus-visible:border-ring-primary",
                       "disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-none"
                     )}
@@ -396,7 +396,7 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                 <button
                   type="button"
                   onClick={() => setShowManualVertex(false)}
-                  className="w-full text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+                  className="w-full text-sm text-text-tertiary hover:text-text-secondary transition-colors"
                 >
                   Or upload JSON file
                 </button>
@@ -431,17 +431,17 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
 
         {/* Beta notice */}
         <div
-          className="mt-3 border border-border-secondary rounded px-3 py-[4px] bg-background-secondary/30"
+          className="mt-3 border border-border-secondary rounded px-3 py-[8px] bg-background-secondary/50"
           style={{ animation: "fade-in 0.4s ease-out 0.35s backwards" }}
         >
-          <p className="text-[10px] text-text-secondary text-center select-none">
+          <p className="text-xs text-text-secondary text-center select-none">
             This is a beta release. Things may break.
           </p>
         </div>
 
         {/* Subtitle */}
         <p
-          className="text-text-secondary text-sm mt-10 select-none"
+          className="text-text-secondary text-base mt-6 select-none"
           style={{ animation: "fade-in 0.4s ease-out 0.5s backwards" }}
         >
           Connect your AI provider to get started
@@ -467,7 +467,7 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                 "focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary"
               )}
             >
-              <span className="text-xs">{selectedProvider.name}</span>
+              <span className="text-base">{selectedProvider.name}</span>
               <CaretDown
                 size={12}
                 className={cn("text-text-secondary transition-transform", showProviderDropdown && "rotate-180")}
@@ -490,12 +490,12 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
                       provider.type === providerType && "bg-background-tertiary"
                     )}
                   >
-                    <div className="text-xs font-medium text-text-primary">{provider.name}</div>
-                    <div className="text-[10px] text-text-secondary">{provider.description}</div>
+                    <div className="text-base font-medium text-text-primary">{provider.name}</div>
+                    <div className="text-sm text-text-secondary">{provider.description}</div>
                   </button>
                 ))}
                 <div className="w-full px-3 py-2 text-left cursor-not-allowed opacity-50">
-                  <div className="text-xs font-medium text-text-tertiary">More providers coming soon</div>
+                  <div className="text-base font-medium text-text-tertiary">More providers coming soon</div>
                 </div>
               </div>
             )}
@@ -526,7 +526,7 @@ export function ViewLogin({ onLoginSuccess }: ViewLoginProps) {
 
         {/* Help link */}
         <p
-          className="mt-6 text-xs text-text-tertiary"
+          className="mt-6 text-sm text-text-tertiary"
           style={{ animation: "fade-in 0.4s ease-out 0.8s backwards" }}
         >
           Get your credentials from{" "}
