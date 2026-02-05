@@ -111,6 +111,10 @@ export interface Pip {
    * SDK uses this to determine initialization behavior.
    */
   triggeredByTool?: boolean;
+  /**
+   * Whether this pip should open in background when another pip is active.
+   */
+  openInBackground?: boolean;
 }
 
 interface PipsState {
@@ -559,12 +563,17 @@ export function AppProvider({ children }: AppProviderProps) {
         toolName: cpPip.toolName,
         creatureAuth: cpPip.creatureAuth,
         triggeredByTool: cpPip.triggeredByTool,
+        openInBackground: cpPip.openInBackground,
       };
 
       setPipsList((prev) => [...prev, pip]);
       setPipOrder((prev) => [...prev, pip.instanceId]);
-      // Auto-select newly created pip as the active tab
-      setActivePipIdState(pip.instanceId);
+      setActivePipIdState((currentActive) => {
+        if (cpPip.triggeredByTool === true && cpPip.openInBackground === true && currentActive) {
+          return currentActive;
+        }
+        return pip.instanceId;
+      });
       // Auto-show pip area when a pip is created
       // Width is dynamically calculated in App.tsx based on window size
       setIsPipAreaVisible(true);

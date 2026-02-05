@@ -291,6 +291,11 @@ interface CachedTool {
    */
   defaultDisplayMode?: string;
   /**
+   * Whether a newly created pip should open in background when another pip is active.
+   * Defaults to false when omitted.
+   */
+  openInBackground?: boolean;
+  /**
    * Creature auth configuration from _meta.creature.auth.
    * When managed=true, host provides identity + token to the app.
    */
@@ -2382,6 +2387,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
           displayModes?: string[];
           experimental?: {
             defaultDisplayMode?: string;
+            openInBackground?: boolean;
           };
         };
         creature?: {
@@ -2410,6 +2416,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
         resourceUri: meta?.ui?.resourceUri,
         displayModes: meta?.ui?.displayModes,
         defaultDisplayMode: meta?.ui?.experimental?.defaultDisplayMode,
+        openInBackground: meta?.ui?.experimental?.openInBackground,
         creatureAuth: meta?.creature?.auth,
       });
     }

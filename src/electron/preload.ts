@@ -169,6 +169,10 @@ export interface McpPip {
    * SDK uses this to determine initialization behavior.
    */
   triggeredByTool?: boolean;
+  /**
+   * Whether this pip should open in background when another pip is active.
+   */
+  openInBackground?: boolean;
 }
 
 /**
