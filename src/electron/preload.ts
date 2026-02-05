@@ -411,15 +411,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     /**
      * Create MCP App project.
-     * Supports both existing MCP folders and creating new ones from template.
+     * Supports both existing MCP folders and creating new ones from the example template.
      */
     createMcpApp: (params: {
-      mcpFolderPath?: string;  // Path to existing MCP folder
-      targetPath?: string;      // Parent path for new MCP
-      name?: string;            // Subfolder name for new MCP
-      template?: string;        // Template to use (template-todos or template-notes)
+      mcpFolderPath?: string; // Path to existing MCP folder
+      targetPath?: string; // Parent path for new MCP
+      name?: string; // Subfolder name for new MCP
       projectName: string;
-      projectRootMode?: "parent" | "app";  // Where to create .creature (default: "parent")
+      projectRootMode?: "parent" | "app"; // Where to create .creature (default: "parent")
     }): Promise<{
       success: boolean;
       project?: ProjectWithValidation;

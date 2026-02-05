@@ -15,27 +15,24 @@ import { buildSpawnEnv, resolveBundledCommand } from "../utils/env";
 import * as telemetry from "../telemetry";
 
 /**
- * Find the path to an MCP app template directory.
+ * Find the path to the MCP app template directory.
+ * Uses the "example" template from desktop/artifacts/example.
  * Searches in various locations to support both development and production modes.
- *
- * @param templateName - Template name (e.g., "todos", "notes", "crm")
  */
-const findTemplatePath = (templateName: string = "todos"): string | null => {
-  const resourceName = `mcp-${templateName}`;
-
-  // In packaged builds, templates are bundled in Resources directory
+const findTemplatePath = (): string | null => {
+  // In packaged builds, template is bundled in Resources directory
   if (app.isPackaged) {
-    const resourcePath = path.join(process.resourcesPath, resourceName);
+    const resourcePath = path.join(process.resourcesPath, "mcp-example");
     if (fs.existsSync(path.join(resourcePath, "package.json"))) {
-      console.log(`[MCP] Found bundled ${templateName} at ${resourcePath}`);
+      console.log(`[MCP] Found bundled example template at ${resourcePath}`);
       return resourcePath;
     }
-    console.warn(`[MCP] ${templateName} not found in bundled resources`);
+    console.warn(`[MCP] Example template not found in bundled resources`);
     return null;
   }
 
-  // Development: check mcps location
-  const devPath = path.resolve(findWorkspaceRoot() || "", `desktop/src/electron/mcps/${templateName}`);
+  // Development: check artifacts/example location
+  const devPath = path.resolve(findWorkspaceRoot() || "", "desktop/artifacts/example");
   if (fs.existsSync(path.join(devPath, "package.json"))) {
     return devPath;
   }
@@ -165,7 +162,7 @@ const runCommand = ({
 };
 
 /**
- * Create a new MCP from a template.
+ * Create a new MCP from the example template.
  *
  * Steps:
  * 1. Copy template to target directory
@@ -176,23 +173,20 @@ const runCommand = ({
  *
  * @param targetPath - Directory to create the MCP in
  * @param name - Name for the new MCP
- * @param template - Template to use ("todos", "notes", or "crm")
  */
 export const createFromTemplate = async ({
   targetPath,
   name,
-  template = "todos",
 }: {
   targetPath: string;
   name: string;
-  template?: string;
 }): Promise<{ success: boolean; error?: string }> => {
-  console.log(`[MCP] Creating new MCP from ${template}: ${name} at ${targetPath}`);
+  console.log(`[MCP] Creating new MCP from example template: ${name} at ${targetPath}`);
 
   // Find template directory
-  const templatePath = findTemplatePath(template);
+  const templatePath = findTemplatePath();
   if (!templatePath) {
-    return { success: false, error: `Could not find ${template} directory` };
+    return { success: false, error: "Could not find example template directory" };
   }
 
   // Create target directory path
@@ -235,50 +229,26 @@ export const createFromTemplate = async ({
     fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
     // Update template identity in source files
-    // This handles both legacy format (src/server.ts, src/ui/page.tsx) and
-    // artifact format (src/server/lib/types.ts, src/server/index.ts, src/ui/app.tsx)
+    // The example template uses "items" as the default name
     
-    // Legacy format: src/server.ts
-    const serverPath = path.join(mcpDir, "src", "server.ts");
-    if (fs.existsSync(serverPath)) {
-      let serverContent = fs.readFileSync(serverPath, "utf-8");
-      serverContent = serverContent.replace(/name: "mcp-template"/g, `name: "${name}"`);
-      serverContent = serverContent.replace(/ui:\/\/mcp-template\//g, `ui://${name}/`);
-      fs.writeFileSync(serverPath, serverContent);
+    // Server entry: src/server/index.ts - contains app name and URI
+    const serverIndexPath = path.join(mcpDir, "src", "server", "index.ts");
+    if (fs.existsSync(serverIndexPath)) {
+      let serverContent = fs.readFileSync(serverIndexPath, "utf-8");
+      // Replace app name in createApp()
+      serverContent = serverContent.replace(/name: "items"/g, `name: "${name}"`);
+      // Replace ui:// URIs
+      serverContent = serverContent.replace(/ui:\/\/items\//g, `ui://${name}/`);
+      fs.writeFileSync(serverIndexPath, serverContent);
     }
 
-    // Legacy format: src/ui/page.tsx
-    const pagePath = path.join(mcpDir, "src", "ui", "page.tsx");
-    if (fs.existsSync(pagePath)) {
-      let pageContent = fs.readFileSync(pagePath, "utf-8");
-      pageContent = pageContent.replace(/name: "mcp-template"/g, `name: "${name}"`);
-      fs.writeFileSync(pagePath, pageContent);
-    }
-
-    // Artifact format: src/server/lib/types.ts - contains MCP_NAME constant
-    const typesPath = path.join(mcpDir, "src", "server", "lib", "types.ts");
-    if (fs.existsSync(typesPath)) {
-      let typesContent = fs.readFileSync(typesPath, "utf-8");
-      // Replace MCP_NAME constant (handles mcp-template-todos, mcp-template-notes, mcp-template-crm, etc.)
-      typesContent = typesContent.replace(
-        /export const MCP_NAME = "mcp-template-[^"]+"/g,
-        `export const MCP_NAME = "${name}"`
-      );
-      // Replace any ui:// URIs that reference the template name
-      typesContent = typesContent.replace(
-        /ui:\/\/mcp-template-[^/]+\//g,
-        `ui://${name}/`
-      );
-      fs.writeFileSync(typesPath, typesContent);
-    }
-
-    // Artifact format: src/ui/app.tsx - contains HostProvider name
+    // UI entry: src/ui/app.tsx - contains HostProvider name
     const appTsxPath = path.join(mcpDir, "src", "ui", "app.tsx");
     if (fs.existsSync(appTsxPath)) {
       let appContent = fs.readFileSync(appTsxPath, "utf-8");
-      // Replace HostProvider name prop (handles mcp-template-todos, mcp-template-notes, mcp-template-crm, etc.)
+      // Replace HostProvider name prop
       appContent = appContent.replace(
-        /<HostProvider name="mcp-template-[^"]+"/g,
+        /<HostProvider name="items"/g,
         `<HostProvider name="${name}"`
       );
       fs.writeFileSync(appTsxPath, appContent);
@@ -332,14 +302,13 @@ export const registerMcpHandlers = () => {
   });
 
   /**
-   * Create a new MCP from the template.
+   * Create a new MCP from the example template.
    */
-  ipcMain.handle("mcp:createFromTemplate", async (_, { targetPath, name, template }) => {
-    const result = await createFromTemplate({ targetPath, name, template });
+  ipcMain.handle("mcp:createFromTemplate", async (_, { targetPath, name }) => {
+    const result = await createFromTemplate({ targetPath, name });
 
     // Track MCP creation (no paths)
     telemetry.track("mcp_create_from_template", {
-      template: template || "todos",
       success: result.success,
     });
 

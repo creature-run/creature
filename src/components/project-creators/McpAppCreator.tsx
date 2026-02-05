@@ -11,16 +11,8 @@ import { Button } from "../Button";
 import { Input } from "../Input";
 import { Label } from "../Label";
 import { Spinner } from "../Spinner";
-import { Select, SelectItem } from "../Select";
 import { cn } from "../../lib/utils";
 import type { ProjectCreatorProps } from "./types";
-
-/** Available MCP templates */
-const TEMPLATES = [
-  { value: "todos", label: "Todos — Single-instance todo list" },
-  { value: "notes", label: "Notes — Multi-instance markdown notes" },
-  { value: "crm", label: "CRM — Data tables + relational data" },
-] as const;
 
 type McpCreatorStatus = 
   | "idle"
@@ -43,7 +35,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   
   // Create mode state
   const [createFolderLocation, setCreateFolderLocation] = useState("");
-  const [selectedTemplate, setSelectedTemplate] = useState<string>("todos");
   
   // Existing mode state
   const [existingFolderPath, setExistingFolderPath] = useState("");
@@ -132,7 +123,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         : await window.electronAPI.project.createMcpApp({
             targetPath: createFolderLocation,
             name: folderName.trim(),
-            template: selectedTemplate,
             projectName: projectName.trim() || "New MCP App",
             projectRootMode: "app",
           });
@@ -151,7 +141,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
       setStatus("error");
       setStatusMessage(null);
     }
-  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, selectedTemplate, onComplete]);
+  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, onComplete]);
 
   /**
    * Generates a folder name from a project name.
@@ -297,20 +287,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
           {/* Create Mode Content */}
           {mode === "create" && (
             <>
-              {/* Template selection */}
-              <div className="mb-4">
-                <Label htmlFor="template">
-                  Template
-                </Label>
-                <Select id="template" value={selectedTemplate} onValueChange={setSelectedTemplate}>
-                  {TEMPLATES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </Select>
-              </div>
-
               {/* Folder Location */}
               <div className="mb-4">
                 <Label>Folder Location</Label>

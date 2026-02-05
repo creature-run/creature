@@ -319,4 +319,4 @@ In the DevConsole, you should see MCP startup logs showing the env vars being in
 ## Related Files
 
 - `desktop/artifacts/sdk/docs/STORAGE.md` - User-facing documentation
-- `desktop/artifacts/template-todos/src/server/lib/data.ts` - Example implementation
+- `desktop/artifacts/example/src/server/lib/data.ts` - Example implementation

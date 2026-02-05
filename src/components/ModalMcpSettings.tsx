@@ -1200,7 +1200,7 @@ function CreateMcpForm({ existingNames, onComplete, onCancel }: CreateMcpFormPro
           )}
 
           <p className="text-sm text-text-secondary mb-4">
-            Create a new MCP from the template with a Todo List example.
+            Create a new MCP App from the example template.
             The template includes tools and a Pip UI.
           </p>
 

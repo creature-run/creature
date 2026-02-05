@@ -445,14 +445,12 @@ export const registerProjectHandlers = () => {
         mcpFolderPath,
         targetPath,
         name,
-        template,
         projectName,
         projectRootMode = "parent",
       }: {
         mcpFolderPath?: string; // Path to existing MCP folder
         targetPath?: string; // Parent path for new MCP
         name?: string; // Subfolder name for new MCP
-        template?: string; // Template to use (todos, notes, or crm)
         projectName: string;
         projectRootMode?: "parent" | "app"; // Where to set local_directory (default: "parent")
       }
@@ -465,14 +463,13 @@ export const registerProjectHandlers = () => {
         // Using existing folder - accept any folder without validation
         finalMcpPath = mcpFolderPath;
       } else if (targetPath && name) {
-        // Creating new MCP from template
+        // Creating new MCP from example template
         finalMcpPath = pathModule.join(targetPath, name);
 
         const { createFromTemplate } = await import("./mcp.handlers");
         const templateResult = await createFromTemplate({
           targetPath,
           name,
-          template: template || "todos",
         });
 
         if (!templateResult.success) {
