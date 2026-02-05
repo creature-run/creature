@@ -147,6 +147,10 @@ interface ProjectWithValidation {
     env?: Record<string, string>;
     enabled: boolean;
   }>;
+  sampling?: {
+    approvalMode: "per_request" | "allowlist" | "allow_all";
+    allowlist: string[];
+  };
   created_at: string;
   updated_at: string;
   last_accessed_at: string;

@@ -50,6 +50,16 @@ export interface ProjectSettingsContext {
   custom_instructions?: string;
 }
 
+export interface SamplingSettings {
+  approvalMode: "per_request" | "allowlist" | "allow_all";
+  allowlist: string[];
+}
+
+export const DEFAULT_SAMPLING_SETTINGS: SamplingSettings = {
+  approvalMode: "allowlist",
+  allowlist: [],
+};
+
 /**
  * Schema for project settings stored in userData.
  * Contains all project configuration including the selected local directory.
@@ -60,6 +70,7 @@ export interface ProjectSettingsConfig {
   profile: ProjectProfile;
   context: ProjectSettingsContext;
   mcps: ProjectMcpConfig[];
+  sampling?: SamplingSettings;
   created_at: string;
   updated_at: string;
 }
@@ -187,6 +198,7 @@ export const writeUserDataProjectConfig = (
       profile: config.profile,
       context: config.context || {},
       mcps: config.mcps || [],
+      sampling: config.sampling ?? DEFAULT_SAMPLING_SETTINGS,
       created_at: config.created_at,
       updated_at: now(),
     };
@@ -345,11 +357,12 @@ export const resolveEffectiveProjectConfig = (
   userDataConfig: ProjectSettingsConfig
 ): ResolvedProjectSettings => {
   const localDir = userDataConfig.context.local_directory?.path;
+  const sampling = userDataConfig.sampling ?? DEFAULT_SAMPLING_SETTINGS;
 
   // No local directory selected - use userData settings
   if (!localDir) {
     return {
-      config: userDataConfig,
+      config: { ...userDataConfig, sampling },
       source: "userData",
       hasLocalOverride: false,
     };
@@ -359,7 +372,7 @@ export const resolveEffectiveProjectConfig = (
   const hasOverride = localOverrideExists(localDir);
   if (!hasOverride) {
     return {
-      config: userDataConfig,
+      config: { ...userDataConfig, sampling },
       source: "userData",
       hasLocalOverride: false,
     };
@@ -371,7 +384,7 @@ export const resolveEffectiveProjectConfig = (
     // Local override exists but is invalid - fall back to userData
     console.warn("[ProjectSettings] Local override invalid, using userData for", projectId);
     return {
-      config: userDataConfig,
+      config: { ...userDataConfig, sampling },
       source: "userData",
       hasLocalOverride: true,
     };
@@ -388,6 +401,7 @@ export const resolveEffectiveProjectConfig = (
       custom_instructions: localConfig.context.custom_instructions,
     },
     mcps: localConfig.mcps,
+    sampling,
     created_at: localConfig.created_at,
     updated_at: localConfig.updated_at,
   };

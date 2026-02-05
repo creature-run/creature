@@ -21,9 +21,11 @@ import {
   localOverrideExists,
   readLocalOverrideConfig,
   getProjectsSettingsRoot,
+  DEFAULT_SAMPLING_SETTINGS,
   type ProjectProfile,
   type ProjectMcpConfig,
   type ProjectSettingsConfig,
+  type SamplingSettings,
 } from "./projectSettings";
 
 // Re-export types for convenience
@@ -53,6 +55,7 @@ export interface LocalProject {
   profile: ProjectProfile;
   context: ProjectContext;
   mcps: ProjectMcpConfig[];
+  sampling: SamplingSettings;
   created_at: string;
   updated_at: string;
   last_accessed_at: string;
@@ -169,6 +172,7 @@ const composeProject = (entry: ProjectIndexEntry): { project: LocalProject; sour
         custom_instructions: resolved.config.context.custom_instructions,
       },
       mcps: resolved.config.mcps,
+      sampling: resolved.config.sampling ?? DEFAULT_SAMPLING_SETTINGS,
       created_at: resolved.config.created_at,
       updated_at: resolved.config.updated_at,
       last_accessed_at: entry.last_accessed_at,
@@ -259,6 +263,7 @@ export const createProject = async (params: {
   profile: ProjectProfile;
   context?: ProjectContext;
   mcps?: ProjectMcpConfig[];
+  sampling?: SamplingSettings;
 }): Promise<LocalProject> => {
   const timestamp = now();
   const id = generateId();
@@ -281,6 +286,7 @@ export const createProject = async (params: {
       custom_instructions: params.context?.custom_instructions,
     },
     mcps: params.mcps || [],
+    sampling: params.sampling ?? DEFAULT_SAMPLING_SETTINGS,
     created_at: timestamp,
   });
 
@@ -304,6 +310,7 @@ export const createProject = async (params: {
       custom_instructions: config.context.custom_instructions,
     },
     mcps: config.mcps,
+    sampling: config.sampling ?? DEFAULT_SAMPLING_SETTINGS,
     created_at: config.created_at,
     updated_at: config.updated_at,
     last_accessed_at: timestamp,
@@ -321,6 +328,7 @@ export const updateProject = async (
     profile?: ProjectProfile;
     context?: ProjectContext;
     mcps?: ProjectMcpConfig[];
+    sampling?: SamplingSettings;
   }
 ): Promise<LocalProject | null> => {
   const index = loadIndex();
@@ -360,6 +368,7 @@ export const updateProject = async (
         : existing.context.custom_instructions,
     },
     mcps: updates.mcps ?? existing.mcps,
+    sampling: updates.sampling ?? existing.sampling ?? DEFAULT_SAMPLING_SETTINGS,
     created_at: existing.created_at,
   };
 
@@ -376,6 +385,7 @@ export const updateProject = async (
       custom_instructions: config.context.custom_instructions,
     },
     mcps: config.mcps,
+    sampling: config.sampling ?? DEFAULT_SAMPLING_SETTINGS,
     created_at: config.created_at,
     updated_at: config.updated_at,
     last_accessed_at: entry.last_accessed_at,

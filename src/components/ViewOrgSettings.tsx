@@ -12,7 +12,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "./AlertDialog";
-import type { ProviderCredentials, ProviderType } from "../electron/preload";
+import type { ProviderCredentials, ProviderType, EmbeddingsCredentials } from "../electron/preload";
 
 interface ViewOrgSettingsProps {
   onClose: () => void;
@@ -64,6 +64,16 @@ export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSetting
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [embeddingsConfigured, setEmbeddingsConfigured] = useState(false);
+  const [embeddingsModel, setEmbeddingsModel] = useState("");
+  const [savedEmbeddingsModel, setSavedEmbeddingsModel] = useState("");
+  const [embeddingsApiKey, setEmbeddingsApiKey] = useState("");
+  const [embeddingsError, setEmbeddingsError] = useState<string | null>(null);
+  const [embeddingsSuccess, setEmbeddingsSuccess] = useState(false);
+  const [isEmbeddingsEditing, setIsEmbeddingsEditing] = useState(false);
+  const [isEmbeddingsLoading, setIsEmbeddingsLoading] = useState(false);
+  const [showEmbeddingsDeleteConfirm, setShowEmbeddingsDeleteConfirm] = useState(false);
+  const [isEmbeddingsDeleting, setIsEmbeddingsDeleting] = useState(false);
 
   // Anthropic fields
   const [apiKey, setApiKey] = useState("");
@@ -96,6 +106,23 @@ export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSetting
     setError(null);
     setSuccess(false);
   }, [providerType]);
+
+  useEffect(() => {
+    const loadEmbeddingsState = async () => {
+      try {
+        const state = await window.electronAPI.embeddings.getState();
+        setEmbeddingsConfigured(state.hasCredentials);
+        setEmbeddingsModel(state.model || "");
+        setSavedEmbeddingsModel(state.model || "");
+      } catch {
+        setEmbeddingsConfigured(false);
+        setEmbeddingsModel("");
+        setSavedEmbeddingsModel("");
+      }
+    };
+
+    loadEmbeddingsState();
+  }, []);
 
   /**
    * Build credentials based on current provider and form state.
@@ -214,6 +241,12 @@ export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSetting
     }
   };
 
+  const handleEmbeddingsKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !isEmbeddingsLoading && isEmbeddingsFormValid()) {
+      handleEmbeddingsSave();
+    }
+  };
+
   /**
    * Delete credentials and return to welcome screen.
    */
@@ -233,6 +266,70 @@ export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSetting
       setShowDeleteConfirm(false);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const buildEmbeddingsCredentials = (): EmbeddingsCredentials | null => {
+    if (!embeddingsApiKey.trim()) return null;
+    return {
+      type: "openai",
+      apiKey: embeddingsApiKey.trim(),
+      model: embeddingsModel.trim() || undefined,
+    };
+  };
+
+  const isEmbeddingsFormValid = (): boolean => {
+    return buildEmbeddingsCredentials() !== null;
+  };
+
+  const handleEmbeddingsSave = async () => {
+    const credentials = buildEmbeddingsCredentials();
+    if (!credentials) {
+      setEmbeddingsError("Please enter an OpenAI API key");
+      return;
+    }
+
+    setIsEmbeddingsLoading(true);
+    setEmbeddingsError(null);
+    setEmbeddingsSuccess(false);
+
+    try {
+      const result = await window.electronAPI.embeddings.saveCredentials(credentials);
+      if (result.success) {
+        setEmbeddingsConfigured(true);
+        setSavedEmbeddingsModel(credentials.model || "");
+        setEmbeddingsModel(credentials.model || "");
+        setEmbeddingsSuccess(true);
+        setEmbeddingsApiKey("");
+      } else {
+        setEmbeddingsError(result.error || "Failed to save embeddings credentials");
+      }
+    } catch (err) {
+      setEmbeddingsError(err instanceof Error ? err.message : "Failed to save embeddings credentials");
+    } finally {
+      setIsEmbeddingsLoading(false);
+    }
+  };
+
+  const handleDeleteEmbeddingsCredentials = async () => {
+    setIsEmbeddingsDeleting(true);
+    try {
+      const result = await window.electronAPI.embeddings.clearCredentials();
+      if (result.success) {
+        setEmbeddingsConfigured(false);
+        setEmbeddingsModel("");
+        setSavedEmbeddingsModel("");
+        setEmbeddingsApiKey("");
+        setEmbeddingsSuccess(false);
+        setIsEmbeddingsEditing(false);
+        setShowEmbeddingsDeleteConfirm(false);
+      } else {
+        setEmbeddingsError(result.error || "Failed to delete embeddings credentials");
+      }
+    } catch (err) {
+      setEmbeddingsError(err instanceof Error ? err.message : "Failed to delete embeddings credentials");
+    } finally {
+      setIsEmbeddingsDeleting(false);
     }
   };
 
@@ -587,6 +684,149 @@ export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSetting
               </div>
             )}
 
+            <div className="mt-12 mb-4">
+              <h2 className="text-sm font-medium text-text-primary">Embeddings</h2>
+              <p className="text-xs text-text-secondary mt-1">
+                Configure OpenAI embeddings for vector search
+              </p>
+            </div>
+
+            {!isEmbeddingsEditing ? (
+              <div className="rounded-md border border-border-primary">
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center gap-3">
+                    <Key size={16} className="text-text-secondary shrink-0" />
+                    <div>
+                      <div className="text-sm font-medium text-text-primary">OpenAI Embeddings</div>
+                      <div className="text-xs text-text-secondary">
+                        {embeddingsConfigured ? "Configured" : "Not configured"}
+                      </div>
+                      {embeddingsConfigured && embeddingsModel && (
+                        <div className="text-xs text-text-tertiary">Model: {embeddingsModel}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {embeddingsConfigured && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowEmbeddingsDeleteConfirm(true)}
+                        className="text-text-secondary hover:text-text-danger hover:border-border-danger"
+                      >
+                        <Trash size={14} />
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEmbeddingsError(null);
+                        setEmbeddingsSuccess(false);
+                        setIsEmbeddingsEditing(true);
+                      }}
+                    >
+                      {embeddingsConfigured ? "Change" : "Add"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-md border border-border-primary p-4">
+                <div className="mb-4">
+                  <label className="block text-xs text-text-secondary mb-2">API Key</label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary">
+                      <Key size={14} />
+                    </div>
+                    <input
+                      type="password"
+                      value={embeddingsApiKey}
+                      onChange={(e) => setEmbeddingsApiKey(e.target.value)}
+                      onKeyDown={handleEmbeddingsKeyPress}
+                      placeholder="sk-..."
+                      disabled={isEmbeddingsLoading}
+                      className="w-full h-[34px] px-3 pl-9 rounded-md bg-background-primary border border-border-primary text-text-primary text-xs placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all font-mono"
+                    />
+                  </div>
+                  {embeddingsConfigured && !embeddingsApiKey && (
+                    <p className="text-xs text-text-tertiary mt-2">
+                      A key is already configured. Enter a new key to replace it.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-xs text-text-secondary mb-2">Model (optional)</label>
+                  <input
+                    type="text"
+                    value={embeddingsModel}
+                    onChange={(e) => setEmbeddingsModel(e.target.value)}
+                    onKeyDown={handleEmbeddingsKeyPress}
+                    placeholder="text-embedding-3-small"
+                    disabled={isEmbeddingsLoading}
+                    className="w-full h-[34px] px-3 rounded-md bg-background-primary border border-border-primary text-text-primary text-xs placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-ring-primary focus:border-ring-primary transition-all font-mono"
+                  />
+                </div>
+
+                <p className="text-xs text-text-tertiary mb-4">
+                  Get credentials from{" "}
+                  <button
+                    onClick={() => window.electronAPI.shell.openExternal("https://platform.openai.com/api-keys")}
+                    className="text-text-secondary hover:text-text-primary hover:underline cursor-pointer"
+                  >
+                    platform.openai.com
+                  </button>
+                </p>
+
+                {embeddingsError && (
+                  <div className="alert alert-danger mb-4">
+                    <div className="flex items-center gap-2">
+                      <Warning size={14} className="shrink-0" />
+                      <span>{embeddingsError}</span>
+                    </div>
+                  </div>
+                )}
+
+                {embeddingsSuccess && (
+                  <div className="flex items-center gap-2 text-sm text-text-success mb-4">
+                    <Check size={14} className="shrink-0" />
+                    <span>Embeddings credentials saved.</span>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setIsEmbeddingsEditing(false);
+                      setEmbeddingsApiKey("");
+                      setEmbeddingsModel(savedEmbeddingsModel);
+                      setEmbeddingsError(null);
+                      setEmbeddingsSuccess(false);
+                    }}
+                    disabled={isEmbeddingsLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={handleEmbeddingsSave}
+                    disabled={isEmbeddingsLoading || !isEmbeddingsFormValid()}
+                  >
+                    {isEmbeddingsLoading ? (
+                      <>
+                        <Spinner size={14} />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* Footer Note */}
             <div className="mt-6 pt-4 border-t border-border-secondary">
               <p className="text-sm text-text-tertiary">
@@ -614,6 +854,34 @@ export function ViewOrgSettings({ onClose, currentProviderType }: ViewOrgSetting
               className="bg-solid-danger hover:bg-solid-danger/90"
             >
               {isDeleting ? (
+                <>
+                  <Spinner size={14} />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showEmbeddingsDeleteConfirm} onOpenChange={setShowEmbeddingsDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete embeddings credentials?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove your OpenAI embeddings key. Vector search will be unavailable until you add a new key.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isEmbeddingsDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteEmbeddingsCredentials}
+              disabled={isEmbeddingsDeleting}
+              className="bg-solid-danger hover:bg-solid-danger/90"
+            >
+              {isEmbeddingsDeleting ? (
                 <>
                   <Spinner size={14} />
                   <span>Deleting...</span>

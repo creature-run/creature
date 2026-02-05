@@ -1,8 +1,17 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ResourceIcon, WidgetState } from "../shared/types";
 import type { ProviderCredentials, ProviderType } from "../shared/credentials";
+import type { SamplingEvent, SamplingResponse } from "./mcp/sampling";
+import type { EmbeddingsCredentials, EmbeddingsProviderType } from "../shared/embeddings";
 
-export type { ResourceIcon, WidgetState, ProviderCredentials, ProviderType };
+export type {
+  ResourceIcon,
+  WidgetState,
+  ProviderCredentials,
+  ProviderType,
+  EmbeddingsCredentials,
+  EmbeddingsProviderType,
+};
 
 export type LogLevel = "debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency";
 
@@ -39,6 +48,12 @@ export interface AuthState {
   providerType?: ProviderType;
   // Legacy compatibility
   hasApiKey: boolean;
+}
+
+export interface EmbeddingsState {
+  hasCredentials: boolean;
+  providerType?: EmbeddingsProviderType;
+  model?: string;
 }
 
 export interface MCPServerConfigForRenderer {
@@ -94,6 +109,11 @@ export interface ProjectContext {
   custom_instructions?: string;
 }
 
+export interface SamplingSettings {
+  approvalMode: "per_request" | "allowlist" | "allow_all";
+  allowlist: string[];
+}
+
 /**
  * Local project (no cloud fields).
  */
@@ -103,6 +123,7 @@ export interface Project {
   profile: ProjectProfile;
   context: ProjectContext;
   mcps: ProjectMcpConfig[];
+  sampling?: SamplingSettings;
   created_at: string;
   updated_at: string;
   last_accessed_at: string;
@@ -294,6 +315,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("auth:clearApiKey"),
   },
 
+  embeddings: {
+    getState: (): Promise<EmbeddingsState> => ipcRenderer.invoke("embeddings:getState"),
+    saveCredentials: (credentials: EmbeddingsCredentials): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("embeddings:saveCredentials", { credentials }),
+    clearCredentials: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("embeddings:clearCredentials"),
+  },
+
   // MCP server configuration
   mcp: {
     getConfigs: (): Promise<MCPServerConfigForRenderer[]> => ipcRenderer.invoke("mcp:getConfigs"),
@@ -352,6 +381,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }> => ipcRenderer.invoke("mcp:launchResourcePip", { serverName, resourceUri }),
   },
 
+  sampling: {
+    onEvent: (callback: (event: SamplingEvent) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: SamplingEvent) => callback(data);
+      ipcRenderer.on("sampling:event", handler);
+      return () => ipcRenderer.removeListener("sampling:event", handler);
+    },
+    respond: (response: SamplingResponse): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("sampling:respond", response),
+  },
+
   // Projects API
   project: {
     /**
@@ -380,6 +419,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       profile: ProjectProfile;
       context?: ProjectContext;
       mcps?: ProjectMcpConfig[];
+      sampling?: SamplingSettings;
     }): Promise<{
       success: boolean;
       project?: Project;
@@ -395,6 +435,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       profile?: ProjectProfile;
       context?: ProjectContext;
       mcps?: ProjectMcpConfig[];
+      sampling?: SamplingSettings;
     }): Promise<{
       success: boolean;
       project?: ProjectWithValidation;
@@ -855,6 +896,11 @@ declare global {
         saveApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>;
         clearApiKey: () => Promise<{ success: boolean }>;
       };
+      embeddings: {
+        getState: () => Promise<EmbeddingsState>;
+        saveCredentials: (credentials: EmbeddingsCredentials) => Promise<{ success: boolean; error?: string }>;
+        clearCredentials: () => Promise<{ success: boolean; error?: string }>;
+      };
       mcp: {
         getConfigs: () => Promise<MCPServerConfigForRenderer[]>;
         createFromTemplate: (targetPath: string, name: string) => Promise<{ success: boolean; error?: string }>;
@@ -883,6 +929,10 @@ declare global {
           error?: string;
         }>;
       };
+      sampling: {
+        onEvent: (callback: (event: SamplingEvent) => void) => () => void;
+        respond: (response: SamplingResponse) => Promise<{ success: boolean; error?: string }>;
+      };
       project: {
         list: () => Promise<{
           success: boolean;
@@ -899,6 +949,7 @@ declare global {
           profile: ProjectProfile;
           context?: ProjectContext;
           mcps?: ProjectMcpConfig[];
+          sampling?: SamplingSettings;
         }) => Promise<{
           success: boolean;
           project?: Project;
@@ -910,6 +961,7 @@ declare global {
           profile?: ProjectProfile;
           context?: ProjectContext;
           mcps?: ProjectMcpConfig[];
+          sampling?: SamplingSettings;
         }) => Promise<{
           success: boolean;
           project?: ProjectWithValidation;

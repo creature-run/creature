@@ -7,11 +7,13 @@ import { ProjectList } from "./components/ProjectList";
 import { ModalMcpSettings } from "./components/ModalMcpSettings";
 import { ViewProjectSettings } from "./components/ViewProjectSettings";
 import { ViewOrgSettings } from "./components/ViewOrgSettings";
+import type { SamplingEvent } from "./components/SamplingDialog";
 import { Toaster } from "./components/Sonner";
 import { useApp } from "./contexts/AppContext";
 import { Spinner } from "./components/Spinner";
 import { toast } from "sonner";
 import type { ProjectWithValidation } from "./electron/preload";
+import type { CreateMessageRequestParams } from "@modelcontextprotocol/sdk/types.js";
 
 /** Duration of the pip slide animation in milliseconds */
 const PIP_ANIMATION_DURATION = 250;
@@ -38,6 +40,77 @@ function App() {
     setAppSettingsOpen,
     setPipsWidth,
   } = useApp();
+
+  const [samplingQueue, setSamplingQueue] = useState<SamplingEvent[]>([]);
+  const activeSampling = samplingQueue[0] ?? null;
+
+  useEffect(() => {
+    const cleanup = window.electronAPI.sampling.onEvent((event) => {
+      setSamplingQueue((queue) => [...queue, event]);
+    });
+    return () => {
+      cleanup();
+    };
+  }, []);
+
+  const applyTextToMessages = useCallback(
+    (messages: CreateMessageRequestParams["messages"], text: string) => {
+      let applied = false;
+      return messages.map((message) => {
+        const contentBlocks = Array.isArray(message.content) ? message.content : [message.content];
+        const nextContent = contentBlocks.map((block) => {
+          if (!applied && block && typeof block === "object" && "type" in block && block.type === "text") {
+            applied = true;
+            return { ...block, text };
+          }
+          return block;
+        });
+        if (!applied) {
+          nextContent.push({ type: "text", text });
+          applied = true;
+        }
+        return { ...message, content: nextContent };
+      });
+    },
+    []
+  );
+
+  const handleSamplingApprove = useCallback(
+    async (payload: {
+      requestId: string;
+      stage: "request";
+      editedSystemPrompt?: string;
+      editedMessages?: CreateMessageRequestParams["messages"];
+      editedText?: string;
+    }) => {
+      let editedMessages = payload.editedMessages;
+
+      if (payload.editedText && activeSampling) {
+        if (activeSampling.stage === "request" && "messages" in activeSampling) {
+          editedMessages = applyTextToMessages(activeSampling.messages, payload.editedText);
+        }
+      }
+
+      await window.electronAPI.sampling.respond({
+        requestId: payload.requestId,
+        stage: payload.stage,
+        action: "approve",
+        editedSystemPrompt: payload.editedSystemPrompt,
+        editedMessages,
+      });
+      setSamplingQueue((queue) => queue.slice(1));
+    },
+    [activeSampling, applyTextToMessages]
+  );
+
+  const handleSamplingReject = useCallback(async (payload: { requestId: string; stage: "request" }) => {
+    await window.electronAPI.sampling.respond({
+      requestId: payload.requestId,
+      stage: payload.stage,
+      action: "reject",
+    });
+    setSamplingQueue((queue) => queue.slice(1));
+  }, []);
 
 
   // -------------------------------------------------------------------------
@@ -384,6 +457,16 @@ function App() {
                 isActive={true}
                 folderPath={session.folderPath}
                 focusTrigger={chatFocusTrigger}
+                samplingApproval={
+                  activeSampling
+                    ? {
+                        event: activeSampling,
+                        onApprove: ({ requestId, stage, editedText }) =>
+                          handleSamplingApprove({ requestId, stage, editedText }),
+                        onReject: ({ requestId, stage }) => handleSamplingReject({ requestId, stage }),
+                      }
+                    : undefined
+                }
               />
             ) : (
               <ProjectList
@@ -419,6 +502,8 @@ function App() {
 
       {/* Toast Notifications */}
       <Toaster />
+
+      
     </div>
   );
 }

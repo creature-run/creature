@@ -33,6 +33,7 @@ interface ViewChatProps {
   isActive: boolean;
   folderPath: string | null;
   focusTrigger?: number;
+  samplingApproval?: import("./ChatInput").SamplingApproval;
 }
 
 /**
@@ -76,6 +77,7 @@ interface ChatSessionProps {
   isActive: boolean;
   folderPath: string | null;
   focusTrigger?: number;
+  samplingApproval?: import("./ChatInput").SamplingApproval;
 }
 
 /**
@@ -86,7 +88,7 @@ interface ChatSessionProps {
  *
  * Separated from ViewChat to avoid initializing chat before folder is selected.
  */
-function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
+function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: ChatSessionProps) {
   const { isDarkMode } = useTheme();
   const { session, setProject } = useApp();
   const [input, setInput] = useState("");
@@ -795,6 +797,7 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
             messageQueue={messageQueue}
             onRemoveFromQueue={handleRemoveFromQueue}
             onClearQueue={handleClearQueue}
+            samplingApproval={samplingApproval}
           />
         </div>
       </div>
@@ -813,6 +816,13 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
  * With the new project-based flow, folder selection is handled by the project picker.
  * Chat now works with or without a folder.
  */
-export function ViewChat({ isActive, folderPath, focusTrigger }: ViewChatProps) {
-  return <ChatSession isActive={isActive} folderPath={folderPath} focusTrigger={focusTrigger} />;
+export function ViewChat({ isActive, folderPath, focusTrigger, samplingApproval }: ViewChatProps) {
+  return (
+    <ChatSession
+      isActive={isActive}
+      folderPath={folderPath}
+      focusTrigger={focusTrigger}
+      samplingApproval={samplingApproval}
+    />
+  );
 }
