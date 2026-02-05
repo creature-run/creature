@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import {
   ArrowClockwise,
   CaretRight,
@@ -27,21 +27,33 @@ interface FileItem {
   children?: FileItem[];
 }
 
+/**
+ * Props for the FileTree component.
+ * Expansion state is managed externally to ensure only user interactions
+ * can expand/collapse directories (agent tool calls don't affect it).
+ */
 interface FileTreeProps {
   items: FileItem[];
   onFileSelect: (path: string) => void;
   onRefresh: () => void;
   selectedPath?: string;
+  expandedPaths: Set<string>;
+  onToggleExpand: (path: string) => void;
 }
 
 /**
  * FileTree Component
  *
  * Displays a hierarchical file browser.
- * Directories can be expanded/collapsed.
+ * Directories can be expanded/collapsed by user clicks only.
  * Files can be clicked to open in the editor.
+ *
+ * Expansion state is managed externally (in App.tsx) to ensure:
+ * - Only user interactions modify expansion state
+ * - Agent tool calls (like ide_dir_list) don't auto-expand directories
+ * - State persists across tree data updates
  */
-export const FileTree = ({ items, onFileSelect, onRefresh, selectedPath }: FileTreeProps) => {
+export const FileTree = ({ items, onFileSelect, onRefresh, selectedPath, expandedPaths, onToggleExpand }: FileTreeProps) => {
   return (
     <div className="file-tree">
       <div className="file-tree-header">
@@ -58,6 +70,8 @@ export const FileTree = ({ items, onFileSelect, onRefresh, selectedPath }: FileT
             depth={0}
             onFileSelect={onFileSelect}
             selectedPath={selectedPath}
+            expandedPaths={expandedPaths}
+            onToggleExpand={onToggleExpand}
           />
         ))}
       </div>
@@ -65,11 +79,17 @@ export const FileTree = ({ items, onFileSelect, onRefresh, selectedPath }: FileT
   );
 };
 
+/**
+ * Props for FileTreeNode component.
+ * Expansion state comes from parent, not local state.
+ */
 interface FileTreeNodeProps {
   item: FileItem;
   depth: number;
   onFileSelect: (path: string) => void;
   selectedPath?: string;
+  expandedPaths: Set<string>;
+  onToggleExpand: (path: string) => void;
 }
 
 /**
@@ -77,17 +97,21 @@ interface FileTreeNodeProps {
  *
  * Renders a single file or directory in the tree.
  * Directories show expand/collapse icons and can have children.
+ *
+ * Expansion state is read from the parent-managed `expandedPaths` set,
+ * ensuring that only explicit user clicks can toggle expansion.
+ * This prevents agent tool calls from auto-expanding the tree.
  */
-const FileTreeNode = ({ item, depth, onFileSelect, selectedPath }: FileTreeNodeProps) => {
-  const [isExpanded, setIsExpanded] = useState(depth === 0);
+const FileTreeNode = ({ item, depth, onFileSelect, selectedPath, expandedPaths, onToggleExpand }: FileTreeNodeProps) => {
+  const isExpanded = expandedPaths.has(item.path);
 
   const handleClick = useCallback(() => {
     if (item.type === "directory") {
-      setIsExpanded((prev) => !prev);
+      onToggleExpand(item.path);
     } else {
       onFileSelect(item.path);
     }
-  }, [item, onFileSelect]);
+  }, [item, onFileSelect, onToggleExpand]);
 
   const isSelected = selectedPath === item.path;
   const paddingLeft = 12 + depth * 16;
@@ -122,6 +146,8 @@ const FileTreeNode = ({ item, depth, onFileSelect, selectedPath }: FileTreeNodeP
               depth={depth + 1}
               onFileSelect={onFileSelect}
               selectedPath={selectedPath}
+              expandedPaths={expandedPaths}
+              onToggleExpand={onToggleExpand}
             />
           ))}
         </div>

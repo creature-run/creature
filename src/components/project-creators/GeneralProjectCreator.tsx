@@ -68,6 +68,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
           { name: "browser", enabled: true },
           { name: "todos", enabled: true },
           { name: "notes", enabled: true },
+          { name: "crm", enabled: true },
           { name: "ide", enabled: true },
           { name: "terminal", enabled: true },
         ],
@@ -127,7 +128,7 @@ export function GeneralProjectCreator({ onComplete, onCancel }: ProjectCreatorPr
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-lg font-medium text-text-primary">Import an existing codebase</h2>
+            <h2 className="text-base font-medium text-text-primary">Import an existing codebase</h2>
             <button
               type="button"
               className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"

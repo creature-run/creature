@@ -232,7 +232,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-lg font-medium text-text-primary">
+            <h2 className="text-base font-medium text-text-primary">
               Create a new MCP App
             </h2>
             <button

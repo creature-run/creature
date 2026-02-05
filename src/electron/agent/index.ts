@@ -11,13 +11,14 @@ import {
   wrapLanguageModel,
   validateUIMessages,
   convertToModelMessages,
+  pruneMessages,
   UIMessage,
   SystemModelMessage,
 } from "ai";
 import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { app } from "electron";
 import { createPipTools } from "./tools";
-import { createProvider, MODEL_IDS } from "./provider";
+import { createProvider } from "./provider";
 import { getMcpToolsForAgent, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
 import { getProfileInstructions } from "./profileInstructions";
 import {
@@ -26,7 +27,8 @@ import {
   closePipInstance,
 } from "../mcp/controlPlane";
 import {
-  maybeCompactMessages,
+  maybeUpdateSummary,
+  getSessionSummary,
   updateArtifactsFromPart,
   updateActualTokenUsage,
   getSessionContext,
@@ -112,12 +114,18 @@ let currentCustomInstructions: string | null = null;
  *
  * @param folderPath - The current working directory (optional)
  * @param customInstructions - Custom instructions from project context (optional)
+ * @param sessionSummary - Summary of compacted conversation history (optional)
  * @returns The complete system prompt string
  */
-export const buildSystemPrompt = (
-  folderPath: string | null,
-  customInstructions: string | null
-): SystemModelMessage[] => {
+export const buildSystemPrompt = ({
+  folderPath,
+  customInstructions,
+  sessionSummary,
+}: {
+  folderPath: string | null;
+  customInstructions: string | null;
+  sessionSummary?: string | null;
+}): SystemModelMessage[] => {
   const activePips = getActivePipsForPrompt();
   const devMcpInfo = getDevMcpInfo();
 
@@ -236,6 +244,15 @@ This session may include profile-specific instructions that describe what the us
     });
   }
 
+  // Add session summary if exists (from context compaction)
+  // This preserves context from older messages that have been pruned
+  if (sessionSummary) {
+    systemMessages.push({
+      content: `# Session Summary\nPrevious conversation history has been compacted. This summary preserves key context:\n\n${sessionSummary}`,
+      role: "system",
+    });
+  }
+
   return systemMessages
 };
 
@@ -250,7 +267,10 @@ export const getCurrentSystemPrompt = (): string => {
   if (currentFolderPath === undefined) {
     return "(No active session - open a project to see the system prompt)";
   }
-  return buildSystemPrompt(currentFolderPath, currentCustomInstructions).map((msg) => msg.content).join("\n");
+  return buildSystemPrompt({
+    folderPath: currentFolderPath,
+    customInstructions: currentCustomInstructions,
+  }).map((msg) => msg.content).join("\n");
 };
 
 /**
@@ -265,10 +285,12 @@ export const createAgent = async ({
   folderPath,
   customInstructions,
   credentials,
+  sessionSummary,
 }: {
   folderPath: string | null;
   customInstructions: string | null;
   credentials: ProviderCredentials;
+  sessionSummary?: string | null;
 }) => {
   const pipTools = createPipTools({ closePipInstance });
   // Pass handleToolCall to route all agent tool calls through Control Plane
@@ -285,13 +307,16 @@ export const createAgent = async ({
         middleware: devToolsMiddleware(),
       });
 
-  // Build system prompt with current pip state and custom instructions
-  const systemPrompt = buildSystemPrompt(folderPath, customInstructions);
+  // Build system prompt with current pip state, custom instructions, and session summary
+  const systemPrompt = buildSystemPrompt({
+    folderPath,
+    customInstructions,
+    sessionSummary,
+  });
 
   return new ToolLoopAgent({
     model,
     instructions: systemPrompt,
-    // instructions: systemPrompt,
     tools: { ...pipTools, ...mcpTools },
   });
 };
@@ -323,10 +348,10 @@ const extractContentText = (result: unknown): string => {
  * Creates an agent and streams the response.
  *
  * Uses AI SDK v6's validateUIMessages to parse raw messages from HTTP,
- * then convertToModelMessages to convert to ModelMessage[] for ToolLoopAgent.
- *
- * Implements context compaction for long-running sessions using
- * anchored iterative summarization (Factory.ai approach).
+ * then convertToModelMessages + pruneMessages for proper context management.
+ * 
+ * Context compaction uses summarization for very long sessions, injected
+ * via system prompt to preserve tool call structure in messages.
  */
 export const handleChatRequest = async ({
   messages,
@@ -348,11 +373,8 @@ export const handleChatRequest = async ({
   // Ensure session context exists
   getSessionContext(sessionId);
 
-  const agent = await createAgent({ folderPath, customInstructions, credentials });
-
   // DefaultChatTransport sends new user messages with parts array
   // containing text and file parts (for images).
-  // Log any file parts for debugging purposes.
   const rawMessages = Array.isArray(messages) ? messages : [];
   const messagesWithParts = rawMessages.map((msg: Record<string, unknown>) => {
     // If message has parts, check for file parts (images)
@@ -361,9 +383,6 @@ export const handleChatRequest = async ({
       const fileParts = parts.filter(p => p.type === "file" && p.mediaType?.startsWith("image/"));
       if (fileParts.length > 0) {
         console.log(`[Agent] Processing message with ${fileParts.length} image file(s)`);
-        fileParts.forEach(p => {
-          console.log(`[Agent] Image URL: ${p.url?.substring(0, 100)}...`);
-        });
       }
       return msg;
     }
@@ -376,17 +395,15 @@ export const handleChatRequest = async ({
     return msg;
   });
 
-  // Validate messages into proper UIMessage[] format.
-  // Note: Messages with experimental_attachments will be handled after validation
+  // Validate messages into proper UIMessage[] format
   const validatedMessages = await validateUIMessages({
     messages: messagesWithParts,
   });
 
-  // Sanitize messages to remove large image data before sending to API.
-  // This prevents token limit errors when large images are in the conversation history.
+  // Sanitize messages to remove large image data before sending to API
   const sanitizedMessages = sanitizeMessagesForTokenLimit(validatedMessages);
 
-  // Track artifacts from message parts for context compaction (host-side tracking)
+  // Track artifacts from message parts for summarization (host-side tracking)
   let msgIndex = 0;
   for (const msg of sanitizedMessages) {
     if (msg.parts) {
@@ -397,8 +414,8 @@ export const handleChatRequest = async ({
     msgIndex++;
   }
 
-  // Build ValidMessage[] for context compaction
-  const validMessages: ValidMessage[] = sanitizedMessages
+  // Build text representation for summarization token estimation
+  const textMessages: ValidMessage[] = sanitizedMessages
     .filter((msg) => msg.role === "user" || msg.role === "assistant")
     .map((msg) => {
       let textContent = "";
@@ -408,60 +425,12 @@ export const handleChatRequest = async ({
           if (part.type === "text" && part.text) {
             textParts.push(part.text);
           }
-          // Handle tool-invocation parts with result
-          if (part.type === "tool-invocation") {
-            const invocation = part as {
-              toolInvocation?: {
-                state?: string;
-                toolName?: string;
-                result?: unknown;
-              };
-            };
-            if (
-              invocation.toolInvocation?.state === "result" &&
-              invocation.toolInvocation.result
-            ) {
-              const contentText = extractContentText(
-                invocation.toolInvocation.result
-              );
-              textParts.push(
-                `[Tool: ${invocation.toolInvocation.toolName}]\nResult: ${contentText}`
-              );
-            }
-          }
-          // Handle dynamic-tool parts (UI-initiated tool calls per AI SDK v6)
-          if (part.type === "dynamic-tool") {
-            const dynamicPart = part as {
-              toolName?: string;
-              state?: string;
-              input?: unknown;
-              output?: unknown;
-            };
-            if (
-              dynamicPart.state === "output-available" &&
-              dynamicPart.output
-            ) {
-              const contentText = extractContentText(dynamicPart.output);
-              const toolName = dynamicPart.toolName || "unknown";
-              textParts.push(
-                `[UI Action - ${toolName}]\nArgs: ${JSON.stringify(dynamicPart.input)}\nResult: ${contentText}`
-              );
-            }
-          }
-          // Handle tool-* parts (like tool-terminal_run, tool-readFile, etc.)
-          if (
-            part.type.startsWith("tool-") &&
-            part.type !== "tool-invocation"
-          ) {
+          // Include tool results as text for token estimation
+          if (part.type.startsWith("tool-") && part.type !== "tool-invocation") {
             const toolPart = part as { state?: string; output?: unknown };
-            const toolName = part.type.substring(5);
-            if (
-              (toolPart.state === "output-available" ||
-                toolPart.state === "result") &&
-              toolPart.output
-            ) {
+            if (toolPart.state === "output-available" || toolPart.state === "result") {
               const contentText = extractContentText(toolPart.output);
-              textParts.push(`[Tool: ${toolName}]\nResult: ${contentText}`);
+              textParts.push(`[Tool result: ${contentText.substring(0, 500)}...]`);
             }
           }
         }
@@ -470,26 +439,42 @@ export const handleChatRequest = async ({
       return { role: msg.role as "user" | "assistant", content: textContent };
     });
 
-  // Apply context compaction if needed (anchored iterative summarization)
-  const { compactedMessages, wasCompacted } = await maybeCompactMessages({
+  // Maybe update session summary if we're approaching context limits
+  // This generates a summary of older messages that will be injected via system prompt
+  await maybeUpdateSummary({
     sessionId,
     credentials,
-    messages: validMessages,
+    messages: textMessages,
   });
 
-  if (wasCompacted) {
-    // Use compacted messages (simplified format after summarization)
-    const result = await agent.stream({ messages: compactedMessages });
-    return result;
-  } else {
-    // Use full model messages (preserves tool call structure)
-    const modelMessages = await convertToModelMessages(sanitizedMessages, {
-      tools: agent.tools,
-      ignoreIncompleteToolCalls: true,
-    });
-    const result = await agent.stream({ messages: modelMessages });
-    return result;
-  }
+  // Get the current session summary (if any) for system prompt injection
+  const sessionSummary = getSessionSummary(sessionId);
+
+  // Create agent with session summary included in system prompt
+  const agent = await createAgent({
+    folderPath,
+    customInstructions,
+    credentials,
+    sessionSummary,
+  });
+
+  // Convert UIMessages to ModelMessages (preserves tool call structure)
+  const modelMessages = await convertToModelMessages(sanitizedMessages, {
+    tools: agent.tools,
+    ignoreIncompleteToolCalls: true,
+  });
+
+  // Prune older tool calls to reduce context while keeping recent ones intact
+  // This is the AI SDK's recommended way to manage context
+  const prunedMessages = pruneMessages({
+    messages: modelMessages,
+    toolCalls: "before-last-2-messages",
+    emptyMessages: "remove",
+  });
+
+  // Stream response with properly structured messages
+  const result = await agent.stream({ messages: prunedMessages });
+  return result;
 };
 
 /**

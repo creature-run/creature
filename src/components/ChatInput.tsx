@@ -939,7 +939,7 @@ export function ChatInput({
                 ) : (
                   <div className="flex gap-3">
                     <Folder size={18} weight="regular" className="shrink-0 mt-0.5" />
-                    <div>
+                    <div className="text-sm">
                       Click to add a local directory to your project so your agent can read and edit files
                     </div>
                   </div>

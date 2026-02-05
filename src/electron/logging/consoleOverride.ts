@@ -40,6 +40,10 @@ export const CONSOLE_OVERRIDE_SCRIPT = `
 
   function installOverride() {
     console.log('[ConsoleOverride] Installing console overrides');
+    if (window.__creatureUiErrorCaptureInstalled) {
+      return;
+    }
+    window.__creatureUiErrorCaptureInstalled = true;
     // Store original console methods
     // Note: console.debug is intentionally NOT overridden - debug logs are for DevTools only
     var original = {
@@ -97,6 +101,71 @@ export const CONSOLE_OVERRIDE_SCRIPT = `
     }
 
     /**
+     * Serialize an error-like value for UI error reporting.
+     */
+    function serializeErrorValue(value) {
+      if (value instanceof Error) {
+        return {
+          name: value.name || 'Error',
+          message: value.message || '(no message)',
+          stack: value.stack || ''
+        };
+      }
+      return {
+        name: 'Error',
+        message: serializeArg(value),
+        stack: ''
+      };
+    }
+
+    /**
+     * Forward a UI error to the parent window.
+     */
+    function forwardUiError(params) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            jsonrpc: '2.0',
+            method: 'ui/error',
+            params: params
+          }, '*');
+        }
+      } catch (e) {
+        // Ignore postMessage errors (e.g., cross-origin restrictions)
+      }
+    }
+
+    /**
+     * Attach global error handlers to capture runtime failures.
+     */
+    function installErrorHandlers() {
+      window.addEventListener('error', function(event) {
+        var details = serializeErrorValue(event.error || event.message);
+        forwardUiError({
+          name: details.name,
+          message: details.message,
+          stack: details.stack,
+          filename: event.filename || '',
+          lineno: event.lineno || 0,
+          colno: event.colno || 0,
+          source: 'window.onerror',
+          timestamp: new Date().toISOString()
+        });
+      });
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var details = serializeErrorValue(event.reason);
+        forwardUiError({
+          name: details.name,
+          message: details.message,
+          stack: details.stack,
+          source: 'unhandledrejection',
+          timestamp: new Date().toISOString()
+        });
+      });
+    }
+
+    /**
      * Forward a log call to the parent window.
      * Preserves original console behavior.
      */
@@ -129,6 +198,8 @@ export const CONSOLE_OVERRIDE_SCRIPT = `
     console.info = function() { forward('info', arguments); };
     console.warn = function() { forward('warn', arguments); };
     console.error = function() { forward('error', arguments); };
+
+    installErrorHandlers();
     
     // Use original.log since console.log is now overridden
     original.log('[ConsoleOverride] Installation complete');

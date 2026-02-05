@@ -170,10 +170,6 @@ export interface MCPServerConfig {
    * Only present when scope is "registry".
    */
   registryPackage?: string;
-  /**
-   * Indicates this is an app-style MCP (like todos/notes) with its own build system.
-   */
-  isAppMcp?: boolean;
 }
 
 /**
@@ -640,16 +636,21 @@ const BUILTIN_MCP_SERVERS: MCPServerConfig[] = [
     path: "mcp-todos",
     transport: "streamable-http",
     command: "node",
-    args: ["dist/server/index.js"],
-    isAppMcp: true,
+    args: ["desktop/.vite/build/todos-server.js"],
   },
   {
     name: "notes",
     path: "mcp-notes",
     transport: "streamable-http",
     command: "node",
-    args: ["dist/server/index.js"],
-    isAppMcp: true,
+    args: ["desktop/.vite/build/notes-server.js"],
+  },
+  {
+    name: "crm",
+    path: "mcp-crm",
+    transport: "streamable-http",
+    command: "node",
+    args: ["desktop/.vite/build/crm-server.js"],
   },
 ];
 
@@ -1254,77 +1255,84 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   }
 
   // Handle built-in MCPs with paths
+  // Vite-compiled built-in MCPs (terminal, ide, browser, todos, notes, crm)
   if (config?.path) {
-    // App-style MCPs (todos, notes) have their own build system
-    if (config.isAppMcp) {
-      if (app.isPackaged) {
-        // Packaged mode: run from Resources/{path}/
-        const mcpAppPath = path.join(process.resourcesPath, config.path);
+    if (app.isPackaged) {
+      // Packaged mode paths:
+      // - Server JS: app.asar/.vite/build/{name}-server.js
+      // - UIs: Resources/mcp-uis/{name}/ui/index.html
+      // - Native modules: Resources/native-deps/node_modules/
+      const mcpUisPath = path.join(process.resourcesPath, "mcp-uis");
+      const serverJs = path.join(app.getAppPath(), ".vite", "build", `${serverName}-server.js`);
+      const nativeDepsPath = path.join(process.resourcesPath, "native-deps", "node_modules");
+
+      // Set NODE_PATH so externalized native modules can be found
+      const baseEnv = {
+        ...config.env,
+        NODE_PATH: nativeDepsPath,
+      };
+
+      if (config.transport === "streamable-http") {
         const port = await portManager.allocate({ serverName });
         portAllocated = true;
         config = {
           ...config,
-          cwd: mcpAppPath,
-          args: ["dist/server/index.js"],
+          cwd: mcpUisPath,
+          args: [serverJs],
           url: `http://localhost:${port}/mcp`,
-          env: { ...config.env, MCP_PORT: String(port) },
+          env: { ...baseEnv, MCP_PORT: String(port) },
         };
       } else {
-        // Development: run from src/electron/mcps/{name}/
-        const workspaceRoot = findWorkspaceRoot();
-        if (!workspaceRoot) {
-          console.warn(`[MCP] Could not find workspace root for ${serverName}`);
-          config = undefined;
-        } else {
-          const mcpAppPath = path.join(workspaceRoot, "desktop", "src", "electron", "mcps", serverName);
-          if (!fs.existsSync(mcpAppPath)) {
-            console.warn(`[MCP] App MCP not found at ${mcpAppPath}`);
-            config = undefined;
-          } else {
-            const port = await portManager.allocate({ serverName });
-            portAllocated = true;
-            config = {
-              ...config,
-              cwd: mcpAppPath,
-              args: ["dist/server/index.js"],
-              url: `http://localhost:${port}/mcp`,
-              env: { ...config.env, MCP_PORT: String(port) },
-            };
+        // Stdio transport (IDE)
+        config = { ...config, cwd: mcpUisPath, args: [serverJs], env: baseEnv };
+      }
+    } else {
+      let usedBuiltinDevServer = false;
+      const primaryWorkspacePath = getPrimaryWorkspacePath();
+      const mcpSourcePath = findMcpPath(config.path);
+
+      if (currentProjectProfile === "dev-mcp" && primaryWorkspacePath && mcpSourcePath) {
+        const normalizedWorkspace = path.resolve(primaryWorkspacePath);
+        const normalizedMcpSource = path.resolve(mcpSourcePath);
+        const isWithinWorkspace =
+          normalizedMcpSource === normalizedWorkspace ||
+          normalizedMcpSource.startsWith(`${normalizedWorkspace}${path.sep}`);
+
+        if (isWithinWorkspace) {
+          const packageJsonPath = path.join(normalizedMcpSource, "package.json");
+          if (fs.existsSync(packageJsonPath)) {
+            try {
+              const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+                scripts?: Record<string, string>;
+              };
+              if (packageJson.scripts?.dev) {
+                const port = await portManager.allocate({ serverName });
+                const hmrPort = await portManager.allocate({ serverName: `${serverName}-hmr` });
+                portAllocated = true;
+                config = {
+                  ...config,
+                  command: "npm",
+                  args: ["run", "dev"],
+                  cwd: normalizedMcpSource,
+                  url: `http://localhost:${port}/mcp`,
+                  env: {
+                    ...config.env,
+                    MCP_PORT: String(port),
+                    MCP_HMR_PORT: String(hmrPort),
+                    NODE_ENV: "development",
+                  },
+                };
+                usedBuiltinDevServer = true;
+                console.log(`[MCP] Using dev MCP for built-in ${serverName} at ${normalizedMcpSource}`);
+              }
+            } catch (error) {
+              console.warn(`[MCP] Failed to read package.json for ${serverName}`, error);
+            }
           }
         }
       }
-    } else {
-      // Vite-compiled built-in MCPs (terminal, ide, browser)
-      if (app.isPackaged) {
-        // Packaged mode paths:
-        // - Server JS: app.asar/.vite/build/{name}-server.js
-        // - UIs: Resources/mcp-uis/{name}/ui/index.html
-        // - Native modules: Resources/native-deps/node_modules/
-        const mcpUisPath = path.join(process.resourcesPath, "mcp-uis");
-        const serverJs = path.join(app.getAppPath(), ".vite", "build", `${serverName}-server.js`);
-        const nativeDepsPath = path.join(process.resourcesPath, "native-deps", "node_modules");
 
-        // Set NODE_PATH so externalized native modules can be found
-        const baseEnv = {
-          ...config.env,
-          NODE_PATH: nativeDepsPath,
-        };
-
-        if (config.transport === "streamable-http") {
-          const port = await portManager.allocate({ serverName });
-          portAllocated = true;
-          config = {
-            ...config,
-            cwd: mcpUisPath,
-            args: [serverJs],
-            url: `http://localhost:${port}/mcp`,
-            env: { ...baseEnv, MCP_PORT: String(port) },
-          };
-        } else {
-          // Stdio transport (IDE)
-          config = { ...config, cwd: mcpUisPath, args: [serverJs], env: baseEnv };
-        }
-      } else {
+      if (!usedBuiltinDevServer) {
         // Development: run from workspace root to access hoisted node_modules
         const workspaceRoot = findWorkspaceRoot();
         if (!workspaceRoot) {
@@ -1665,7 +1673,6 @@ export const initMcpsForProject = async ({
   currentProjectId = projectId;
   currentWorkspaceRoots = workspaceRoots;
   currentProjectProfile = profile;
-
   // Store the project's MCP names (flat list - source of truth)
   projectMcpNames = new Set(mcps.map(m => m.name));
 
@@ -2337,6 +2344,18 @@ export const readResource = async ({
     return await executeRead();
   } catch (error) {
     if (isSessionInvalidError(error)) {
+      const conn = connections.get(serverName);
+      const isProcessAlive = !!conn?.spawnedProcess && conn.spawnedProcess.exitCode === null;
+
+      if (isProcessAlive && !app.isPackaged) {
+        clearResourceCache({ serverName, uri });
+        try {
+          return await executeRead();
+        } catch {
+          // Fall through to reconnect on repeated session errors
+        }
+      }
+
       await reconnectServer(serverName);
       return executeRead();
     }

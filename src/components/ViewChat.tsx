@@ -767,10 +767,15 @@ function ChatSession({ isActive, folderPath, focusTrigger }: ChatSessionProps) {
         </div>
       </div>
 
-      {/* Gradient overlay that fades content behind and below input - starts 50px above input */}
+      {/* Gradient overlay that fades content behind the chat input area.
+          Uses solid background color (not opacity) to fully hide scrolled content.
+          Gradient finishes early so text is fully hidden before reaching the input. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute bottom-0 left-0 right-[12px] h-[90px] [@media(min-height:800px)]:h-[130px] z-[15] bg-gradient-to-t from-background/90 via-background/70 via-background/35 to-transparent"
+        className="pointer-events-none absolute bottom-0 left-0 right-[12px] h-[190px] [@media(min-height:800px)]:h-[250px] z-[15]"
+        style={{
+          background: `linear-gradient(to bottom, transparent 0%, var(--color-background-primary) 25%)`,
+        }}
       />
 
       {/* Floating input area - positioned at bottom, matches content width */}

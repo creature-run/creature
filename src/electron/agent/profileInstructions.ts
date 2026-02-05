@@ -277,6 +277,8 @@ setWidgetState({
 **modelContent**: What the AI sees. Include current view, key identifiers, and brief status. Keep it concise so the AI can follow along.
 **privateContent**: UI-only state for restoration (scroll position, expanded panels, draft content).
 
+**Note:** For ephemeral, one-off notifications that don't need persistence, use \`updateModelContext([{ type: "text", text: "..." }])\` instead. This informs the AI without storing state. Use widget state for persistent context; use updateModelContext for transient events.
+
 ## Styling with Tailwind
 
 The SDK uses Tailwind 4 with host-provided theming. **One import gives you instant host theming.**
@@ -303,40 +305,60 @@ Apps inherit the host's visual design automatically. A notes app in Creature loo
 
 ### Color Classes (Host-Themed)
 
-Use these prefixed classes - they map to host-provided values:
+Use these prefixed classes - they map to host-provided CSS variables:
 
 **Backgrounds** (\`bg-bg-*\`):
-- \`bg-bg-primary\`, \`bg-bg-secondary\`, \`bg-bg-tertiary\`
-- \`bg-bg-info\`, \`bg-bg-danger\`, \`bg-bg-success\`, \`bg-bg-warning\`
+- Core: \`bg-bg-primary\`, \`bg-bg-secondary\`, \`bg-bg-tertiary\`
+- Special: \`bg-bg-inverse\`, \`bg-bg-ghost\`, \`bg-bg-disabled\`
+- Semantic: \`bg-bg-info\`, \`bg-bg-danger\`, \`bg-bg-success\`, \`bg-bg-warning\`
 
 **Text** (\`text-txt-*\`):
-- \`text-txt-primary\`, \`text-txt-secondary\`, \`text-txt-tertiary\`
-- \`text-txt-info\`, \`text-txt-danger\`, \`text-txt-success\`, \`text-txt-warning\`
+- Core: \`text-txt-primary\`, \`text-txt-secondary\`, \`text-txt-tertiary\`
+- Special: \`text-txt-inverse\`, \`text-txt-ghost\`, \`text-txt-disabled\`
+- Semantic: \`text-txt-info\`, \`text-txt-danger\`, \`text-txt-success\`, \`text-txt-warning\`
 
 **Borders** (\`border-bdr-*\`):
-- \`border-bdr-primary\`, \`border-bdr-secondary\`, \`border-bdr-tertiary\`
+- Core: \`border-bdr-primary\`, \`border-bdr-secondary\`, \`border-bdr-tertiary\`
+- Special: \`border-bdr-inverse\`, \`border-bdr-ghost\`, \`border-bdr-disabled\`
+- Semantic: \`border-bdr-info\`, \`border-bdr-danger\`, \`border-bdr-success\`, \`border-bdr-warning\`
 
 **Focus rings** (\`ring-ring-*\`):
-- \`ring-ring-primary\`, \`ring-ring-secondary\`
+- \`ring-ring-primary\`, \`ring-ring-secondary\`, \`ring-ring-inverse\`
+- Semantic: \`ring-ring-info\`, \`ring-ring-danger\`, \`ring-ring-success\`, \`ring-ring-warning\`
 
-### Other Tailwind Classes
+### Typography
 
-Standard Tailwind works as expected for:
-- **Spacing**: \`p-4\`, \`m-2\`, \`gap-3\`, etc.
-- **Layout**: \`flex\`, \`grid\`, \`items-center\`, \`justify-between\`, etc.
-- **Typography sizes**: \`text-sm\`, \`text-base\`, \`text-lg\`
-- **Border radius**: \`rounded-sm\`, \`rounded-md\`, \`rounded-lg\` (mapped to host values)
-- **Shadows**: \`shadow-sm\`, \`shadow-md\`, \`shadow-lg\` (mapped to host values)
+**Font families:**
+- \`font-sans\` - Host's sans-serif font (default for body text)
+- \`font-mono\` - Host's monospace font (for code)
 
-### Custom Utilities
+**Font weights:**
+- \`font-normal\`, \`font-medium\`, \`font-semibold\`, \`font-bold\`
+
+**Text sizes** (with automatic line-height):
+- \`text-xs\`, \`text-sm\`, \`text-base\`, \`text-lg\`
+
+**Heading sizes** (font-size only, for custom weights):
+- \`text-heading-xs\`, \`text-heading-sm\`, \`text-heading-md\`, \`text-heading-lg\`
+- \`text-heading-xl\`, \`text-heading-2xl\`, \`text-heading-3xl\`
+
+### Other Host-Themed Classes
+
+**Border radius:**
+- \`rounded-xs\`, \`rounded-sm\`, \`rounded-md\`, \`rounded-lg\`, \`rounded-xl\`, \`rounded-full\`
+
+**Shadows:**
+- \`shadow-hairline\`, \`shadow-sm\`, \`shadow-md\`, \`shadow-lg\`
+
+### SDK Custom Utilities
 
 The SDK adds utilities for common patterns:
 
 **Headings** (combines size + weight + line-height):
 \`\`\`tsx
-<h1 className="heading-xl">Page Title</h1>
-<h2 className="heading-lg">Section</h2>
-<h3 className="heading-md">Subsection</h3>
+<h1 className="heading-xl">Page Title</h1>    {/* bold weight */}
+<h2 className="heading-lg">Section</h2>       {/* semibold weight */}
+<h3 className="heading-md">Subsection</h3>    {/* semibold weight */}
 \`\`\`
 
 **Control heights** (for buttons/inputs):

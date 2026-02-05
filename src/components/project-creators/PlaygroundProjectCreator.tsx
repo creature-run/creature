@@ -106,7 +106,7 @@ export function PlaygroundProjectCreator({ onComplete, onCancel }: ProjectCreato
         <div>
           {/* Header */}
           <div className="flex items-center justify-between pb-8">
-            <h2 className="text-lg font-medium text-text-primary">Create a general playground</h2>
+            <h2 className="text-base font-medium text-text-primary">Create a general playground</h2>
             <button
               type="button"
               className="text-text-secondary hover:text-text-primary transition-colors cursor-pointer p-0 bg-transparent border-none"

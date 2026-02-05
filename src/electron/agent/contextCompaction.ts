@@ -252,35 +252,28 @@ Now update the summary according to the rules. Output ONLY the updated summary f
 `.trim();
 };
 
-// --- Compaction Logic ---
+// --- Summarization Logic ---
 
 /**
- * Prepend the summary as a context message at the start of the conversation.
+ * Get the current session summary for injection into system prompt.
+ * Returns null if no summary exists yet.
  */
-const prependSummaryMessage = (summary: string, messages: ValidMessage[]): ValidMessage[] => [
-  {
-    role: "assistant" as const,
-    content: `[Context Summary - Previous conversation history has been compacted. This summary preserves key files, decisions, and next steps. Prefer recent messages for fine-grained details.]\n\n${summary}`,
-  },
-  ...messages,
-];
-
-export interface CompactResult {
-  compactedMessages: ValidMessage[];
-  wasCompacted: boolean;
-  tokensBefore: number;
-  tokensAfter: number;
-}
+export const getSessionSummary = (sessionId: string): string | null => {
+  const ctx = getSessionContext(sessionId);
+  return ctx.summary;
+};
 
 /**
- * Main compaction function implementing anchored iterative summarization.
- *
- * - Only triggers when messages exceed TRIGGER_COMPACTION_AT tokens
- * - Only summarizes newly-truncated spans (not full history)
- * - Merges new summary into existing persistent summary
- * - Keeps a recent window of messages for fine-grained context
+ * Maybe update the session summary based on token usage.
+ * 
+ * This function checks if we're approaching context limits and generates/updates
+ * a summary of older messages. The summary is stored in session context and
+ * should be injected via system prompt (not by modifying message history).
+ * 
+ * Uses anchored iterative summarization: only summarizes newly-truncated spans,
+ * not the full history, and merges into existing summary.
  */
-export const maybeCompactMessages = async ({
+export const maybeUpdateSummary = async ({
   sessionId,
   credentials,
   messages,
@@ -288,26 +281,16 @@ export const maybeCompactMessages = async ({
   sessionId: string;
   credentials: ProviderCredentials;
   messages: ValidMessage[];
-}): Promise<CompactResult> => {
+}): Promise<{ summarized: boolean }> => {
   const ctx = getSessionContext(sessionId);
   const messageTokens = estimateTokensForMessages(messages);
 
-  // Use actual tokens from last API call if available, otherwise estimate
-  // If we have actual data, the new request will be ~similar (actual + new message delta)
-  const estimatedNewMessageTokens = messages.length > 0 ? estimateTokens(messages[messages.length - 1].content) : 0;
-  const totalEstimatedTokens = ctx.lastActualInputTokens
-    ? ctx.lastActualInputTokens + estimatedNewMessageTokens
-    : messageTokens + BASELINE_OVERHEAD_TOKENS;
+  // Estimate total context size (messages + baseline overhead for system prompt and tools)
+  const totalEstimatedTokens = messageTokens + BASELINE_OVERHEAD_TOKENS;
 
-  // If under threshold, just prepend summary (if any) and return
+  // If under threshold, no summarization needed
   if (totalEstimatedTokens < TRIGGER_COMPACTION_AT) {
-    const withSummary = ctx.summary ? prependSummaryMessage(ctx.summary, messages) : messages;
-    return {
-      compactedMessages: withSummary,
-      wasCompacted: false,
-      tokensBefore: messageTokens,
-      tokensAfter: estimateTokensForMessages(withSummary),
-    };
+    return { summarized: false };
   }
 
   logAggregator.log({
@@ -316,8 +299,8 @@ export const maybeCompactMessages = async ({
     message: `[Context Compaction] Triggered at ~${Math.round(totalEstimatedTokens / 1000)}k tokens (threshold: ${Math.round(TRIGGER_COMPACTION_AT / 1000)}k)`,
   });
 
-  // Determine how many messages to keep as "live window"
-  // Aim to keep recent messages under TARGET_MESSAGES_AFTER_COMPACTION / 2 (~30k tokens)
+  // Determine how many messages to keep in "live window"
+  // The rest will be summarized
   let runningTokens = 0;
   let keepFromIndex = messages.length;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -328,78 +311,54 @@ export const maybeCompactMessages = async ({
     }
   }
 
-  // Messages [0, keepFromIndex) are candidates to summarize
   // Only summarize the NEW span since last summarization (anchored approach)
   const newSpanStart = ctx.lastSummarizedMessageIndex;
   const newSpanEnd = Math.max(newSpanStart, keepFromIndex);
   const newSpan = messages.slice(newSpanStart, newSpanEnd);
 
-  if (newSpan.length > 0) {
-    logAggregator.log({
-      source: "host",
-      level: "info",
-      message: `[Context Compaction] Summarizing ${newSpan.length} new messages (indices ${newSpanStart}-${newSpanEnd})`,
-    });
-
-    try {
-      const { provider, haikuModelId } = createProvider(credentials);
-      const model = provider(haikuModelId);
-
-      const summarizationPrompt = buildSummarizationPrompt({
-        previousSummary: ctx.summary,
-        newMessages: newSpan,
-        artifactIndex: ctx.artifactIndex,
-      });
-
-      const { text: updatedSummary } = await generateText({
-        model,
-        system: SUMMARIZATION_SYSTEM_PROMPT,
-        prompt: summarizationPrompt,
-        maxOutputTokens: 1500,
-      });
-
-      ctx.summary = updatedSummary;
-      ctx.lastSummarizedMessageIndex = newSpanEnd;
-
-      logAggregator.log({
-        source: "host",
-        level: "info",
-        message: `[Context Compaction] Summary updated (${estimateTokens(updatedSummary)} tokens)`,
-      });
-    } catch (error) {
-      logAggregator.log({
-        source: "host",
-        level: "error",
-        message: `[Context Compaction] Summarization failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-      });
-      // On failure, fall back to no compaction this turn
-      return {
-        compactedMessages: messages,
-        wasCompacted: false,
-        tokensBefore: messageTokens,
-        tokensAfter: messageTokens,
-      };
-    }
+  if (newSpan.length === 0) {
+    return { summarized: false };
   }
-
-  // Build compacted history: summary + recent window
-  const recentMessages = messages.slice(keepFromIndex);
-  const compactedMessages = ctx.summary
-    ? prependSummaryMessage(ctx.summary, recentMessages)
-    : recentMessages;
-
-  const messageTokensAfter = estimateTokensForMessages(compactedMessages);
 
   logAggregator.log({
     source: "host",
     level: "info",
-    message: `[Context Compaction] Complete: ~${Math.round(messageTokens / 1000)}k -> ~${Math.round(messageTokensAfter / 1000)}k message tokens (${Math.round((1 - messageTokensAfter / messageTokens) * 100)}% reduction)`,
+    message: `[Context Compaction] Summarizing ${newSpan.length} messages (indices ${newSpanStart}-${newSpanEnd})`,
   });
 
-  return {
-    compactedMessages,
-    wasCompacted: true,
-    tokensBefore: messageTokens,
-    tokensAfter: messageTokensAfter,
-  };
+  try {
+    const { provider, haikuModelId } = createProvider(credentials);
+    const model = provider(haikuModelId);
+
+    const summarizationPrompt = buildSummarizationPrompt({
+      previousSummary: ctx.summary,
+      newMessages: newSpan,
+      artifactIndex: ctx.artifactIndex,
+    });
+
+    const { text: updatedSummary } = await generateText({
+      model,
+      system: SUMMARIZATION_SYSTEM_PROMPT,
+      prompt: summarizationPrompt,
+      maxOutputTokens: 1500,
+    });
+
+    ctx.summary = updatedSummary;
+    ctx.lastSummarizedMessageIndex = newSpanEnd;
+
+    logAggregator.log({
+      source: "host",
+      level: "info",
+      message: `[Context Compaction] Summary updated (${estimateTokens(updatedSummary)} tokens)`,
+    });
+
+    return { summarized: true };
+  } catch (error) {
+    logAggregator.log({
+      source: "host",
+      level: "error",
+      message: `[Context Compaction] Summarization failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+    return { summarized: false };
+  }
 };

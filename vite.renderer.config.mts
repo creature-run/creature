@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     watch: {
-      ignored: ['**/artifacts/**']
+      ignored: ['**/artifacts/**', '**/src/electron/mcps/**']
     }
   },
   resolve: {

@@ -34,6 +34,7 @@ const BUILTIN_MCPS = [
   { name: "browser", description: "Web browser automation" },
   { name: "todos", description: "Task management" },
   { name: "notes", description: "Note taking" },
+  { name: "crm", description: "Contact and relationship management" },
   { name: "ide", description: "Read and write files within the project directory" },
   { name: "terminal", description: "Execute terminal commands" },
 ];
@@ -320,7 +321,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
       {/* Header */}
       <div className="shrink-0 border-b border-border-secondary">
         <div className="flex items-center justify-between px-6 py-4">
-          <h1 className="text-base font-semibold text-text-primary">Project Settings</h1>
+          <h1 className="text-base font-medium text-text-primary">Project Settings</h1>
           <button
             onClick={onClose}
             className="p-1 rounded-md hover:bg-background-tertiary text-text-secondary hover:text-text-primary transition-colors focus:outline-none"

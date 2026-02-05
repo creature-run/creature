@@ -147,32 +147,6 @@ export interface McpPip {
 }
 
 /**
- * Event emitted when a UI-initiated tool call completes.
- * Used by ViewChat to inject the tool call into the agent's conversation history.
- *
- * Per AI SDK v6, tool calls should be represented as assistant message parts
- * with type 'dynamic-tool' to maintain the correct conversation structure.
- */
-export interface UIToolExecutedEvent {
-  /** Unique identifier for this tool call */
-  toolCallId: string;
-  /** Instance ID that initiated the call */
-  instanceId: string;
-  /** UI Resource URI of the pip */
-  resourceUri: string;
-  /** MCP server that handled the call */
-  serverName: string;
-  /** Tool that was called */
-  toolName: string;
-  /** Arguments passed to the tool */
-  args: Record<string, unknown>;
-  /** Result from the tool execution */
-  result: unknown;
-  /** Timestamp of execution */
-  timestamp: number;
-}
-
-/**
  * Event emitted when a pip is destroyed (closed by user).
  * Used by ViewChat to inject a message into conversation history so the
  * agent knows the pip is no longer valid.
@@ -575,19 +549,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       const handler = (_event: Electron.IpcRendererEvent, data: { instanceId: string; toolName: string; result: unknown; isError: boolean; source?: "agent" | "ui" }) => callback(data);
       ipcRenderer.on("pip:tool-result", handler);
       return () => ipcRenderer.removeListener("pip:tool-result", handler);
-    },
-
-    /**
-     * Listen for UI-initiated tool executions.
-     * Used by ViewChat to inject tool calls into conversation history.
-     *
-     * When a user interacts with a Pip and triggers a tool call,
-     * this event is emitted so the conversation history can be updated.
-     */
-    onUIToolExecuted: (callback: (event: UIToolExecutedEvent) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, data: UIToolExecutedEvent) => callback(data);
-      ipcRenderer.on("ui-tool:executed", handler);
-      return () => ipcRenderer.removeListener("ui-tool:executed", handler);
     },
 
     /**
@@ -1001,7 +962,6 @@ declare global {
         onPipTitleChanged: (callback: (data: { instanceId: string; title: string }) => void) => () => void;
         onToolInput: (callback: (data: { instanceId: string; toolName: string; arguments: Record<string, unknown> }) => void) => () => void;
         onToolResult: (callback: (data: { instanceId: string; toolName: string; result: unknown; isError: boolean }) => void) => () => void;
-        onUIToolExecuted: (callback: (event: UIToolExecutedEvent) => void) => () => void;
         onPipDestroyed: (callback: (event: PipDestroyedEvent) => void) => () => void;
         onPipCreatedForHistory: (callback: (event: PipCreatedEvent) => void) => () => void;
         onBrowserCommand: (callback: (data: {

@@ -1,7 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useHost } from "open-mcp-app/react";
 import { NavigationBar } from "./components/NavigationBar";
-import "./App.css";
+// Tailwind 4 integration - imports SDK theme mapping for host-provided variables
+import "open-mcp-app/styles/tailwind.css";
+import "./fonts.css";
+import "./app.css";
 
 // =============================================================================
 // Types

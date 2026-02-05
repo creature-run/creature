@@ -176,11 +176,17 @@ export const computeWorkspaceRoots = async (
     if (validation.valid) {
       addRoot(workspacePath, "workspace");
 
-      // 2. Auto-discover MCP apps under workspace
+      // 2. Auto-discover MCP apps under workspace (but not direct children)
+      // Direct children are already accessible via the workspace root, so adding
+      // them as separate roots would cause duplication in the IDE file tree.
+      const normalizedWorkspace = path.resolve(workspacePath);
       const discovered = discoverMcpApps(workspacePath);
       for (const appPath of discovered) {
-        // Don't add the workspace root itself if it was discovered
-        if (path.resolve(appPath) !== path.resolve(workspacePath)) {
+        const normalizedApp = path.resolve(appPath);
+        const isDirectChild = path.dirname(normalizedApp) === normalizedWorkspace;
+        const isSamePath = normalizedApp === normalizedWorkspace;
+        
+        if (!isDirectChild && !isSamePath) {
           addRoot(appPath, "discovered");
         }
       }
@@ -531,6 +537,7 @@ export const registerProjectHandlers = () => {
               { name: "browser", enabled: true },
               { name: "todos", enabled: true },
               { name: "notes", enabled: true },
+              { name: "crm", enabled: true },
               { name: "ide", enabled: true },
               { name: "terminal", enabled: true },
             ],
