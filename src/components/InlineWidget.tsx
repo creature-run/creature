@@ -8,6 +8,7 @@ import {
 } from "../lib/appBridge";
 import { widgetStateStore } from "../lib/widgetStateStore";
 import type { McpUiTheme, McpUiDisplayMode } from "@modelcontextprotocol/ext-apps";
+import { Spinner } from "./Spinner";
 
 const PLACEHOLDER_HTML = `<!DOCTYPE html><html><head></head><body></body></html>`;
 
@@ -297,10 +298,10 @@ export const InlineWidget = memo(function InlineWidget({
           </span>
         </div>
         <div 
-          className="w-full flex items-center justify-center text-text-secondary text-sm"
+          className="w-full flex items-center justify-center"
           style={{ height: `${MIN_HEIGHT}px`, backgroundColor: colors.backgroundSecondary }}
         >
-          Loading...
+          <Spinner size={16} />
         </div>
       </div>
     );
@@ -323,22 +324,33 @@ export const InlineWidget = memo(function InlineWidget({
         )}
       </div>
 
-      <iframe
-        ref={iframeRef}
-        srcDoc={PLACEHOLDER_HTML}
-        sandbox="allow-scripts allow-same-origin allow-forms"
-        className={cn(
-          "w-full border-0 transition-opacity duration-200",
-          isLoaded ? "opacity-100" : "opacity-50"
-        )}
-        style={{
-          height: `${iframeHeight}px`,
-          backgroundColor: colors.backgroundSecondary,
-          overflowY: "auto",
-          overflowX: "hidden",
-        }}
-        title={`Inline widget: ${resourceUri}`}
-      />
+      {/* Iframe container with loading overlay — hides the iframe until
+       *  the Guest sends ui/notifications/initialized, preventing blank
+       *  placeholder flashes and routing flashes during boot. */}
+      <div className="relative" style={{ height: `${iframeHeight}px` }}>
+        <iframe
+          ref={iframeRef}
+          srcDoc={PLACEHOLDER_HTML}
+          sandbox="allow-scripts allow-same-origin allow-forms"
+          className="w-full h-full border-0"
+          style={{
+            backgroundColor: colors.backgroundSecondary,
+            overflowY: "auto",
+            overflowX: "hidden",
+          }}
+          title={`Inline widget: ${resourceUri}`}
+        />
+        <div
+          className="absolute inset-0 flex items-center justify-center transition-opacity duration-200"
+          style={{
+            backgroundColor: colors.backgroundSecondary,
+            opacity: isLoaded ? 0 : 1,
+            pointerEvents: isLoaded ? "none" : "auto",
+          }}
+        >
+          <Spinner size={16} />
+        </div>
+      </div>
     </div>
   );
 });

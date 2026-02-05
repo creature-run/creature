@@ -9,6 +9,7 @@ import {
 import { widgetStateStore } from "../lib/widgetStateStore";
 import type { McpUiTheme, McpUiDisplayMode } from "@modelcontextprotocol/ext-apps";
 import { Copy } from "@phosphor-icons/react";
+import { Spinner } from "./Spinner";
 
 /** Minimal placeholder HTML to initialize iframe before injecting real content */
 const PLACEHOLDER_HTML = `<!DOCTYPE html><html><head></head><body></body></html>`;
@@ -522,6 +523,19 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
         title={pip.title}
         onLoad={handleIframeLoad}
       />
+      {/* Loading overlay — covers the iframe until the Guest sends ui/notifications/initialized.
+       *  Prevents black flashes, blank placeholder flashes, and routing flashes.
+       *  Uses a smooth opacity transition so the app fades in once ready. */}
+      <div
+        className="absolute inset-0 flex items-center justify-center z-10 transition-opacity duration-200"
+        style={{
+          backgroundColor: colors.backgroundPrimary,
+          opacity: initialized ? 0 : 1,
+          pointerEvents: initialized ? "none" : "auto",
+        }}
+      >
+        <Spinner size={22} />
+      </div>
       {uiError && (
         <div
           className="absolute inset-0 p-4 flex flex-col gap-3 overflow-auto"

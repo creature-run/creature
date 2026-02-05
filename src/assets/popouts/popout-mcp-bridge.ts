@@ -93,6 +93,9 @@ let browserWebview: WebviewElement | null = null;
 /** Browser instance ID (only used in browser mode) */
 let browserInstanceId: string | undefined;
 
+/** Loading overlay element — visible by default, hidden when Guest sends initialized */
+let loadingOverlay: HTMLDivElement | null = null;
+
 /** Track if browser navigation has started (prevents double loadURL from tool-input + tool-result) */
 let browserNavigationStarted = false;
 
@@ -109,6 +112,34 @@ let activeIframe: HTMLIFrameElement | null = null;
 let uiErrorOverlay: HTMLDivElement | null = null;
 let uiErrorBody: HTMLDivElement | null = null;
 let uiErrorCopyButton: HTMLButtonElement | null = null;
+
+/**
+ * Hide the loading overlay with a fade-out transition.
+ * Called when the Guest sends ui/notifications/initialized, signaling
+ * the MCP App is ready to be displayed to the user.
+ */
+const hideLoadingOverlay = (): void => {
+  if (!loadingOverlay) {
+    loadingOverlay = document.getElementById("loading-overlay") as HTMLDivElement | null;
+  }
+  if (loadingOverlay) {
+    loadingOverlay.classList.add("hidden");
+  }
+};
+
+/**
+ * Show the loading overlay (reset to visible state).
+ * Called before re-initializing content on refresh so the user
+ * sees a spinner while the new content boots.
+ */
+const showLoadingOverlay = (): void => {
+  if (!loadingOverlay) {
+    loadingOverlay = document.getElementById("loading-overlay") as HTMLDivElement | null;
+  }
+  if (loadingOverlay) {
+    loadingOverlay.classList.remove("hidden");
+  }
+};
 
 /**
  * Initialize the UI error overlay elements.
@@ -330,6 +361,10 @@ const initializePopout = async (): Promise<void> => {
       },
       onInitialized: () => {
         console.log("[Popout] Ready", { instanceId: metadata.instanceId });
+
+        // Reveal the MCP App by hiding the loading overlay
+        hideLoadingOverlay();
+
         // Notify main process that pip is ready to receive notifications
         window.electronAPI.controlPlane
           .pipReady(metadata.instanceId)
@@ -543,6 +578,9 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
       htmlLength: data.htmlContent?.length || 0 
     });
 
+    // Show loading overlay while new content boots
+    showLoadingOverlay();
+
     // Clean up existing bridge before loading new content
     if (bridgeInstance) {
       try {
@@ -604,6 +642,10 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
         },
         onInitialized: () => {
           console.log("[Popout] Refreshed pip ready", { instanceId: metadata.instanceId });
+
+          // Reveal the refreshed MCP App
+          hideLoadingOverlay();
+
           window.electronAPI.controlPlane
             .pipReady(metadata.instanceId)
             .catch((error) => {
