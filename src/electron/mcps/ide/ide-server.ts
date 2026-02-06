@@ -439,6 +439,7 @@ app.tool(
     displayModes: ["pip"],
     experimental: {
       defaultDisplayMode: "pip",
+      openInBackground: true,
     },
   },
   async ({ path: filePath }, context) => {
@@ -500,6 +501,9 @@ app.tool(
     }),
     ui: IDE_UI_RESOURCE_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async ({ path: filePath, startLine, endLine, _source }) => {
     console.info(`[IDE] Reading file: ${filePath}`);
@@ -565,6 +569,9 @@ app.tool(
     }),
     ui: IDE_UI_RESOURCE_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async ({ path: filePath, content, _source }) => {
     console.info(`[IDE] Writing file: ${filePath}`);
@@ -615,6 +622,9 @@ app.tool(
     }),
     ui: IDE_UI_RESOURCE_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async ({ path: filePath, oldText, newText, replaceAll, _source }) => {
     console.info(`[IDE] Editing file: ${filePath}`);
@@ -670,6 +680,9 @@ app.tool(
     }),
     ui: IDE_UI_RESOURCE_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async ({ path: dirPath, recursive }) => {
     console.info(`[IDE] Listing directory: ${dirPath}`);
@@ -783,6 +796,9 @@ app.tool(
     }),
     ui: IDE_UI_RESOURCE_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async ({ pattern, path: searchPath, fileGlob, caseSensitive, listFiles, maxResults }) => {
     console.info(`[IDE] Searching: ${pattern || "(list files)"}`);

@@ -291,6 +291,11 @@ interface CachedTool {
    */
   defaultDisplayMode?: string;
   /**
+   * Whether a newly created pip should open in background when another pip is active.
+   * Defaults to false when omitted.
+   */
+  openInBackground?: boolean;
+  /**
    * Creature auth configuration from _meta.creature.auth.
    * When managed=true, host provides identity + token to the app.
    */
@@ -2387,6 +2392,48 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   try {
     const toolsResult = await client.listTools();
     tools = parseToolsFromServer({ serverName, rawTools: toolsResult.tools });
+    for (const t of toolsResult.tools) {
+      // Extract UI metadata from _meta.ui if present
+      // Per MCP Apps spec, non-standard extensions are under `experimental`
+      const meta = t._meta as { 
+        ui?: { 
+          resourceUri?: string; 
+          displayModes?: string[];
+          experimental?: {
+            defaultDisplayMode?: string;
+            openInBackground?: boolean;
+          };
+        };
+        creature?: {
+          auth?: { managed?: boolean };
+        };
+      } | undefined;
+
+      // Ensure inputSchema has required type: "object" for Anthropic API compatibility
+      // Some MCPs may return tools with undefined or empty inputSchema
+      const inputSchema = (t.inputSchema as Record<string, unknown>) || { type: "object" };
+      if (!inputSchema.type) {
+        inputSchema.type = "object";
+      }
+
+      // Build description with display mode info for the agent
+      let description = t.description || "";
+      if (meta?.ui?.displayModes?.length) {
+        description += ` [Display modes: ${meta.ui.displayModes.join(", ")}]`;
+      }
+
+      tools.set(t.name, {
+        name: t.name,
+        serverName,
+        description,
+        inputSchema,
+        resourceUri: meta?.ui?.resourceUri,
+        displayModes: meta?.ui?.displayModes,
+        defaultDisplayMode: meta?.ui?.experimental?.defaultDisplayMode,
+        openInBackground: meta?.ui?.experimental?.openInBackground,
+        creatureAuth: meta?.creature?.auth,
+      });
+    }
   } catch (error) {
     console.error(`[MCP] Failed to list tools from ${serverName}:`, error);
   }

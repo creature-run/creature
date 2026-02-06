@@ -334,6 +334,7 @@ const sendToPipWindow = (instanceId: string, channel: string, data: unknown) => 
  * @param instanceId - Instance ID from SDK (required - SDK generates before handler runs)
  * @param creatureAuth - Creature auth configuration from tool metadata
  * @param triggeredByTool - Whether pip was opened by a tool call (vs user action)
+ * @param openInBackground - Whether pip should open in background when another pip is active
  */
 export const createPipInstance = async ({
   resourceUri,
@@ -343,6 +344,7 @@ export const createPipInstance = async ({
   title,
   creatureAuth,
   triggeredByTool = true,
+  openInBackground = false,
 }: {
   resourceUri: string;
   serverName: string;
@@ -351,6 +353,7 @@ export const createPipInstance = async ({
   title?: string;
   creatureAuth?: { managed?: boolean };
   triggeredByTool?: boolean;
+  openInBackground?: boolean;
 }): Promise<PipInstance> => {
   // Fetch HTML content and icon from MCP server
   const { html: htmlContent, icon } = await readResource({
@@ -392,6 +395,7 @@ export const createPipInstance = async ({
     createdAt: pip.createdAt,
     creatureAuth,
     triggeredByTool,
+    openInBackground,
   });
 
   return pip;
@@ -1304,6 +1308,7 @@ export const handleToolCall = async ({
         toolName,
         instanceId: targetInstanceId,
         creatureAuth: toolDef?.creatureAuth,
+        openInBackground: toolDef?.openInBackground,
       });
     }
   } finally {
@@ -1521,4 +1526,3 @@ export const getActivePipsForPrompt = (): string => {
     })
     .join("\n\n");
 };
-

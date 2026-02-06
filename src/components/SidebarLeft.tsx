@@ -345,7 +345,7 @@ export function SidebarLeft() {
           <AlertDialogHeader>
             <AlertDialogTitle>Leave current session?</AlertDialogTitle>
             <AlertDialogDescription>
-              You will lose your active chat session and any open widgets.
+              Your chat is saved automatically. Open tabs will be closed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -3,7 +3,7 @@ import { useHost } from "open-mcp-app/react";
 import { NavigationBar } from "./components/NavigationBar";
 // Tailwind 4 integration - imports SDK theme mapping for host-provided variables
 import "open-mcp-app/styles/tailwind.css";
-import "./app.css";
+import "./App.css";
 
 // =============================================================================
 // Types
