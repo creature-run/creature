@@ -24,7 +24,7 @@ import { ICON_SVG, ICON_ALT } from "./icon.js";
 
 const PORT = parseInt(process.env.MCP_PORT || process.env.PORT || "3002", 10);
 const BASE_FOLDER = process.env.MCP_WORKING_DIR || process.cwd();
-const TERMINAL_UI_RESOURCE_URI = "ui://mcp-terminal/terminal";
+const TERMINAL_UI_RESOURCE_URI = "ui://terminal/terminal";
 
 // =============================================================================
 // Types
@@ -59,7 +59,7 @@ interface TerminalInstanceState {
 const terminalManager = new TerminalManager();
 
 const app = createApp({
-  name: "mcp-terminal",
+  name: "terminal",
   version: "0.0.6",
   port: PORT,
 });

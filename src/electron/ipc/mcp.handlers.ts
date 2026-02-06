@@ -166,22 +166,24 @@ const runCommand = ({
  *
  * Steps:
  * 1. Copy template to target directory
- * 2. Update package.json with new name
+ * 2. Update package.json and source files with the canonical app name
  * 3. Run npm install
  * 4. Run npm run build
- * 5. Add to user MCP configs
  *
- * @param targetPath - Directory to create the MCP in
- * @param name - Name for the new MCP
+ * @param params.targetPath - Parent directory to create the MCP folder in
+ * @param params.name - Folder name for the new MCP on disk
+ * @param params.appName - Canonical MCP App name (used in package.json, createApp, URIs)
  */
 export const createFromTemplate = async ({
   targetPath,
   name,
+  appName,
 }: {
   targetPath: string;
   name: string;
+  appName: string;
 }): Promise<{ success: boolean; error?: string }> => {
-  console.log(`[MCP] Creating new MCP from example template: ${name} at ${targetPath}`);
+  console.log(`[MCP] Creating new MCP from example template: ${name} (app: ${appName}) at ${targetPath}`);
 
   // Find template directory
   const templatePath = findTemplatePath();
@@ -208,17 +210,17 @@ export const createFromTemplate = async ({
       fs.unlinkSync(lockFilePath);
     }
 
-    // Step 2: Update package.json with new name, bin field, and creature.name
+    // Step 2: Update package.json with the canonical app name, bin field, and creature.name
     const packageJsonPath = path.join(mcpDir, "package.json");
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-    packageJson.name = name;
-    // Update bin field to use the new name (required for npx to work)
+    packageJson.name = appName;
+    // Update bin field to use the app name (required for npx to work)
     if (packageJson.bin) {
-      packageJson.bin = { [name]: "dist/server.js" };
+      packageJson.bin = { [appName]: "dist/server.js" };
     }
     // Update creature.name for registry publishing
     if (packageJson.creature) {
-      packageJson.creature.name = name;
+      packageJson.creature.name = appName;
     }
     
     if (isWithinWorkspace(mcpDir) && packageJson.dependencies?.["open-mcp-app"]) {
@@ -228,17 +230,17 @@ export const createFromTemplate = async ({
     
     fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
-    // Update template identity in source files
-    // The example template uses "items" as the default name
+    // Update template identity in source files using the canonical app name.
+    // The example template uses "items" as the default name.
     
     // Server entry: src/server/index.ts - contains app name and URI
     const serverIndexPath = path.join(mcpDir, "src", "server", "index.ts");
     if (fs.existsSync(serverIndexPath)) {
       let serverContent = fs.readFileSync(serverIndexPath, "utf-8");
       // Replace app name in createApp()
-      serverContent = serverContent.replace(/name: "items"/g, `name: "${name}"`);
+      serverContent = serverContent.replace(/name: "items"/g, `name: "${appName}"`);
       // Replace ui:// URIs
-      serverContent = serverContent.replace(/ui:\/\/items\//g, `ui://${name}/`);
+      serverContent = serverContent.replace(/ui:\/\/items\//g, `ui://${appName}/`);
       fs.writeFileSync(serverIndexPath, serverContent);
     }
 
@@ -247,7 +249,7 @@ export const createFromTemplate = async ({
     if (fs.existsSync(toolsPath)) {
       let toolsContent = fs.readFileSync(toolsPath, "utf-8");
       // Replace ui:// URIs in the ITEMS_UI constant
-      toolsContent = toolsContent.replace(/ui:\/\/items\//g, `ui://${name}/`);
+      toolsContent = toolsContent.replace(/ui:\/\/items\//g, `ui://${appName}/`);
       fs.writeFileSync(toolsPath, toolsContent);
     }
 
@@ -258,7 +260,7 @@ export const createFromTemplate = async ({
       // Replace HostProvider name prop
       appContent = appContent.replace(
         /<HostProvider name="items"/g,
-        `<HostProvider name="${name}"`
+        `<HostProvider name="${appName}"`
       );
       fs.writeFileSync(appTsxPath, appContent);
     }
@@ -313,8 +315,8 @@ export const registerMcpHandlers = () => {
   /**
    * Create a new MCP from the example template.
    */
-  ipcMain.handle("mcp:createFromTemplate", async (_, { targetPath, name }) => {
-    const result = await createFromTemplate({ targetPath, name });
+  ipcMain.handle("mcp:createFromTemplate", async (_, { targetPath, name, appName }) => {
+    const result = await createFromTemplate({ targetPath, name, appName: appName || name });
 
     // Track MCP creation (no paths)
     telemetry.track("mcp_create_from_template", {

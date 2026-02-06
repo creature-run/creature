@@ -378,6 +378,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   };
 
   const isStreaming = status === "streaming" || status === "submitted";
+  const hasStreamError = status === "error";
 
   /**
    * Handles form submission from ChatInput.
@@ -606,13 +607,18 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                           const stuckAtInputAvailable =
                             toolPart.state === "input-available" && !isCurrentStreamingMessage;
 
+                          // When the stream dies with an error, tool parts stuck in
+                          // input-available are abandoned (no result will ever arrive).
+                          // Show them as errors so the UI doesn't appear frozen.
+                          const isAbandoned = stuckAtInputAvailable && hasStreamError;
+
                           const isRunning =
                             (toolPart.state === "input-streaming" ||
                               toolPart.state === "input-available") &&
                             !stuckAtInputAvailable;
                           const isComplete =
-                            toolPart.state === "output-available" || stuckAtInputAvailable;
-                          const isError = toolPart.state === "output-error";
+                            toolPart.state === "output-available" || (stuckAtInputAvailable && !isAbandoned);
+                          const isError = toolPart.state === "output-error" || isAbandoned;
 
                           const output = toolPart.output as {
                             _inlineDisplay?: {

@@ -30,6 +30,7 @@ type McpCreatorMode = "create" | "existing";
  */
 export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   const [projectName, setProjectName] = useState("New MCP App");
+  const [appName, setAppName] = useState("new-mcp-app");
   const [folderName, setFolderName] = useState("new-mcp-app");
   const [mode, setMode] = useState<McpCreatorMode>("create");
   
@@ -85,6 +86,19 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   };
 
   /**
+   * Derives a human-readable project name from a hyphenated app name.
+   * Replaces hyphens with spaces and capitalizes each word.
+   * e.g., "my-cool-app" → "My Cool App"
+   */
+  const deriveProjectName = useCallback((name: string): string => {
+    if (!name) return "New MCP App";
+    return name
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }, []);
+
+  /**
    * Creates or adds the MCP app project.
    */
   const handleCreate = useCallback(async () => {
@@ -97,7 +111,13 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         return;
       }
     } else {
-      // Create mode - need folder name and parent location
+      // Create mode - need app name, folder name, and parent location
+      const appNameError = validateFolderName(appName);
+      if (appNameError) {
+        setError(appNameError.replace("Folder name", "MCP App name"));
+        return;
+      }
+
       const folderError = validateFolderName(folderName);
       if (folderError) {
         setError(folderError);
@@ -123,7 +143,8 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
         : await window.electronAPI.project.createMcpApp({
             targetPath: createFolderLocation,
             name: folderName.trim(),
-            projectName: projectName.trim() || "New MCP App",
+            appName: appName.trim(),
+            projectName: deriveProjectName(appName.trim()),
             projectRootMode: "app",
           });
 
@@ -141,33 +162,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
       setStatus("error");
       setStatusMessage(null);
     }
-  }, [mode, projectName, folderName, createFolderLocation, existingFolderPath, onComplete]);
-
-  /**
-   * Generates a folder name from a project name.
-   * Converts to lowercase and replaces spaces with hyphens.
-   */
-  const generateFolderName = useCallback((name: string): string => {
-    return name
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "-")           // Replace spaces with hyphens
-      .replace(/[^a-z0-9-]/g, "")     // Remove invalid characters
-      .replace(/-+/g, "-")            // Collapse multiple hyphens
-      .replace(/^-|-$/g, "");         // Remove leading/trailing hyphens
-  }, []);
-
-  /**
-   * Handle project name change and auto-generate folder name in create mode.
-   */
-  const handleProjectNameChange = useCallback((value: string) => {
-    setProjectName(value);
-    // Only auto-generate folder name in create mode
-    if (mode === "create") {
-      const generated = generateFolderName(value);
-      setFolderName(generated || "new-mcp-app");
-    }
-  }, [mode, generateFolderName]);
+  }, [mode, projectName, appName, folderName, createFolderLocation, existingFolderPath, deriveProjectName, onComplete]);
 
   /**
    * Handle mode tab change and reset relevant state.
@@ -182,10 +177,22 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   }, []);
 
   /**
+   * Handle MCP App name change.
+   * Auto-formats to lowercase with hyphens. Derives project name and
+   * folder name automatically so the user only fills in one field.
+   */
+  const handleAppNameChange = useCallback((value: string) => {
+    const formatted = value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    setAppName(formatted);
+    setFolderName(formatted);
+    setProjectName(deriveProjectName(formatted));
+  }, [deriveProjectName]);
+
+  /**
    * Handle folder name change with validation.
+   * Folder name can be edited independently from app name.
    */
   const handleFolderNameChange = useCallback((value: string) => {
-    // Auto-format: lowercase, allow only valid characters
     const formatted = value.toLowerCase().replace(/[^a-z0-9-]/g, "");
     setFolderName(formatted);
   }, []);
@@ -206,7 +213,7 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
   }
 
   const isCreateDisabled = mode === "create"
-    ? !createFolderLocation || !folderName
+    ? !createFolderLocation || !folderName || !appName
     : !existingFolderPath;
 
   // Main form
@@ -232,26 +239,6 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
             >
               <X size={16} />
             </button>
-          </div>
-
-          {error && (
-            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-sm rounded-md p-3 mb-6">
-              {error}
-            </div>
-          )}
-
-          {/* Project name field */}
-          <div className="mb-4">
-            <Label htmlFor="project-name">
-              Project Name
-            </Label>
-            <Input
-              id="project-name"
-              type="text"
-              value={projectName}
-              onChange={(e) => handleProjectNameChange(e.target.value)}
-              placeholder="New MCP App"
-            />
           </div>
 
           {/* Mode Tabs */}
@@ -284,9 +271,32 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
             </div>
           </div>
 
+          {error && (
+            <div className="border border-border-danger bg-background-danger/10 text-text-danger text-sm rounded-md p-3 mb-6">
+              {error}
+            </div>
+          )}
+
           {/* Create Mode Content */}
           {mode === "create" && (
             <>
+              {/* MCP App Name */}
+              <div className="mb-4">
+                <Label htmlFor="app-name">
+                  MCP App Name
+                </Label>
+                <Input
+                  id="app-name"
+                  type="text"
+                  value={appName}
+                  onChange={(e) => handleAppNameChange(e.target.value)}
+                  placeholder="my-mcp-app"
+                />
+                <p className="text-sm text-text-secondary mt-2">
+                  Lowercase letters, numbers, and hyphens only
+                </p>
+              </div>
+
               {/* Folder Location */}
               <div className="mb-4">
                 <Label>Folder Location</Label>
@@ -330,21 +340,38 @@ export function McpAppCreator({ onComplete, onCancel }: ProjectCreatorProps) {
 
           {/* Existing Mode Content */}
           {mode === "existing" && (
-            <div className="mb-8">
-              <Label>Location of Existing App</Label>
-              <div className="flex gap-2">
+            <>
+              {/* Project Name */}
+              <div className="mb-4">
+                <Label htmlFor="project-name">
+                  Project Name
+                </Label>
                 <Input
+                  id="project-name"
                   type="text"
-                  value={existingFolderPath}
-                  readOnly
-                  placeholder="Select folder..."
-                  className="flex-1 bg-background-tertiary text-text-secondary cursor-default"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="New MCP App"
                 />
-                <Button type="button" variant="secondary" onClick={handleSelectExistingFolder}>
-                  Browse
-                </Button>
               </div>
-            </div>
+
+              {/* Folder Selection */}
+              <div className="mb-8">
+                <Label>Location of Existing App</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    value={existingFolderPath}
+                    readOnly
+                    placeholder="Select folder..."
+                    className="flex-1 bg-background-tertiary text-text-secondary cursor-default"
+                  />
+                  <Button type="button" variant="secondary" onClick={handleSelectExistingFolder}>
+                    Browse
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
 
           {/* Footer */}

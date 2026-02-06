@@ -175,7 +175,7 @@ export function ProjectList({
             className="px-5 text-sm text-text-primary"
             style={{ animation: "fade-in 0.22s ease-out backwards" }}
           >
-            What Are You Building?
+            Create A New Project
           </span>
           <div
             className="flex-1 border-t border-border-secondary origin-left"
@@ -191,7 +191,7 @@ export function ProjectList({
             <CardHeader className="flex flex-col items-start py-6">
               <Cube size={20} className="text-text-secondary mb-3" />
               <CardTitle className="mb-1 text-base">
-                <span className="text-[13px]">New MCP App</span>
+                <span className="text-[13px]">Build An MCP App</span>
               </CardTitle>
               <CardDescription className="text-sm leading-relaxed">
                 Build a new MCP App from scratch.
@@ -202,6 +202,22 @@ export function ProjectList({
           <Card
             className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
             style={{ animation: "gentle-rise 0.5s ease-out 0.35s backwards" }}
+            onClick={() => setActiveCreator("playground")}
+          >
+            <CardHeader className="flex flex-col items-start py-6">
+              <Lightning size={20} className="text-text-secondary mb-3" />
+              <CardTitle className="mb-1 text-base">
+                <span className="text-[13px]">Use MCP Apps</span>
+              </CardTitle>
+              <CardDescription className="text-sm leading-relaxed">
+                Do anything with MCP Apps.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
+          <Card
+            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
+            style={{ animation: "gentle-rise 0.5s ease-out 0.45s backwards" }}
             onClick={() => setActiveCreator("general")}
           >
             <CardHeader className="flex flex-col items-start py-6">
@@ -210,23 +226,7 @@ export function ProjectList({
                 <span className="text-[13px]">Existing Codebase</span>
               </CardTitle>
               <CardDescription className="text-sm leading-relaxed">
-                Code with help from MCP Apps.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card
-            className="cursor-pointer transition-all duration-200 bg-transparent border-border-secondary hover:bg-background-primary hover:border-background-inverse hover:shadow-[1px_1px_0_var(--color-background-inverse),2px_2px_0_var(--color-background-inverse),3px_3px_0_var(--color-background-inverse),4px_4px_0_var(--color-background-inverse),5px_5px_0_var(--color-background-inverse)] hover:-translate-x-[2px] hover:-translate-y-[2px] active:translate-x-0 active:translate-y-0 active:shadow-none select-none"
-            style={{ animation: "gentle-rise 0.5s ease-out 0.45s backwards" }}
-            onClick={() => setActiveCreator("playground")}
-          >
-            <CardHeader className="flex flex-col items-start py-6">
-              <Lightning size={20} className="text-text-secondary mb-3" />
-              <CardTitle className="mb-1 text-base">
-                <span className="text-[13px]">Playground</span>
-              </CardTitle>
-              <CardDescription className="text-sm leading-relaxed">
-                Do anything with MCP Apps.
+                Code anything with help from MCP Apps.
               </CardDescription>
             </CardHeader>
           </Card>

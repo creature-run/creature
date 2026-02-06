@@ -468,6 +468,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       mcpFolderPath?: string; // Path to existing MCP folder
       targetPath?: string; // Parent path for new MCP
       name?: string; // Subfolder name for new MCP
+      appName?: string; // Canonical MCP App name (used in package.json, createApp, URIs)
       projectName: string;
       projectRootMode?: "parent" | "app"; // Where to create .creature (default: "parent")
     }): Promise<{

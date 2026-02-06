@@ -3,7 +3,7 @@
  *
  * Creates and manages the AI agent with full tool access.
  * Tools include pip management and all MCP server tools.
- * File operations are provided by the mcp-ide MCP server.
+ * File operations are provided by the ide MCP server.
  */
 
 import {
@@ -276,7 +276,7 @@ export const getCurrentSystemPrompt = (): string => {
 /**
  * Creates the main chat agent with full tool access.
  * Tools include pip management and all MCP server tools.
- * File operations are provided by the mcp-ide MCP server.
+ * File operations are provided by the ide MCP server.
  *
  * Note: The system prompt includes current pip state and is built fresh
  * for each chat request to reflect the latest pip information.
@@ -294,7 +294,7 @@ export const createAgent = async ({
 }) => {
   const pipTools = createPipTools({ closePipInstance });
   // Pass handleToolCall to route all agent tool calls through Control Plane
-  // File tools are now provided by mcp-ide MCP server
+  // File tools are now provided by the ide MCP server
   const mcpTools = await getMcpToolsForAgent(handleToolCall);
 
   const { provider, modelId } = createProvider(credentials);

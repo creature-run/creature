@@ -448,12 +448,14 @@ export const registerProjectHandlers = () => {
         mcpFolderPath,
         targetPath,
         name,
+        appName,
         projectName,
         projectRootMode = "parent",
       }: {
         mcpFolderPath?: string; // Path to existing MCP folder
         targetPath?: string; // Parent path for new MCP
         name?: string; // Subfolder name for new MCP
+        appName?: string; // Canonical MCP App name (used in package.json, createApp, URIs)
         projectName: string;
         projectRootMode?: "parent" | "app"; // Where to set local_directory (default: "parent")
       }
@@ -473,6 +475,7 @@ export const registerProjectHandlers = () => {
         const templateResult = await createFromTemplate({
           targetPath,
           name,
+          appName: appName || name,
         });
 
         if (!templateResult.success) {
@@ -539,6 +542,7 @@ export const registerProjectHandlers = () => {
               { name: "notes", enabled: true },
               { name: "ide", enabled: true },
               { name: "terminal", enabled: true },
+              { name: "devkit", enabled: true },
             ],
           });
           validatedProject = await addLocalValidation(project);

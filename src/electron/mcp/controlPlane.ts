@@ -39,8 +39,10 @@
  * Per MCP Apps spec, Host must send ui/notifications/tool-input after initialization completes.
  */
 
-import { BrowserWindow } from "electron";
-import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, type ResourceIcon, type Views } from "./client";
+import { BrowserWindow, app } from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, restartMcp, type ResourceIcon, type Views } from "./client";
 import { getPopoutWindow } from "../window/popoutWindows";
 import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
@@ -68,6 +70,125 @@ export type { WidgetState };
  * 3. Host returns success to the agent
  */
 const BROWSER_MCP_NAME = "browser";
+
+/**
+ * DEVKIT MCP SPECIAL HANDLING
+ *
+ * The devkit MCP server declares tools but their handlers are no-ops.
+ * The Host intercepts all devkit tool calls and executes them directly
+ * because they require access to Electron APIs (LogAggregator, restartMcp,
+ * filesystem) that are unavailable to MCP server child processes.
+ */
+const DEVKIT_MCP_NAME = "devkit";
+
+/**
+ * Handle devkit tool calls.
+ *
+ * All devkit tools are executed by the Host, not the MCP server.
+ * The MCP server just declares the tools for the protocol.
+ *
+ * Tools:
+ * - devkit_get_logs: Read from LogAggregator
+ * - devkit_refresh_mcp_app: Restart an MCP App via restartMcp()
+ * - devkit_get_mcp_app_sdk_docs: Read SDK reference from disk
+ */
+const handleDevkitToolCall = async ({
+  toolName,
+  args,
+}: {
+  toolName: string;
+  args: Record<string, unknown>;
+}): Promise<unknown> => {
+  const action = toolName.replace("devkit_", "");
+
+  if (action === "get_logs") {
+    const filter = (args.filter as string) || "all";
+    const mcpName = args.mcpName as string | undefined;
+    const recentCount = 50;
+
+    let logs = logAggregator.getRecent(recentCount);
+
+    // Filter out devkit's own tool call/result logs to prevent infinite loop noise
+    logs = logs.filter(
+      (entry) => !entry.message.startsWith(`[Tool Call] ${DEVKIT_MCP_NAME}/`) &&
+                 !entry.message.startsWith(`[Tool Result] ${DEVKIT_MCP_NAME}/`)
+    );
+
+    if (filter === "current_mcp_app" && mcpName) {
+      logs = logs.filter((entry) => entry.sourceName === mcpName);
+    } else if (filter === "errors") {
+      const errorLevels = new Set(["error", "critical", "alert", "emergency"]);
+      logs = logs.filter((entry) => errorLevels.has(entry.level));
+    }
+
+    const errorCount = logs.filter((entry) => entry.level === "error" || entry.level === "critical").length;
+    const summary = `Fetched ${logs.length} log entries (${errorCount} errors)`;
+
+    return {
+      content: [{ type: "text", text: summary }],
+      structuredContent: {
+        type: "logs",
+        logs,
+        filter,
+        mcpName,
+        total: logs.length,
+      },
+    };
+  }
+
+  if (action === "refresh_mcp_app") {
+    const mcpName = args.mcpName as string;
+    if (!mcpName) {
+      return {
+        content: [{ type: "text", text: "Error: mcpName is required" }],
+        structuredContent: { type: "refresh", success: false, mcpName: "", error: "mcpName is required" },
+        isError: true,
+      };
+    }
+
+    try {
+      await restartMcp({ name: mcpName });
+      return {
+        content: [{ type: "text", text: `MCP App "${mcpName}" restarted successfully` }],
+        structuredContent: { type: "refresh", success: true, mcpName },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        content: [{ type: "text", text: `Failed to restart MCP App "${mcpName}": ${errorMessage}` }],
+        structuredContent: { type: "refresh", success: false, mcpName, error: errorMessage },
+        isError: true,
+      };
+    }
+  }
+
+  if (action === "get_mcp_app_sdk_docs") {
+    // Resolve the SDK reference docs path relative to the app root
+    const docsPath = app.isPackaged
+      ? path.join(process.resourcesPath, "docs", "sdk-reference.md")
+      : path.join(__dirname, "..", "..", "..", "docs", "sdk-reference.md");
+
+    try {
+      const content = fs.readFileSync(docsPath, "utf-8");
+      return {
+        content: [{ type: "text", text: content }],
+        structuredContent: { type: "sdk_docs" },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        content: [{ type: "text", text: `Failed to read SDK docs: ${errorMessage}` }],
+        structuredContent: { type: "sdk_docs", error: errorMessage },
+        isError: true,
+      };
+    }
+  }
+
+  return {
+    content: [{ type: "text", text: `Unknown devkit tool: ${toolName}` }],
+    isError: true,
+  };
+};
 
 /**
  * Pip Instance represents a rendered UI Resource in pip (picture-in-picture) mode.
@@ -278,7 +399,7 @@ export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promi
         resourceUri: pip.resourceUri
       });
       pipInstances.delete(pip.instanceId);
-      sendToRenderer("pip:closed", { instanceId: pip.instanceId });
+      sendToRenderer("pip:closed", pip.instanceId);
       continue;
     }
 
@@ -1024,12 +1145,19 @@ export const handleToolCall = async ({
   /** Source of the tool call - 'agent' for AI-initiated, 'ui' for user pip interaction */
   source?: "agent" | "ui";
 }) => {
+  // Skip logging for devkit tools to prevent infinite loops.
+  // Devkit reads from the same log aggregator it would write to,
+  // so logging its own calls would create recursive noise.
+  const isDevkitTool = serverName === DEVKIT_MCP_NAME;
+
   // Log tool call input to Dev Console
-  logAggregator.log({
-    source: "host",
-    level: "info",
-    message: `[Tool Call] ${serverName}/${toolName} (${source}) Input: ${JSON.stringify(args)}`,
-  });
+  if (!isDevkitTool) {
+    logAggregator.log({
+      source: "host",
+      level: "info",
+      message: `[Tool Call] ${serverName}/${toolName} (${source}) Input: ${JSON.stringify(args)}`,
+    });
+  }
 
   // Get tool metadata to check for UI Resource
   const toolDef = getTool(serverName, toolName);
@@ -1108,7 +1236,7 @@ export const handleToolCall = async ({
   }
 
   // Execute tool on MCP server with instanceId in args
-  // SPECIAL HANDLING: Browser MCP tools are executed by the Host
+  // SPECIAL HANDLING: Browser and Devkit MCP tools are executed by the Host
   let result: unknown;
 
   if (serverName === BROWSER_MCP_NAME && toolName.startsWith("browser_")) {
@@ -1117,6 +1245,8 @@ export const handleToolCall = async ({
       args,
       instanceId: targetInstanceId,
     });
+  } else if (serverName === DEVKIT_MCP_NAME && toolName.startsWith("devkit_")) {
+    result = await handleDevkitToolCall({ toolName, args });
   } else {
     // Inject _source and _instanceId into args
     // The SDK uses _instanceId for state management and WebSocket routing
@@ -1132,12 +1262,14 @@ export const handleToolCall = async ({
     result = await callTool({ serverName, toolName, args: argsWithContext });
   }
 
-  // Log tool call result to Dev Console
-  logAggregator.log({
-    source: "host",
-    level: "info",
-    message: `[Tool Result] ${serverName}/${toolName} Output: ${JSON.stringify(result)}`,
-  });
+  // Log tool call result to Dev Console (skip devkit to prevent infinite loops)
+  if (!isDevkitTool) {
+    logAggregator.log({
+      source: "host",
+      level: "info",
+      message: `[Tool Result] ${serverName}/${toolName} Output: ${JSON.stringify(result)}`,
+    });
+  }
 
   // Create pip if needed (for new instanceIds)
   try {

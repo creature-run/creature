@@ -1,0 +1,13 @@
+/**
+ * MCP Devkit Styles
+ *
+ * Minimal styles for elements that can't be styled with Tailwind classes.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}

@@ -662,8 +662,11 @@ const getSamplingSettingsForProject = (): SamplingSettings => {
 let mcpsShutdown = false;
 
 // Track dev MCP folder paths to their current server names
-// Used to detect when a dev MCP's name changes after code rewrite
+// Maps dev MCP folder paths to their current canonical server names.
+// Initially populated from package.json during initializeMcps, then updated by
+// createConnection when the server's self-declared name differs from the spawn key.
 const devMcpPathToName = new Map<string, string>();
+
 
 /**
  * Check if a server name is a built-in MCP.
@@ -689,8 +692,11 @@ const getPrimaryWorkspacePath = (): string | null => {
 };
 
 /**
- * Find a workspace root by MCP app server name.
- * MCP app names come from their package.json name field.
+ * Find a workspace root by MCP app name.
+ *
+ * Reads each MCP app root's package.json to match against the given name.
+ * Used for initial process spawning and discovery — the canonical name
+ * after connection comes from the MCP protocol handshake.
  */
 const findRootByMcpName = (serverName: string): WorkspaceRoot | null => {
   for (const root of currentWorkspaceRoots) {
@@ -1328,6 +1334,13 @@ const BUILTIN_MCP_SERVERS: MCPServerConfig[] = [
     command: "node",
     args: ["desktop/.vite/build/crm-server.js"],
   },
+  {
+    name: "devkit",
+    path: "mcp-devkit",
+    transport: "streamable-http",
+    command: "node",
+    args: ["desktop/.vite/build/devkit-server.js"],
+  },
 ];
 
 
@@ -1343,8 +1356,8 @@ const findMcpPath = (serverDir: string): string | null => {
     return null;
   }
 
-  // Development: MCPs are now in desktop/src/electron/mcps/
-  // Extract the MCP name (e.g., "mcp-ide" -> "ide")
+  // Development: MCPs are in desktop/src/electron/mcps/
+  // Strip the "mcp-" prefix from the path to get the folder name (e.g., "mcp-ide" -> "ide")
   const mcpName = serverDir.replace("mcp-", "");
   
   // In dev mode, __dirname points to .vite/build/, so we need to resolve from workspace
@@ -1858,7 +1871,7 @@ const createStdioTransport = async (
   const assignedPort = await portManager.allocate({ serverName });
   env.MCP_ASSIGNED_PORT = String(assignedPort);
 
-  // Pass workspace roots to MCPs that need them (e.g., mcp-ide).
+  // Pass workspace roots to MCPs that need them (e.g., ide).
   // MCPs can read MCP_WORKING_DIRS (JSON) for multi-root support,
   // or MCP_WORKING_DIR (single path) for backward compatibility.
   const primaryPath = getPrimaryWorkspacePath();
@@ -2471,8 +2484,42 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     instructions,
   };
 
-  connections.set(config.name, connection);
-  setMcpStatus(serverName, "ok");
+  // Reconcile the spawn key (serverName) against the server's self-declared name.
+  // The MCP protocol handshake is the canonical source of identity — package.json
+  // is only used for initial process spawning and discovery.
+  const serverVersion = client.getServerVersion();
+  const canonicalName = serverVersion?.name || serverName;
+
+  if (canonicalName !== serverName) {
+    console.log(`[MCP] Server declared name "${canonicalName}" (spawned as "${serverName}")`);
+
+    // Update devMcpPathToName to reflect the canonical name
+    for (const [devPath, mappedName] of devMcpPathToName.entries()) {
+      if (mappedName === serverName) {
+        devMcpPathToName.set(devPath, canonicalName);
+        break;
+      }
+    }
+
+    // Update project MCP name tracking
+    projectMcpNames.delete(serverName);
+    projectMcpNames.add(canonicalName);
+
+    // Move connection promise to canonical name
+    connectionPromises.delete(serverName);
+
+    // Close old pips that reference the spawn key
+    await refreshPipsForMcp({ mcpName: serverName });
+
+    // Remove old sidebar icon
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("mcp:disabled", { name: serverName });
+    }
+  }
+
+  connections.set(canonicalName, connection);
+  setMcpStatus(canonicalName, "ok");
 
   return connection;
   } catch (error) {
@@ -2619,11 +2666,51 @@ export const closeMcpsForProject = async (): Promise<void> => {
 };
 
 /**
+ * Close and clean up a single MCP connection by name.
+ *
+ * Gracefully closes the MCP client, kills transport and spawned processes,
+ * releases allocated ports, and removes the connection from tracking maps.
+ * No-ops if no connection exists for the given name.
+ */
+const closeConnection = async ({ name }: { name: string }): Promise<void> => {
+  const conn = connections.get(name);
+  if (conn) {
+    try {
+      await Promise.race([
+        conn.client.close(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Client close timeout")), 2000)
+        ),
+      ]);
+    } catch (e) {
+      console.error(`[MCP] Error closing ${name}:`, e);
+    } finally {
+      // Force-kill the transport if it's still active
+      // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
+      if (conn.transport.childProcess && !conn.transport.childProcess.killed) {
+        // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
+        killProcessTree(conn.transport.childProcess);
+      }
+      // Kill spawned process for HTTP-based local MCPs
+      if (conn.spawnedProcess && !conn.spawnedProcess.killed) {
+        killProcessTree(conn.spawnedProcess);
+      }
+      // Release ports so they can be reused
+      portManager.release({ serverName: name });
+      portManager.release({ serverName: `${name}-hmr` });
+    }
+    connections.delete(name);
+  }
+  connectionPromises.delete(name);
+};
+
+/**
  * Restart a specific MCP server by name.
  *
  * Closes the existing connection (if any), clears cached data,
- * and creates a fresh connection. Useful after changing dev mode
- * or other settings that require a full server restart.
+ * and creates a fresh connection. If the server declares a different
+ * canonical name after reconnection, createConnection handles the
+ * re-keying and UI cleanup automatically.
  *
  * @param params.name - Server name to restart
  * @param params.config - Optional config for new custom MCPs (not needed for built-in or existing MCPs)
@@ -2656,47 +2743,38 @@ export const restartMcp = async ({ name, config }: {
     });
   }
 
-  // Close existing connection if present
-  const existing = connections.get(name);
-  if (existing) {
-    try {
-      await Promise.race([
-        existing.client.close(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Client close timeout")), 2000)
-        ),
-      ]);
-    } catch (e) {
-      console.error(`[MCP] Error closing ${name}:`, e);
-    } finally {
-      // Force-kill the transport if it's still active
-      // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
-      if (existing.transport.childProcess && !existing.transport.childProcess.killed) {
-        // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
-        killProcessTree(existing.transport.childProcess);
+  // Close the connection under `name` if it exists
+  await closeConnection({ name });
+
+  // If called with a new name (e.g., after a rename), there may be a stale
+  // connection under the old name for the same dev path. Find and close it
+  // so we don't end up with duplicate connections and sidebar icons.
+  const devRoot = findRootByMcpName(name);
+  if (devRoot) {
+    const oldName = devMcpPathToName.get(devRoot.path);
+    if (oldName && oldName !== name) {
+      console.log(`[MCP] Closing stale connection "${oldName}" for dev path ${devRoot.path}`);
+      await closeConnection({ name: oldName });
+
+      // Close old pips and sidebar icon immediately
+      await refreshPipsForMcp({ mcpName: oldName });
+      const mainWindow = getMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("mcp:disabled", { name: oldName });
       }
-      // Kill spawned process for HTTP-based local MCPs
-      if (existing.spawnedProcess && !existing.spawnedProcess.killed) {
-        killProcessTree(existing.spawnedProcess);
-      }
-      // Release ports so they can be reused on reconnect
-      portManager.release({ serverName: name });
-      portManager.release({ serverName: `${name}-hmr` });
+
+      projectMcpNames.delete(oldName);
     }
-    connections.delete(name);
   }
 
-  // Clear any pending connection promise
-  connectionPromises.delete(name);
-
-  // Reconnect
+  // Reconnect — createConnection handles name reconciliation if the server
+  // declares a different canonical name than what we used to spawn it
   try {
     await getConnection(name);
 
-    // Refresh any pips using this MCP with fresh content
+    // Refresh pips (handles non-rename restarts where content changed)
     await refreshPipsForMcp({ mcpName: name });
 
-    // Notify renderer (for any additional handling)
     const mainWindow = getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("mcp:restarted", { name });
@@ -2713,42 +2791,8 @@ export const restartMcp = async ({ name, config }: {
  * Used when deleting an MCP from project settings.
  */
 export const disableMcp = async ({ name }: { name: string }): Promise<void> => {
-
-  // Remove from project MCP names
   projectMcpNames.delete(name);
-
-  // Close existing connection if present
-  const existing = connections.get(name);
-  if (existing) {
-    try {
-      await Promise.race([
-        existing.client.close(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Client close timeout")), 2000)
-        ),
-      ]);
-    } catch (e) {
-      console.error(`[MCP] Error closing ${name}:`, e);
-    } finally {
-      // Force-kill the transport if it's still active
-      // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
-      if (existing.transport.childProcess && !existing.transport.childProcess.killed) {
-        // @ts-expect-error - childProcess is not typed but exists on StdioClientTransport
-        killProcessTree(existing.transport.childProcess);
-      }
-      // Kill spawned process for HTTP-based local MCPs
-      if (existing.spawnedProcess && !existing.spawnedProcess.killed) {
-        killProcessTree(existing.spawnedProcess);
-      }
-      // Release ports so they can be reused
-      portManager.release({ serverName: name });
-      portManager.release({ serverName: `${name}-hmr` });
-    }
-    connections.delete(name);
-  }
-
-  // Clear any pending connection promise
-  connectionPromises.delete(name);
+  await closeConnection({ name });
 
   console.log(`[MCP] Disconnected from ${name}`);
   mcpStatusByName.delete(name);
@@ -3035,6 +3079,23 @@ const jsonSchemaToZod = (schema: Record<string, unknown>): z.ZodType => {
 };
 
 /**
+ * Check if an MCP tool result is a "tool not found" error.
+ *
+ * When an MCP server restarts with different tools (common during development),
+ * the agent's cached tool list becomes stale. Calling a removed tool returns
+ * an isError result with "not found" in the content. Detecting this lets us
+ * enrich the error with the server's current tools so the model can self-correct.
+ */
+const isToolNotFoundResult = (result: unknown): boolean => {
+  if (!result || typeof result !== "object") return false;
+  const r = result as { isError?: boolean; content?: Array<{ type?: string; text?: string }> };
+  if (!r.isError || !Array.isArray(r.content)) return false;
+  return r.content.some(
+    (item) => item.type === "text" && typeof item.text === "string" && item.text.includes("not found")
+  );
+};
+
+/**
  * Get MCP tools formatted for the AI agent.
  * Routes tool calls through the provided handleToolCall function.
  *
@@ -3082,6 +3143,23 @@ export const getMcpToolsForAgent = async (
             args,
             source: "agent",
           });
+
+          // When the MCP server restarted with different tools (e.g., during
+          // development), tool calls return isError with "not found". Enrich
+          // the error with the server's current tool list so the model can
+          // self-correct without the user needing to re-prompt.
+          if (isToolNotFoundResult(result)) {
+            const currentTools = getAllTools()
+              .filter((ct) => ct.serverName === t.serverName)
+              .map((ct) => ct.name);
+
+            return {
+              ...result as Record<string, unknown>,
+              availableTools: currentTools,
+              hint: "The MCP server restarted with different tools. Use the tools listed in availableTools instead.",
+            };
+          }
+
           return result;
         } catch (error) {
           console.error(`[Agent Tool] ${t.name} failed:`, error);
@@ -3262,57 +3340,26 @@ const isSessionInvalidError = (error: unknown): boolean => {
          errorMessage.includes("No valid session ID");
 };
 
+/**
+ * Reconnect to an MCP server after a session error.
+ *
+ * Closes the existing connection and creates a fresh one. If the server
+ * declares a different canonical name after reconnection (e.g., the developer
+ * renamed it), createConnection handles the re-keying and UI cleanup.
+ */
 const reconnectServer = async (serverName: string): Promise<void> => {
-  // Check if this is a dev MCP that may have changed names
-  let devMcpPath: string | null = null;
-  for (const [path, name] of devMcpPathToName.entries()) {
-    if (name === serverName) {
-      devMcpPath = path;
-      break;
-    }
-  }
+  await closeConnection({ name: serverName });
 
-  // Close existing connection
-  const conn = connections.get(serverName);
-  if (conn) {
-    await conn.client.close().catch(() => {});
-    await conn.transport.close().catch(() => {});
-    if (conn.spawnedProcess && !conn.spawnedProcess.killed) {
-      killProcessTree(conn.spawnedProcess);
-    }
-    portManager.release({ serverName });
-    portManager.release({ serverName: `${serverName}-hmr` });
-    connections.delete(serverName);
-    connectionPromises.delete(serverName);
-  }
-
-  // Determine the name to connect with (may have changed for dev MCPs)
-  let newName = serverName;
-  if (devMcpPath) {
-    const mcpDef = getPublishablePackageInfo(devMcpPath);
-    if (mcpDef && mcpDef.name !== serverName) {
-      console.log(`[MCP] Dev MCP name changed: ${serverName} -> ${mcpDef.name}`);
-      newName = mcpDef.name;
-      devMcpPathToName.set(devMcpPath, newName);
-
-      // Notify sidebar to remove old entry
-      const mainWindow = getMainWindow();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("mcp:disabled", { name: serverName });
-      }
-    }
-  }
-
-  // Create new connection with fresh resources
-  await getConnection(newName);
+  // Create new connection — createConnection handles name reconciliation
+  await getConnection(serverName);
 
   // Notify renderer so sidebar refreshes resource list
   const mainWindow = getMainWindow();
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("mcp:restarted", { name: newName });
+    mainWindow.webContents.send("mcp:restarted", { name: serverName });
   }
 
-  console.log(`[MCP] Reconnected to ${newName}`);
+  console.log(`[MCP] Reconnected to ${serverName}`);
 };
 
 /**

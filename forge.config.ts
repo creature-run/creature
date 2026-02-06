@@ -86,7 +86,7 @@ const copyMcpUIs = (resourcesPath: string) => {
   const destDir = path.join(resourcesPath, 'mcp-uis');
 
   // Copy all MCP UIs
-  const mcpNames = ['browser', 'terminal', 'ide', 'todos', 'notes', 'crm'];
+  const mcpNames = ['browser', 'terminal', 'ide', 'todos', 'notes', 'crm', 'devkit'];
   for (const name of mcpNames) {
     const srcPath = path.join(distDir, name, 'ui');
     const destPath = path.join(destDir, name, 'ui');
@@ -480,6 +480,11 @@ const config: ForgeConfig = {
         },
         {
           entry: 'src/electron/mcps/crm/crm-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
+        {
+          entry: 'src/electron/mcps/devkit/devkit-server.ts',
           config: 'vite.main.config.mts',
           target: 'main',
         },
