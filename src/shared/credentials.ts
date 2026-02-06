@@ -7,9 +7,14 @@
 
 export type ProviderType = "anthropic" | "bedrock" | "vertex";
 
+export type ChatModelPreference = "sonnet-4-5" | "opus-4-6";
+
+export const DEFAULT_CHAT_MODEL: ChatModelPreference = "sonnet-4-5";
+
 export interface AnthropicCredentials {
   type: "anthropic";
   apiKey: string;
+  chatModel?: ChatModelPreference;
 }
 
 export interface BedrockCredentials {
@@ -17,6 +22,7 @@ export interface BedrockCredentials {
   accessKeyId: string;
   secretAccessKey: string;
   region: string;
+  chatModel?: ChatModelPreference;
 }
 
 export interface VertexCredentials {
@@ -25,6 +31,7 @@ export interface VertexCredentials {
   location: string;
   clientEmail: string;
   privateKey: string;
+  chatModel?: ChatModelPreference;
 }
 
 export type ProviderCredentials =

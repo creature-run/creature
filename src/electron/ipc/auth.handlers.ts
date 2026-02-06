@@ -13,7 +13,12 @@ import {
   hasCredentials,
   validateCredentials,
 } from "../auth/credentialsStore";
-import type { ProviderCredentials, ProviderType } from "../../shared/credentials";
+import {
+  DEFAULT_CHAT_MODEL,
+  type ChatModelPreference,
+  type ProviderCredentials,
+  type ProviderType,
+} from "../../shared/credentials";
 
 /**
  * Auth state for the application.
@@ -21,6 +26,7 @@ import type { ProviderCredentials, ProviderType } from "../../shared/credentials
 export interface AuthState {
   hasCredentials: boolean;
   providerType?: ProviderType;
+  chatModel?: ChatModelPreference;
   // Legacy compatibility
   hasApiKey: boolean;
 }
@@ -30,6 +36,10 @@ export interface AuthState {
  * Loaded on startup and updated when credentials change.
  */
 let cachedCredentials: ProviderCredentials | null = null;
+
+const isValidChatModel = (value: unknown): value is ChatModelPreference => {
+  return value === "sonnet-4-5" || value === "opus-4-6";
+};
 
 /**
  * Get the current credentials (from memory cache).
@@ -42,9 +52,11 @@ export const getCredentials = (): ProviderCredentials | null => {
  * Get the current auth state.
  */
 export const getAuthState = (): AuthState => {
+  const chatModel = cachedCredentials?.chatModel;
   return {
     hasCredentials: cachedCredentials !== null,
     providerType: cachedCredentials?.type,
+    chatModel: isValidChatModel(chatModel) ? chatModel : DEFAULT_CHAT_MODEL,
     hasApiKey: cachedCredentials !== null, // Legacy compatibility
   };
 };
@@ -112,16 +124,29 @@ export const registerAuthHandlers = () => {
           return { success: false, error: "Unknown provider type" };
       }
 
+      const requestedChatModel = (credentials as { chatModel?: unknown }).chatModel;
+      if (requestedChatModel != null && !isValidChatModel(requestedChatModel)) {
+        return { success: false, error: "Invalid chat model selection" };
+      }
+
+      const normalizedCredentials: ProviderCredentials = {
+        ...credentials,
+        chatModel:
+          (isValidChatModel(requestedChatModel) ? requestedChatModel : undefined) ??
+          cachedCredentials?.chatModel ??
+          DEFAULT_CHAT_MODEL,
+      };
+
       // Validate credentials with the provider
-      const validation = await validateCredentials(credentials);
+      const validation = await validateCredentials(normalizedCredentials);
       if (!validation.valid) {
         return { success: false, error: validation.error || "Invalid credentials" };
       }
 
       // Save the credentials
       try {
-        await saveCredentials(credentials);
-        cachedCredentials = credentials;
+        await saveCredentials(normalizedCredentials);
+        cachedCredentials = normalizedCredentials;
         return { success: true };
       } catch (error) {
         return {
@@ -218,5 +243,32 @@ export const registerAuthHandlers = () => {
   ipcMain.handle("auth:hasApiKey", async () => {
     const has = await hasCredentials();
     return { hasApiKey: has };
+  });
+
+  ipcMain.handle("auth:setChatModel", async (_, { chatModel }: { chatModel: ChatModelPreference }) => {
+    if (!isValidChatModel(chatModel)) {
+      return { success: false, error: "Invalid chat model selection" };
+    }
+
+    if (cachedCredentials === null) {
+      cachedCredentials = await loadCredentials();
+    }
+
+    if (!cachedCredentials) {
+      return { success: false, error: "No credentials configured" };
+    }
+
+    const updatedCredentials: ProviderCredentials = { ...cachedCredentials, chatModel };
+
+    try {
+      await saveCredentials(updatedCredentials);
+      cachedCredentials = updatedCredentials;
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to update chat model",
+      };
+    }
   });
 };
