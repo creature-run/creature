@@ -1,18 +1,21 @@
 /**
  * Dev Console IPC Handlers
  *
- * Handles IPC events for the Dev Console:
+ * Handles IPC events for the Dev Console and logging:
  * - Opening the Dev Console window
- * - Providing log entries (delegated to logs module)
- * - Providing conversation history
- * - Providing the current system prompt
+ * - Providing and clearing log entries
+ * - Receiving UI Resource logs from the renderer
+ * - Storing conversation history (consumed by Devkit MCP)
+ *
+ * Conversation and System Prompt inspection is handled by the Devkit MCP.
+ * The updateConversation handler remains because ViewChat.tsx pushes
+ * conversation state here, and the Devkit reads it via controlPlane.
  */
 
 import { ipcMain } from "electron";
 import { logAggregator, type LogLevel } from "../logging";
 import { openDevConsoleWindow } from "../window/devConsoleWindow";
-import { getCurrentConversation } from "./chat.handlers";
-import { getCurrentSystemPrompt } from "../agent";
+import { setCurrentConversation } from "./chat.handlers";
 
 /**
  * Register IPC handlers for the Dev Console.
@@ -63,31 +66,11 @@ export const registerDevConsoleHandlers = () => {
   });
 
   /**
-   * Get the current conversation history.
-   * Returns the messages array from the current chat session.
-   */
-  ipcMain.handle("devconsole:getConversation", async () => {
-    return getCurrentConversation();
-  });
-
-  /**
-   * Get the current system prompt.
-   * Returns the full system prompt including dynamic content.
-   */
-  ipcMain.handle("devconsole:getSystemPrompt", async () => {
-    return getCurrentSystemPrompt();
-  });
-
-  /**
    * Update the stored conversation history.
    * Called by the renderer when conversation changes.
+   * Data is consumed by the Devkit MCP's devkit_get_conversation tool.
    */
   ipcMain.on("devconsole:updateConversation", (_event, messages: unknown[]) => {
-    // Store in chat.handlers for retrieval
     setCurrentConversation(messages);
   });
 };
-
-// Re-export for use in chat.handlers
-import { setCurrentConversation } from "./chat.handlers";
-

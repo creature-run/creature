@@ -2382,50 +2382,11 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     }
   }
 
-  // Cache tools
-  const tools = new Map<string, CachedTool>();
+  // Cache tools using shared parsing logic
+  let tools = new Map<string, CachedTool>();
   try {
     const toolsResult = await client.listTools();
-    for (const t of toolsResult.tools) {
-      // Extract UI metadata from _meta.ui if present
-      // Per MCP Apps spec, non-standard extensions are under `experimental`
-      const meta = t._meta as { 
-        ui?: { 
-          resourceUri?: string; 
-          displayModes?: string[];
-          experimental?: {
-            defaultDisplayMode?: string;
-          };
-        };
-        creature?: {
-          auth?: { managed?: boolean };
-        };
-      } | undefined;
-
-      // Ensure inputSchema has required type: "object" for Anthropic API compatibility
-      // Some MCPs may return tools with undefined or empty inputSchema
-      const inputSchema = (t.inputSchema as Record<string, unknown>) || { type: "object" };
-      if (!inputSchema.type) {
-        inputSchema.type = "object";
-      }
-
-      // Build description with display mode info for the agent
-      let description = t.description || "";
-      if (meta?.ui?.displayModes?.length) {
-        description += ` [Display modes: ${meta.ui.displayModes.join(", ")}]`;
-      }
-
-      tools.set(t.name, {
-        name: t.name,
-        serverName,
-        description,
-        inputSchema,
-        resourceUri: meta?.ui?.resourceUri,
-        displayModes: meta?.ui?.displayModes,
-        defaultDisplayMode: meta?.ui?.experimental?.defaultDisplayMode,
-        creatureAuth: meta?.creature?.auth,
-      });
-    }
+    tools = parseToolsFromServer({ serverName, rawTools: toolsResult.tools });
   } catch (error) {
     console.error(`[MCP] Failed to list tools from ${serverName}:`, error);
   }
@@ -2520,6 +2481,38 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
 
   connections.set(canonicalName, connection);
   setMcpStatus(canonicalName, "ok");
+
+  // Proactive restart detection for dev MCP servers.
+  // During development, tsx watch restarts the underlying server process
+  // when source files change. The parent npm process stays alive, so the
+  // spawned process doesn't exit — only the HTTP server restarts on the
+  // same port with a new session. The MCP SDK convention is to log
+  // "listening on http://localhost:PORT/mcp" on startup, so any subsequent
+  // occurrence of this pattern indicates a restart. A settling delay ensures
+  // the initial startup message is ignored.
+  if (!app.isPackaged && spawnedProcess && actualTransportType === "streamable-http") {
+    const storedName = canonicalName;
+    setTimeout(() => {
+      if (spawnedProcess.killed || !connections.has(storedName)) return;
+
+      const onRestartDetected = (data: Buffer) => {
+        if (!data.toString().includes("listening on")) return;
+        console.log(`[MCP] Detected dev server restart for ${storedName}`);
+
+        // Brief delay to let the new server fully initialize before reconnecting
+        setTimeout(async () => {
+          try {
+            await reconnectServer(storedName);
+          } catch (err) {
+            console.warn(`[MCP] Proactive reconnect after restart failed for ${storedName}:`, err);
+          }
+        }, 1000);
+      };
+
+      spawnedProcess.stdout?.on("data", onRestartDetected);
+      spawnedProcess.stderr?.on("data", onRestartDetected);
+    }, 5000);
+  }
 
   return connection;
   } catch (error) {
@@ -2933,6 +2926,72 @@ export const getResourceUrisForMcp = (serverName: string): Set<string> => {
 };
 
 /**
+ * Parse raw MCP tool definitions into CachedTool entries.
+ *
+ * Extracts UI metadata, ensures Anthropic-compatible inputSchema,
+ * and builds enriched descriptions with display mode info. Factored
+ * out of createConnection so the same parsing logic can be reused
+ * when refreshing tools for a live connection.
+ */
+const parseToolsFromServer = ({
+  serverName,
+  rawTools,
+}: {
+  serverName: string;
+  rawTools: Array<{
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    _meta?: unknown;
+  }>;
+}): Map<string, CachedTool> => {
+  const tools = new Map<string, CachedTool>();
+
+  for (const t of rawTools) {
+    // Extract UI metadata from _meta.ui if present
+    // Per MCP Apps spec, non-standard extensions are under `experimental`
+    const meta = t._meta as {
+      ui?: {
+        resourceUri?: string;
+        displayModes?: string[];
+        experimental?: {
+          defaultDisplayMode?: string;
+        };
+      };
+      creature?: {
+        auth?: { managed?: boolean };
+      };
+    } | undefined;
+
+    // Ensure inputSchema has required type: "object" for Anthropic API compatibility
+    // Some MCPs may return tools with undefined or empty inputSchema
+    const inputSchema = (t.inputSchema as Record<string, unknown>) || { type: "object" };
+    if (!inputSchema.type) {
+      inputSchema.type = "object";
+    }
+
+    // Build description with display mode info for the agent
+    let description = t.description || "";
+    if (meta?.ui?.displayModes?.length) {
+      description += ` [Display modes: ${meta.ui.displayModes.join(", ")}]`;
+    }
+
+    tools.set(t.name, {
+      name: t.name,
+      serverName,
+      description,
+      inputSchema,
+      resourceUri: meta?.ui?.resourceUri,
+      displayModes: meta?.ui?.displayModes,
+      defaultDisplayMode: meta?.ui?.experimental?.defaultDisplayMode,
+      creatureAuth: meta?.creature?.auth,
+    });
+  }
+
+  return tools;
+};
+
+/**
  * Get all tools from all connected servers.
  */
 export const getAllTools = (): CachedTool[] => {
@@ -3079,23 +3138,6 @@ const jsonSchemaToZod = (schema: Record<string, unknown>): z.ZodType => {
 };
 
 /**
- * Check if an MCP tool result is a "tool not found" error.
- *
- * When an MCP server restarts with different tools (common during development),
- * the agent's cached tool list becomes stale. Calling a removed tool returns
- * an isError result with "not found" in the content. Detecting this lets us
- * enrich the error with the server's current tools so the model can self-correct.
- */
-const isToolNotFoundResult = (result: unknown): boolean => {
-  if (!result || typeof result !== "object") return false;
-  const r = result as { isError?: boolean; content?: Array<{ type?: string; text?: string }> };
-  if (!r.isError || !Array.isArray(r.content)) return false;
-  return r.content.some(
-    (item) => item.type === "text" && typeof item.text === "string" && item.text.includes("not found")
-  );
-};
-
-/**
  * Get MCP tools formatted for the AI agent.
  * Routes tool calls through the provided handleToolCall function.
  *
@@ -3113,7 +3155,12 @@ export const getMcpToolsForAgent = async (
     source: "agent" | "ui";
   }) => Promise<unknown>
 ): Promise<Record<string, unknown>> => {
-  // MCPs are initialized when folder is opened, just get cached tools
+  // Refresh dev MCP tools before building the agent's tool map.
+  // During development, MCP servers restart via tsx watch and the cached
+  // tool list becomes stale. Without this, the AI SDK throws
+  // AI_NoSuchToolError for new/renamed tools before execute() is reached.
+  await refreshDevConnectionTools();
+
   const allTools = getAllTools();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const agentTools: Record<string, any> = {};
@@ -3143,23 +3190,6 @@ export const getMcpToolsForAgent = async (
             args,
             source: "agent",
           });
-
-          // When the MCP server restarted with different tools (e.g., during
-          // development), tool calls return isError with "not found". Enrich
-          // the error with the server's current tool list so the model can
-          // self-correct without the user needing to re-prompt.
-          if (isToolNotFoundResult(result)) {
-            const currentTools = getAllTools()
-              .filter((ct) => ct.serverName === t.serverName)
-              .map((ct) => ct.name);
-
-            return {
-              ...result as Record<string, unknown>,
-              availableTools: currentTools,
-              hint: "The MCP server restarted with different tools. Use the tools listed in availableTools instead.",
-            };
-          }
-
           return result;
         } catch (error) {
           console.error(`[Agent Tool] ${t.name} failed:`, error);
@@ -3353,6 +3383,12 @@ const reconnectServer = async (serverName: string): Promise<void> => {
   // Create new connection — createConnection handles name reconciliation
   await getConnection(serverName);
 
+  // Refresh pips for this MCP so stale pips get new HTML content
+  // and pips whose resources no longer exist are cleaned up.
+  // Without this, session-error reconnects leave stale pips with
+  // broken AppBridge connections stuck in loading state.
+  await refreshPipsForMcp({ mcpName: serverName });
+
   // Notify renderer so sidebar refreshes resource list
   const mainWindow = getMainWindow();
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3360,6 +3396,52 @@ const reconnectServer = async (serverName: string): Promise<void> => {
   }
 
   console.log(`[MCP] Reconnected to ${serverName}`);
+};
+
+/**
+ * Refresh tools for development MCP connections.
+ *
+ * During development, MCP servers may restart (e.g., tsx watch file changes)
+ * without the client knowing. The cached tool definitions become stale,
+ * causing AI_NoSuchToolError when the model tries to call new/renamed tools.
+ *
+ * This re-lists tools from each dev HTTP connection before the agent is
+ * created. If the session is invalid (server restarted), a full reconnect
+ * is triggered first so the agent always has the latest tool definitions.
+ *
+ * Only runs in development mode and only targets HTTP connections with
+ * spawned processes (dev MCPs).
+ */
+const refreshDevConnectionTools = async (): Promise<void> => {
+  if (app.isPackaged) return;
+
+  for (const [name, conn] of connections.entries()) {
+    // Only refresh streamable-http connections with spawned processes.
+    // These are the dev MCPs that restart via tsx watch / npm run dev.
+    if (conn.transportType !== "streamable-http" || !conn.spawnedProcess) continue;
+
+    try {
+      const toolsResult = await conn.client.listTools();
+      const freshTools = parseToolsFromServer({ serverName: name, rawTools: toolsResult.tools });
+
+      // Only update if tools actually changed to avoid unnecessary churn
+      const oldNames = Array.from(conn.tools.keys()).sort().join(",");
+      const newNames = Array.from(freshTools.keys()).sort().join(",");
+      if (oldNames !== newNames) {
+        console.log(`[MCP] Tools changed for ${name}: [${oldNames}] → [${newNames}]`);
+        conn.tools = freshTools;
+        // Refresh instructions too since the server may have updated them
+        conn.instructions = conn.client.getInstructions();
+      }
+    } catch (error) {
+      if (isSessionInvalidError(error)) {
+        console.log(`[MCP] Session invalid for ${name} (server likely restarted), reconnecting...`);
+        await reconnectServer(name);
+      } else {
+        console.warn(`[MCP] Failed to refresh tools for ${name}:`, error);
+      }
+    }
+  }
 };
 
 /**

@@ -309,17 +309,25 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
   /**
    * Phase 2: Inject real HTML content AFTER bridge is ready.
    * This ensures Host is listening before Guest sends ui/initialize.
+   *
+   * The bridgeRef.current check guards against a stale bridgeReady state during
+   * pip refresh. When refreshVersion increments, Phase 1 cleanup synchronously
+   * sets bridgeRef.current = null and queues setBridgeReady(false), but the
+   * current render still sees the previous bridgeReady=true. Without this check,
+   * content would be injected before the new bridge is created, causing the
+   * Guest's ui/initialize request to go unanswered and the pip to hang in a
+   * loading state indefinitely.
    */
   useEffect(() => {
     const iframe = iframeRef.current;
 
-    if (!bridgeReady || !iframe || !pip.htmlContent) {
+    if (!bridgeReady || !iframe || !pip.htmlContent || !bridgeRef.current) {
       return;
     }
 
     // Inject real content now that bridge is listening
     iframe.srcdoc = pip.htmlContent;
-  }, [bridgeReady, pip.htmlContent, pip.instanceId]);
+  }, [bridgeReady, pip.htmlContent, pip.instanceId, pip.refreshVersion]);
 
   /**
    * Listen for UI runtime errors posted from the iframe.

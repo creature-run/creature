@@ -48,6 +48,8 @@ import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
 import type { WidgetState } from "../../shared/types";
 import { resolveInstanceIdForTool, type RoutingResult } from "./routing";
+import { getCurrentConversation } from "../ipc/chat.handlers";
+import { getCurrentSystemPrompt } from "../agent";
 
 export type { WidgetState };
 
@@ -182,6 +184,28 @@ const handleDevkitToolCall = async ({
         isError: true,
       };
     }
+  }
+
+  if (action === "get_conversation") {
+    const conversation = getCurrentConversation();
+    return {
+      content: [{ type: "text", text: `Conversation has ${conversation.length} messages` }],
+      structuredContent: {
+        type: "conversation",
+        messages: conversation,
+      },
+    };
+  }
+
+  if (action === "get_system_prompt") {
+    const prompt = getCurrentSystemPrompt();
+    return {
+      content: [{ type: "text", text: prompt }],
+      structuredContent: {
+        type: "system_prompt",
+        prompt,
+      },
+    };
   }
 
   return {

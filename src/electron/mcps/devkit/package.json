@@ -10,6 +10,7 @@
     "build:ui": "vite build --mode production"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.18",
     "open-mcp-app": "file:../../../../artifacts/sdk"
   },
   "devDependencies": {

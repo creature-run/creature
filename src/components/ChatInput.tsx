@@ -270,6 +270,18 @@ export function ChatInput({
     autoResize();
   }, [isSampling, samplingSeed, autoResize]);
 
+  /**
+   * Recalculate textarea height whenever input changes programmatically.
+   * This handles cases where setInput is called directly (e.g. on submit)
+   * without going through handleInputChange, which is the only other
+   * place autoResize is called. Without this, the textarea's DOM height
+   * (set via direct style manipulation in autoResize) would persist
+   * even after the content is cleared.
+   */
+  useEffect(() => {
+    autoResize();
+  }, [input, autoResize]);
+
   // Detect @ mentions in input
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -410,11 +422,6 @@ export function ChatInput({
         setImageAttachments([]);
         setMentionQuery(null);
         setMentionResults([]);
-
-        // Reset textarea height immediately
-        if (inputRef.current) {
-          inputRef.current.style.height = "auto";
-        }
       }
     },
     [selectMention, pendingFileRefs, imageAttachments, onSubmit, setInput, inputRef]

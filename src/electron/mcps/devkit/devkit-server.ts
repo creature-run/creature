@@ -35,6 +35,8 @@ Tools:
 - devkit_get_logs { filter?, mcpName? }: Fetch recent logs from Creature's aggregated log system. Filter by "all" (last 50), "current_mcp_app" (logs for a specific MCP App by name), or "errors" (error-level entries only).
 - devkit_refresh_mcp_app { mcpName }: Restart an MCP App server and refresh all its pip instances. Use this when the user has made code changes to their MCP App.
 - devkit_get_mcp_app_sdk_docs: Fetch the MCP App SDK reference documentation. Use this to learn how to build MCP Apps with the open-mcp-app SDK.
+- devkit_get_conversation: (App-only) Fetch the current conversation history for inspection.
+- devkit_get_system_prompt: (App-only) Fetch the current system prompt for inspection.
 
 Response style: When showing logs, summarize key findings (errors, patterns) rather than listing every entry. The user can see the log viewer UI for full details.`,
 });
@@ -46,18 +48,25 @@ Response style: When showing logs, summarize key findings (errors, patterns) rat
 /**
  * Devkit UI resource.
  *
- * Single-instance, single-view log viewer and status display.
- * Shows the result of the most recent tool call (logs, refresh status, etc.).
+ * Single-instance tabbed interface for developer tools.
+ * Tabs: Logs, Conversation History, System Prompt.
+ * All tools route to the root view since this is a single-instance pip.
  */
 app.resource({
   name: "Developer Kit",
   uri: DEVKIT_UI_URI,
-  description: "Log viewer and developer tools",
+  description: "Log viewer, conversation inspector, and developer tools",
   displayModes: ["pip"],
   html: "devkit/ui/index.html",
   icon: { svg: ICON_SVG, alt: ICON_ALT },
   views: {
-    "/": ["devkit_get_logs", "devkit_refresh_mcp_app", "devkit_get_mcp_app_sdk_docs"],
+    "/": [
+      "devkit_get_logs",
+      "devkit_refresh_mcp_app",
+      "devkit_get_mcp_app_sdk_docs",
+      "devkit_get_conversation",
+      "devkit_get_system_prompt",
+    ],
   },
 });
 
@@ -126,6 +135,46 @@ app.tool(
   async () => ({
     data: { placeholder: true },
     text: "SDK docs fetched",
+  })
+);
+
+/**
+ * Fetch the current conversation history for inspection.
+ *
+ * Host-managed: the control plane reads from the conversation store.
+ * App-only visibility: not shown to the model, only callable from the UI.
+ */
+app.tool(
+  "devkit_get_conversation",
+  {
+    description: "Fetch the current conversation history for developer inspection.",
+    input: z.object({}),
+    ui: DEVKIT_UI_URI,
+    visibility: ["app"],
+  },
+  async () => ({
+    data: { placeholder: true },
+    text: "Conversation fetched",
+  })
+);
+
+/**
+ * Fetch the current system prompt for inspection.
+ *
+ * Host-managed: the control plane reads from the agent module.
+ * App-only visibility: not shown to the model, only callable from the UI.
+ */
+app.tool(
+  "devkit_get_system_prompt",
+  {
+    description: "Fetch the current system prompt for developer inspection.",
+    input: z.object({}),
+    ui: DEVKIT_UI_URI,
+    visibility: ["app"],
+  },
+  async () => ({
+    data: { placeholder: true },
+    text: "System prompt fetched",
   })
 );
 
