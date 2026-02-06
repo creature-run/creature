@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { cn, truncatePathLeft } from "../lib/utils";
-import { Folder, FileText, PaperPlaneRight, Stop } from "@phosphor-icons/react";
+import { Folder, FileText, PaperPlaneRight, Stop, CaretDown, Check } from "@phosphor-icons/react";
 import { useApp } from "../contexts/AppContext";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./HoverCard";
 import { Button } from "./Button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./DropdownMenu";
 import type { SamplingEvent } from "./SamplingDialog";
+import { DEFAULT_CHAT_MODEL, type ChatModelPreference } from "../shared/credentials";
 
 export interface FileReference {
   id: string;
@@ -104,6 +106,15 @@ const formatCompactNumber = (num: number): string => {
   return num.toString();
 };
 
+const CHAT_MODEL_LABELS: Record<ChatModelPreference, string> = {
+  "sonnet-4-5": "Sonnet 4.5",
+  "opus-4-6": "Opus 4.6",
+};
+
+const isChatModelPreference = (value: unknown): value is ChatModelPreference => {
+  return value === "sonnet-4-5" || value === "opus-4-6";
+};
+
 
 export function ChatInput({
   input,
@@ -120,7 +131,9 @@ export function ChatInput({
   onClearQueue,
   samplingApproval,
 }: ChatInputProps) {
-  const { setProjectSettingsOpen } = useApp();
+  const { setProjectSettingsOpen, auth } = useApp();
+  const [chatModel, setChatModel] = useState<ChatModelPreference>(DEFAULT_CHAT_MODEL);
+  const [isUpdatingChatModel, setIsUpdatingChatModel] = useState(false);
 
   const ensureSamplingAllowlist = useCallback(
     async (serverName: string) => {
@@ -176,6 +189,47 @@ export function ChatInput({
   useEffect(() => {
     mentionQueryRef.current = mentionQuery;
   }, [mentionQuery]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadChatModel = async () => {
+      try {
+        const state = await window.electronAPI.auth.getState();
+        if (!cancelled && isChatModelPreference(state.chatModel)) {
+          setChatModel(state.chatModel);
+        }
+      } catch {
+        if (!cancelled) {
+          setChatModel(DEFAULT_CHAT_MODEL);
+        }
+      }
+    };
+    loadChatModel();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleChatModelChange = useCallback(
+    async (value: string) => {
+      if (!isChatModelPreference(value) || isUpdatingChatModel) return;
+
+      const previousModel = chatModel;
+      setChatModel(value);
+      setIsUpdatingChatModel(true);
+      try {
+        const result = await window.electronAPI.auth.setChatModel(value);
+        if (!result.success) {
+          setChatModel(previousModel);
+        }
+      } catch {
+        setChatModel(previousModel);
+      } finally {
+        setIsUpdatingChatModel(false);
+      }
+    },
+    [chatModel, isUpdatingChatModel]
+  );
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -234,6 +288,7 @@ export function ChatInput({
    */
   const MIN_HEIGHT = 48;
   const MAX_HEIGHT = 180;
+  const modelLabel = CHAT_MODEL_LABELS[chatModel];
 
   /**
    * Auto-resize the textarea to fit its content.
@@ -1121,14 +1176,32 @@ export function ChatInput({
 
         {/* Right side - Model and token stats */}
         <div className="flex items-center gap-2 text-text-secondary text-xs">
-          <span>Sonnet 4.5</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={auth.providerType !== "anthropic" || isUpdatingChatModel}
+                className="h-6 min-w-[120px] rounded-md border border-border-secondary bg-background-secondary px-2.5 text-xs text-text-primary inline-flex items-center justify-between gap-2 transition-colors hover:bg-background-tertiary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>{modelLabel}</span>
+                <CaretDown size={10} weight="bold" className="text-text-secondary" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="min-w-[140px]">
+              <DropdownMenuItem onClick={() => handleChatModelChange("sonnet-4-5")} className="text-xs py-1">
+                {chatModel === "sonnet-4-5" ? <Check size={12} weight="bold" /> : <span className="w-3.5" />}
+                Sonnet 4.5
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleChatModelChange("opus-4-6")} className="text-xs py-1">
+                {chatModel === "opus-4-6" ? <Check size={12} weight="bold" /> : <span className="w-3.5" />}
+                Opus 4.6
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {tokenUsage && tokenUsage.totalTokens > 0 && (
             <>
               <span title={`Input tokens: ${tokenUsage.inputTokens}, Output tokens: ${tokenUsage.outputTokens}`}>
                 {formatCompactNumber(tokenUsage.inputTokens)} / {formatCompactNumber(tokenUsage.outputTokens)}
-              </span>
-              <span title="Estimated cost (Sonnet 4.5: $3/MTok in, $15/MTok out)">
-                ${((tokenUsage.inputTokens * 3 + tokenUsage.outputTokens * 15) / 1_000_000).toFixed(2)}
               </span>
             </>
           )}

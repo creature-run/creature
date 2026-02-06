@@ -9,15 +9,26 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createVertex } from "@ai-sdk/google-vertex";
-import type { ProviderCredentials } from "../../shared/credentials";
+import {
+  DEFAULT_CHAT_MODEL,
+  type ChatModelPreference,
+  type ProviderCredentials,
+} from "../../shared/credentials";
 
 /**
- * Model IDs for Claude Sonnet 4.5 across providers.
+ * Chat model IDs across providers.
  */
-export const MODEL_IDS = {
-  anthropic: "claude-sonnet-4-5",
-  bedrock: "anthropic.claude-sonnet-4-5-20250514-v1:0",
-  vertex: "claude-sonnet-4-5@20250514",
+export const MODEL_IDS: Record<ChatModelPreference, { anthropic: string; bedrock: string; vertex: string }> = {
+  "sonnet-4-5": {
+    anthropic: "claude-sonnet-4-5",
+    bedrock: "anthropic.claude-sonnet-4-5-20250514-v1:0",
+    vertex: "claude-sonnet-4-5@20250514",
+  },
+  "opus-4-6": {
+    anthropic: "claude-opus-4-6",
+    bedrock: "anthropic.claude-sonnet-4-5-20250514-v1:0",
+    vertex: "claude-sonnet-4-5@20250514",
+  },
 } as const;
 
 /**
@@ -87,11 +98,16 @@ export const createVertexProvider = ({
  * Returns both the provider and the appropriate model ID.
  */
 export const createProvider = (credentials: ProviderCredentials) => {
+  const selectedModel: ChatModelPreference =
+    credentials.chatModel === "opus-4-6" || credentials.chatModel === "sonnet-4-5"
+      ? credentials.chatModel
+      : DEFAULT_CHAT_MODEL;
+
   switch (credentials.type) {
     case "anthropic":
       return {
         provider: createAnthropicProvider({ apiKey: credentials.apiKey }),
-        modelId: MODEL_IDS.anthropic,
+        modelId: MODEL_IDS[selectedModel].anthropic,
         haikuModelId: HAIKU_MODEL_IDS.anthropic,
       };
     case "bedrock":
@@ -101,7 +117,7 @@ export const createProvider = (credentials: ProviderCredentials) => {
           secretAccessKey: credentials.secretAccessKey,
           region: credentials.region,
         }),
-        modelId: MODEL_IDS.bedrock,
+        modelId: MODEL_IDS[selectedModel].bedrock,
         haikuModelId: HAIKU_MODEL_IDS.bedrock,
       };
     case "vertex":
@@ -112,7 +128,7 @@ export const createProvider = (credentials: ProviderCredentials) => {
           clientEmail: credentials.clientEmail,
           privateKey: credentials.privateKey,
         }),
-        modelId: MODEL_IDS.vertex,
+        modelId: MODEL_IDS[selectedModel].vertex,
         haikuModelId: HAIKU_MODEL_IDS.vertex,
       };
   }

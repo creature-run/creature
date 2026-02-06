@@ -1,12 +1,17 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ResourceIcon, WidgetState } from "../shared/types";
-import type { ProviderCredentials, ProviderType } from "../shared/credentials";
+import type {
+  ChatModelPreference,
+  ProviderCredentials,
+  ProviderType,
+} from "../shared/credentials";
 import type { SamplingEvent, SamplingResponse } from "./mcp/sampling";
 import type { EmbeddingsCredentials, EmbeddingsProviderType } from "../shared/embeddings";
 
 export type {
   ResourceIcon,
   WidgetState,
+  ChatModelPreference,
   ProviderCredentials,
   ProviderType,
   EmbeddingsCredentials,
@@ -46,6 +51,7 @@ export interface LogEntry {
 export interface AuthState {
   hasCredentials: boolean;
   providerType?: ProviderType;
+  chatModel?: ChatModelPreference;
   // Legacy compatibility
   hasApiKey: boolean;
 }
@@ -310,6 +316,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getState: (): Promise<AuthState> => ipcRenderer.invoke("auth:getState"),
     saveCredentials: (credentials: ProviderCredentials): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke("auth:saveCredentials", { credentials }),
+    setChatModel: (chatModel: ChatModelPreference): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke("auth:setChatModel", { chatModel }),
     clearCredentials: (): Promise<{ success: boolean }> =>
       ipcRenderer.invoke("auth:clearCredentials"),
     // Legacy compatibility
@@ -895,6 +903,7 @@ declare global {
       auth: {
         getState: () => Promise<AuthState>;
         saveCredentials: (credentials: ProviderCredentials) => Promise<{ success: boolean; error?: string }>;
+        setChatModel: (chatModel: ChatModelPreference) => Promise<{ success: boolean; error?: string }>;
         clearCredentials: () => Promise<{ success: boolean }>;
         // Legacy compatibility
         saveApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>;
