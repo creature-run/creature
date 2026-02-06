@@ -3,15 +3,29 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
-import { CaretRight, CaretDown, Warning, XCircle } from "@phosphor-icons/react";
+import {
+  CaretRight,
+  CaretDown,
+  Plus,
+  Warning,
+  XCircle,
+  PushPin,
+  PushPinSlash,
+  PencilSimple,
+  Check,
+  X,
+} from "@phosphor-icons/react";
 import { ChatInput } from "./ChatInput";
 import { Button } from "./Button";
-import { Alert, AlertTitle, AlertDescription, AlertAction } from "./Alert";
+import { Alert, AlertTitle, AlertDescription } from "./Alert";
 import { InlineWidget } from "./InlineWidget";
 import { Spinner } from "./Spinner";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./DropdownMenu";
+import { Input } from "./Input";
 import { cn, startUpgrade } from "../lib/utils";
 import { useTheme } from "../contexts/ThemeContext";
 import { useApp } from "../contexts/AppContext";
+import type { ChatSessionState, ChatSessionSummary, ChatSessionWithState } from "../electron/preload";
 
 /**
  * Maps file extensions to IANA media types for images.
@@ -69,6 +83,34 @@ interface TokenUsage {
   totalTokens: number;
 }
 
+const DEFAULT_TOKEN_USAGE: TokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+};
+
+const normalizeTokenUsage = (value: unknown): TokenUsage => {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_TOKEN_USAGE };
+  }
+
+  const candidate = value as Partial<TokenUsage>;
+  return {
+    inputTokens: Number.isFinite(candidate.inputTokens) ? Number(candidate.inputTokens) : 0,
+    outputTokens: Number.isFinite(candidate.outputTokens) ? Number(candidate.outputTokens) : 0,
+    totalTokens: Number.isFinite(candidate.totalTokens) ? Number(candidate.totalTokens) : 0,
+  };
+};
+
+const sortSessionSummaries = (sessions: ChatSessionSummary[]): ChatSessionSummary[] => {
+  return [...sessions].sort((a, b) => {
+    if (a.isPinned !== b.isPinned) {
+      return a.isPinned ? -1 : 1;
+    }
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  });
+};
+
 // ============================================================================
 // ChatSession Component (Internal)
 // ============================================================================
@@ -90,19 +132,25 @@ interface ChatSessionProps {
  */
 function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: ChatSessionProps) {
   const { isDarkMode } = useTheme();
-  const { session, setProject } = useApp();
+  const { session, setProject, setSessionId, closeAllPips } = useApp();
   const [input, setInput] = useState("");
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
-  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  });
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({ ...DEFAULT_TOKEN_USAGE });
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [isScrolled, setIsScrolled] = useState(false);
   const userScrolledUpRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
+  const [sessionOptions, setSessionOptions] = useState<ChatSessionSummary[]>([]);
+  const [seedMessages, setSeedMessages] = useState<UIMessage[]>([]);
+  const [isSessionLoading, setIsSessionLoading] = useState(false);
+  const [isSwitchingSession, setIsSwitchingSession] = useState(false);
+  const [isSessionMetaUpdating, setIsSessionMetaUpdating] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [isSessionMenuOpen, setIsSessionMenuOpen] = useState(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratingSessionRef = useRef(true);
 
   /**
    * Separate state for UI-injected messages (pip events, UI tool calls).
@@ -190,7 +238,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       new DefaultChatTransport({
         api: "http://localhost:43891/api/chat",
         headers: {
-          "X-Session-Id": "main-chat",
+          "X-Session-Id": session.sessionId,
         },
         prepareSendMessagesRequest: (options) => {
           // Merge streamed messages with injected context for agent
@@ -207,13 +255,14 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
             ...options,
             body: {
               messages: allMessages,
+              sessionId: session.sessionId,
               folderPath: folderPathRef.current,
               customInstructions: customInstructionsRef.current,
             },
           };
         },
       }),
-    []
+    [session.sessionId]
   );
 
   /**
@@ -234,7 +283,8 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   }, []);
 
   const { messages: streamedMessages, status, error, sendMessage, stop } = useChat({
-    id: "main-chat",
+    id: session.sessionId,
+    messages: seedMessages,
     transport,
     onFinish: ({ message }) => {
       const metadata = message.metadata as {
@@ -253,6 +303,394 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       }
     },
   });
+
+  const toUiMessages = useCallback((items: unknown[]): UIMessage[] => {
+    return items.filter((item): item is UIMessage => {
+      if (!item || typeof item !== "object") return false;
+      const candidate = item as { id?: unknown; role?: unknown };
+      return typeof candidate.id === "string" && typeof candidate.role === "string";
+    });
+  }, []);
+
+  const toInjectedUiMessages = useCallback((items: unknown[]): (UIMessage & { _order?: number })[] => {
+    return items
+      .filter((item): item is UIMessage & { _order?: number } => {
+        if (!item || typeof item !== "object") return false;
+        const candidate = item as { id?: unknown; role?: unknown };
+        return typeof candidate.id === "string" && typeof candidate.role === "string";
+      })
+      .map((message) => {
+        const candidate = message as UIMessage & { _order?: unknown };
+        if (Number.isFinite(candidate._order)) {
+          return { ...message, _order: Number(candidate._order) };
+        }
+        return message;
+      });
+  }, []);
+
+  const upsertSessionSummary = useCallback((summary: ChatSessionSummary) => {
+    setSessionOptions((prev) => {
+      return sortSessionSummaries([
+        summary,
+        ...prev.filter((sessionOption) => sessionOption.id !== summary.id),
+      ]);
+    });
+  }, []);
+
+  const hydrateFromSession = useCallback(
+    (payload: ChatSessionWithState, allSessions: ChatSessionSummary[]) => {
+      const nextStreamed = toUiMessages(payload.state.streamedMessages);
+      const nextInjected = toInjectedUiMessages(payload.state.injectedMessages);
+      const nextOrderEntries = Object.entries(payload.state.messageOrder ?? {});
+      const nextOrderMap = new Map<string, number>();
+      for (const [id, value] of nextOrderEntries) {
+        if (Number.isFinite(value)) {
+          nextOrderMap.set(id, Number(value));
+        }
+      }
+      const nextOrder = Number.isFinite(payload.state.nextOrder)
+        ? Math.max(0, Math.floor(payload.state.nextOrder))
+        : nextOrderMap.size;
+
+      hydratingSessionRef.current = true;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+
+      setSessionOptions(sortSessionSummaries(allSessions));
+      setSeedMessages(nextStreamed);
+      setInjectedMessages(nextInjected);
+      setTokenUsage(normalizeTokenUsage(payload.state.tokenUsage));
+      messageOrderMapRef.current = nextOrderMap;
+      messageOrderCounterRef.current = nextOrder;
+      userScrolledUpRef.current = false;
+      setMessageQueue([]);
+      setExpandedTools(new Set());
+      setInput("");
+      setRenamingSessionId(null);
+      setRenameDraft("");
+      setIsSessionMenuOpen(false);
+      setSessionId(payload.summary.id);
+
+      setTimeout(() => {
+        hydratingSessionRef.current = false;
+      }, 0);
+    },
+    [setSessionId, toInjectedUiMessages, toUiMessages]
+  );
+
+  const buildPersistedState = useCallback((): ChatSessionState => {
+    const messageOrder: Record<string, number> = {};
+    for (const [id, order] of messageOrderMapRef.current.entries()) {
+      messageOrder[id] = order;
+    }
+
+    return {
+      streamedMessages,
+      injectedMessages,
+      messageOrder,
+      nextOrder: messageOrderCounterRef.current,
+      tokenUsage,
+    };
+  }, [streamedMessages, injectedMessages, tokenUsage]);
+
+  const persistState = useCallback(
+    async (state: ChatSessionState) => {
+      if (!session.project?.id || !session.sessionId) return;
+
+      const result = await window.electronAPI.chatSession.save({
+        projectId: session.project.id,
+        sessionId: session.sessionId,
+        state,
+      });
+
+      if (result.success && result.session) {
+        upsertSessionSummary(result.session);
+      }
+    },
+    [session.project?.id, session.sessionId, upsertSessionSummary]
+  );
+
+  const flushPendingSave = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (hydratingSessionRef.current) return;
+    await persistState(buildPersistedState());
+  }, [buildPersistedState, persistState]);
+
+  const flushPendingSaveRef = useRef(flushPendingSave);
+  useEffect(() => {
+    flushPendingSaveRef.current = flushPendingSave;
+  }, [flushPendingSave]);
+
+  const applySessionUpdate = useCallback(
+    (result: { session?: ChatSessionSummary; sessions?: ChatSessionSummary[] }) => {
+      if (result.sessions) {
+        setSessionOptions(sortSessionSummaries(result.sessions));
+        return;
+      }
+      if (result.session) {
+        upsertSessionSummary(result.session);
+      }
+    },
+    [upsertSessionSummary]
+  );
+
+  const handleStartRenameSession = useCallback((sessionOption: ChatSessionSummary) => {
+    setRenamingSessionId(sessionOption.id);
+    setRenameDraft(sessionOption.title);
+    setIsSessionMenuOpen(true);
+  }, []);
+
+  const handleCancelRenameSession = useCallback(() => {
+    setRenamingSessionId(null);
+    setRenameDraft("");
+  }, []);
+
+  const handleConfirmRenameSession = useCallback(async () => {
+    if (!session.project?.id || !renamingSessionId) return;
+    const normalizedTitle = renameDraft.trim();
+    if (!normalizedTitle) return;
+    if (isSessionMetaUpdating) return;
+
+    setIsSessionMetaUpdating(true);
+    try {
+      const result = await window.electronAPI.chatSession.rename({
+        projectId: session.project.id,
+        sessionId: renamingSessionId,
+        title: renameDraft,
+      });
+
+      if (result.success) {
+        applySessionUpdate(result);
+        setRenamingSessionId(null);
+        setRenameDraft("");
+      }
+    } catch (renameError) {
+      console.error("[ViewChat] Failed to rename session:", renameError);
+    } finally {
+      setIsSessionMetaUpdating(false);
+    }
+  }, [
+    applySessionUpdate,
+    isSessionMetaUpdating,
+    renameDraft,
+    renamingSessionId,
+    session.project?.id,
+  ]);
+
+  const handleSetPinned = useCallback(
+    async (sessionOption: ChatSessionSummary, pinned: boolean) => {
+      if (!session.project?.id || isSessionMetaUpdating) return;
+
+      setIsSessionMetaUpdating(true);
+      try {
+        const result = await window.electronAPI.chatSession.setPinned({
+          projectId: session.project.id,
+          sessionId: sessionOption.id,
+          pinned,
+        });
+
+        if (result.success) {
+          applySessionUpdate(result);
+        }
+      } catch (pinError) {
+        console.error("[ViewChat] Failed to update session pin:", pinError);
+      } finally {
+        setIsSessionMetaUpdating(false);
+      }
+    },
+    [applySessionUpdate, isSessionMetaUpdating, session.project?.id]
+  );
+
+  const handleSwitchSession = useCallback(
+    async (targetSessionId: string) => {
+      if (!session.project?.id || !targetSessionId || targetSessionId === session.sessionId) {
+        return;
+      }
+      if (isSwitchingSession || isSessionMetaUpdating) return;
+
+      setIsSwitchingSession(true);
+      try {
+        setRenamingSessionId(null);
+        setRenameDraft("");
+        setIsSessionMenuOpen(false);
+        await stop();
+        await flushPendingSave();
+        await closeAllPips();
+
+        const result = await window.electronAPI.chatSession.switch({
+          projectId: session.project.id,
+          sessionId: targetSessionId,
+        });
+
+        if (result.success && result.session && result.sessions) {
+          hydrateFromSession(result.session, result.sessions);
+        }
+      } catch (switchError) {
+        console.error("[ViewChat] Failed to switch session:", switchError);
+      } finally {
+        setIsSwitchingSession(false);
+      }
+    },
+    [
+      closeAllPips,
+      flushPendingSave,
+      hydrateFromSession,
+      isSessionMetaUpdating,
+      isSwitchingSession,
+      session.project?.id,
+      session.sessionId,
+      stop,
+    ]
+  );
+
+  const handleCreateSession = useCallback(async () => {
+    if (!session.project?.id || isSwitchingSession || isSessionMetaUpdating) return;
+
+    setIsSwitchingSession(true);
+    try {
+      setRenamingSessionId(null);
+      setRenameDraft("");
+      setIsSessionMenuOpen(false);
+      await stop();
+      await flushPendingSave();
+      await closeAllPips();
+
+      const result = await window.electronAPI.chatSession.create({
+        projectId: session.project.id,
+      });
+
+      if (result.success && result.session && result.sessions) {
+        hydrateFromSession(result.session, result.sessions);
+      }
+    } catch (createError) {
+      console.error("[ViewChat] Failed to create session:", createError);
+    } finally {
+      setIsSwitchingSession(false);
+    }
+  }, [
+    closeAllPips,
+    flushPendingSave,
+    hydrateFromSession,
+    isSessionMetaUpdating,
+    isSwitchingSession,
+    session.project?.id,
+    stop,
+  ]);
+
+  useEffect(() => {
+    const projectId = session.project?.id;
+    hydratingSessionRef.current = true;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
+    setSeedMessages([]);
+    setInjectedMessages([]);
+    setTokenUsage({ ...DEFAULT_TOKEN_USAGE });
+    setSessionOptions([]);
+    setIsSessionMetaUpdating(false);
+    setRenamingSessionId(null);
+    setRenameDraft("");
+    setIsSessionMenuOpen(false);
+    messageOrderMapRef.current = new Map<string, number>();
+    messageOrderCounterRef.current = 0;
+    setMessageQueue([]);
+    setExpandedTools(new Set());
+    setInput("");
+
+    if (!projectId) {
+      setSessionOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadActiveSession = async () => {
+      let loaded = false;
+      setIsSessionLoading(true);
+      try {
+        const result = await window.electronAPI.chatSession.getActive({
+          projectId,
+        });
+
+        if (cancelled) return;
+        if (result.success && result.session && result.sessions) {
+          hydrateFromSession(result.session, result.sessions);
+          loaded = true;
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          console.error("[ViewChat] Failed to load active session:", loadError);
+        }
+      } finally {
+        if (!cancelled) {
+          if (!loaded) {
+            hydratingSessionRef.current = false;
+          }
+          setIsSessionLoading(false);
+        }
+      }
+    };
+
+    void loadActiveSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateFromSession, session.project?.id]);
+
+  useEffect(() => {
+    if (!session.project?.id || isSessionLoading || isSwitchingSession) return;
+    if (hydratingSessionRef.current) return;
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    const state = buildPersistedState();
+    saveTimerRef.current = setTimeout(() => {
+      void persistState(state);
+      saveTimerRef.current = null;
+    }, 1000);
+
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, [
+    buildPersistedState,
+    injectedMessages,
+    isSessionLoading,
+    isSwitchingSession,
+    persistState,
+    session.project?.id,
+    session.sessionId,
+    streamedMessages,
+    tokenUsage,
+  ]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      void flushPendingSaveRef.current();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void flushPendingSaveRef.current();
+    };
+  }, []);
 
   /**
    * Merge streamed messages with injected context for Dev Console and agent.
@@ -376,6 +814,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   };
 
   const isStreaming = status === "streaming" || status === "submitted";
+  const activeSession = sessionOptions.find((sessionOption) => sessionOption.id === session.sessionId);
+  const isSessionBusy = isSessionLoading || isSwitchingSession || isSessionMetaUpdating;
+  const activeSessionTitle = activeSession?.title ?? "Session";
 
   /**
    * Handles form submission from ChatInput.
@@ -384,6 +825,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
    */
   const handleSubmit = useCallback(
     (finalContent: string, _attachedPaths: string[], images: Array<{ url?: string; filename: string }>) => {
+      if (isSessionBusy) return;
       if (!finalContent.trim() && images.length === 0) return;
 
       // Re-enable auto-scroll when user sends a new message
@@ -418,7 +860,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
         }
       }
     },
-    [isStreaming, sendMessage]
+    [isSessionBusy, isStreaming, sendMessage]
   );
 
   /**
@@ -540,6 +982,178 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       {/* Scrollable content area */}
       <div className="flex-1 min-h-0 overflow-y-auto show-scrollbar pb-[120px] [@media(min-height:800px)]:pb-[175px]" ref={outputRef}>
         <div className="p-6 pb-[80px] w-full max-w-[750px] mx-auto">
+          <div className="mb-5 mt-1 flex items-center">
+            <DropdownMenu
+              open={isSessionMenuOpen}
+              onOpenChange={(open) => {
+                setIsSessionMenuOpen(open);
+                if (!open) {
+                  handleCancelRenameSession();
+                }
+              }}
+            >
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md border border-border-secondary bg-background-secondary px-2.5 py-1 text-xs text-text-secondary transition-colors",
+                    "hover:text-text-primary hover:border-border-primary",
+                    isSessionBusy && "opacity-70 cursor-not-allowed"
+                  )}
+                  disabled={isSessionBusy}
+                >
+                  {activeSession?.isPinned && <PushPin size={12} />}
+                  <span className="max-w-[360px] truncate">
+                    {isSessionLoading ? "Loading session..." : activeSessionTitle}
+                  </span>
+                  <CaretDown size={12} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="bottom" className="min-w-[300px]">
+                {sessionOptions.map((sessionOption) => (
+                  <DropdownMenuItem
+                    key={sessionOption.id}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                    }}
+                    className="text-xs"
+                  >
+                    {renamingSessionId === sessionOption.id ? (
+                      <div
+                        className="flex w-full items-center gap-1.5"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                        }}
+                      >
+                        <Input
+                          value={renameDraft}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void handleConfirmRenameSession();
+                            } else if (event.key === "Escape") {
+                              event.preventDefault();
+                              handleCancelRenameSession();
+                            }
+                          }}
+                          autoFocus
+                          disabled={isSessionBusy}
+                          className="h-7 text-xs"
+                          maxLength={64}
+                        />
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
+                          disabled={isSessionBusy || !renameDraft.trim()}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleConfirmRenameSession();
+                          }}
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
+                          disabled={isSessionBusy}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleCancelRenameSession();
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex w-full items-center gap-1.5">
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex flex-1 items-center gap-1.5 truncate text-left",
+                            sessionOption.id !== session.sessionId &&
+                              !isSessionBusy &&
+                              "hover:text-text-primary"
+                          )}
+                          disabled={isSessionBusy || sessionOption.id === session.sessionId}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (sessionOption.id !== session.sessionId) {
+                              void handleSwitchSession(sessionOption.id);
+                              setIsSessionMenuOpen(false);
+                            }
+                          }}
+                        >
+                          {sessionOption.isPinned && <PushPin size={10} />}
+                          <span className="truncate">{sessionOption.title}</span>
+                        </button>
+                        {sessionOption.id === session.sessionId && (
+                          <span className="text-[10px] text-text-secondary">Current</span>
+                        )}
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
+                          disabled={isSessionBusy}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleSetPinned(sessionOption, !sessionOption.isPinned);
+                          }}
+                        >
+                          {sessionOption.isPinned ? <PushPinSlash size={12} /> : <PushPin size={12} />}
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
+                          disabled={isSessionBusy}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleStartRenameSession(sessionOption);
+                          }}
+                        >
+                          <PencilSimple size={12} />
+                        </button>
+                      </div>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem
+                  disabled={isSessionBusy}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleCreateSession();
+                    setIsSessionMenuOpen(false);
+                  }}
+                  className="text-xs"
+                >
+                  <Plus size={12} />
+                  <span>New Session</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
           {/* Message list - renders only streamed messages (users don't see injected context) */}
           {streamedMessages.map((msg) => (
               <div key={msg.id}>

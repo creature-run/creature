@@ -205,6 +205,7 @@ interface AppContextValue {
   pips: PipsState;
   setActivePipId: (instanceId: string | null) => void;
   deletePip: (instanceId: string) => void;
+  closeAllPips: () => Promise<void>;
   popoutPip: (params: {
     type: PipType;
     instanceId: string;
@@ -220,6 +221,7 @@ interface AppContextValue {
 
   // Session
   session: SessionState;
+  setSessionId: (sessionId: string) => void;
   setProject: (project: ProjectWithValidation | null) => void;
 
   // Auth
@@ -244,11 +246,6 @@ interface AppContextValue {
 // ============================================================================
 
 const AppContext = createContext<AppContextValue | null>(null);
-
-/**
- * Generates a random ID for session tracking.
- */
-const generateId = () => Math.random().toString(36).substring(2, 9);
 
 // ============================================================================
 // Provider
@@ -287,7 +284,7 @@ export function AppProvider({ children }: AppProviderProps) {
   // Session State
   // -------------------------------------------------------------------------
 
-  const [sessionId] = useState(generateId);
+  const [sessionId, setSessionIdState] = useState("main-chat");
   const [project, setProjectState] = useState<ProjectWithValidation | null>(null);
   const [folderPath, setFolderPathState] = useState<string | null>(null);
   const [folderName, setFolderNameState] = useState<string | null>(null);
@@ -350,6 +347,25 @@ export function AppProvider({ children }: AppProviderProps) {
   );
 
   /**
+   * Closes all MCP pips for the current chat session context.
+   * Used when switching between saved chat sessions.
+   */
+  const closeAllPips = useCallback(async () => {
+    const mcpPips = pipsList.filter((p) => p.pipType === "mcp");
+    if (mcpPips.length === 0) return;
+
+    await Promise.all(
+      mcpPips.map(async (pip) => {
+        try {
+          await window.electronAPI.controlPlane.closePip(pip.instanceId);
+        } catch (error) {
+          console.error("[AppContext] Failed to close pip:", pip.instanceId, error);
+        }
+      })
+    );
+  }, [pipsList]);
+
+  /**
    * Pops out a pip to a separate window.
    * HTML content is injected via srcDoc per MCP Apps spec.
    * Pip metadata is passed to enable MCP Apps protocol in the popout.
@@ -410,6 +426,14 @@ export function AppProvider({ children }: AppProviderProps) {
     setPipOrder(newOrder);
   }, []);
 
+  /**
+   * Updates the active chat session ID.
+   */
+  const setSessionId = useCallback((nextSessionId: string) => {
+    if (!nextSessionId) return;
+    setSessionIdState(nextSessionId);
+  }, []);
+
   // -------------------------------------------------------------------------
   // Session Actions
   // -------------------------------------------------------------------------
@@ -422,6 +446,10 @@ export function AppProvider({ children }: AppProviderProps) {
    */
   const setProject = useCallback(
     async (newProject: ProjectWithValidation | null) => {
+      const previousProjectId = project?.id || null;
+      const nextProjectId = newProject?.id || null;
+      const projectChanged = previousProjectId !== nextProjectId;
+
       // Close MCP connections FIRST when leaving project (going to project list)
       // This must happen before deleting pips, otherwise pip cleanup tool calls
       // (like terminal_close) will trigger MCP re-initialization via getConnection()
@@ -429,10 +457,9 @@ export function AppProvider({ children }: AppProviderProps) {
         await window.electronAPI.mcp.closeAll();
       }
 
-      // Close any existing MCP pips when switching projects
-      const pipsToRemove = pipsList.filter((p) => p.pipType === "mcp");
-      for (const pip of pipsToRemove) {
-        deletePip(pip.instanceId);
+      if (projectChanged) {
+        await closeAllPips();
+        setSessionIdState("main-chat");
       }
 
       // Always close project settings when switching projects
@@ -452,7 +479,7 @@ export function AppProvider({ children }: AppProviderProps) {
         : null;
       setFolderNameState(name);
     },
-    [pipsList, deletePip]
+    [closeAllPips, project?.id]
   );
 
   // -------------------------------------------------------------------------
@@ -675,6 +702,7 @@ export function AppProvider({ children }: AppProviderProps) {
     },
     setActivePipId,
     deletePip,
+    closeAllPips,
     popoutPip,
     reorderPips,
 
@@ -685,6 +713,7 @@ export function AppProvider({ children }: AppProviderProps) {
       folderPath,
       folderName,
     },
+    setSessionId,
     setProject,
 
     // Auth

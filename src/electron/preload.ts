@@ -148,6 +148,36 @@ export interface ProjectWithValidation extends Project {
   _isAppManaged?: boolean;
 }
 
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  isAutoTitle: boolean;
+  isPinned: boolean;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+  message_count: number;
+}
+
+export interface ChatTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface ChatSessionState {
+  streamedMessages: unknown[];
+  injectedMessages: unknown[];
+  messageOrder: Record<string, number>;
+  nextOrder: number;
+  tokenUsage: ChatTokenUsage;
+}
+
+export interface ChatSessionWithState {
+  summary: ChatSessionSummary;
+  state: ChatSessionState;
+}
+
 /**
  * Pip Instance data sent from the Control Plane to the renderer.
  * Matches the new MCP Apps architecture.
@@ -284,6 +314,61 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("chat:start"),
     isRunning: (): Promise<{ running: boolean }> =>
       ipcRenderer.invoke("chat:isRunning"),
+  },
+
+  chatSession: {
+    list: (params: { projectId: string }): Promise<{
+      success: boolean;
+      sessions?: ChatSessionSummary[];
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:list", params),
+    getActive: (params: { projectId: string }): Promise<{
+      success: boolean;
+      session?: ChatSessionWithState;
+      sessions?: ChatSessionSummary[];
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:getActive", params),
+    create: (params: { projectId: string }): Promise<{
+      success: boolean;
+      session?: ChatSessionWithState;
+      sessions?: ChatSessionSummary[];
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:create", params),
+    switch: (params: { projectId: string; sessionId: string }): Promise<{
+      success: boolean;
+      session?: ChatSessionWithState;
+      sessions?: ChatSessionSummary[];
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:switch", params),
+    save: (params: {
+      projectId: string;
+      sessionId: string;
+      state: ChatSessionState;
+    }): Promise<{
+      success: boolean;
+      session?: ChatSessionSummary;
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:save", params),
+    rename: (params: {
+      projectId: string;
+      sessionId: string;
+      title: string;
+    }): Promise<{
+      success: boolean;
+      session?: ChatSessionSummary;
+      sessions?: ChatSessionSummary[];
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:rename", params),
+    setPinned: (params: {
+      projectId: string;
+      sessionId: string;
+      pinned: boolean;
+    }): Promise<{
+      success: boolean;
+      session?: ChatSessionSummary;
+      sessions?: ChatSessionSummary[];
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:setPinned", params),
   },
 
   // Image upload for chat messages
@@ -899,6 +984,60 @@ declare global {
       chat: {
         start: () => Promise<{ success: boolean; error?: string }>;
         isRunning: () => Promise<{ running: boolean }>;
+      };
+      chatSession: {
+        list: (params: { projectId: string }) => Promise<{
+          success: boolean;
+          sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
+        getActive: (params: { projectId: string }) => Promise<{
+          success: boolean;
+          session?: ChatSessionWithState;
+          sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
+        create: (params: { projectId: string }) => Promise<{
+          success: boolean;
+          session?: ChatSessionWithState;
+          sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
+        switch: (params: { projectId: string; sessionId: string }) => Promise<{
+          success: boolean;
+          session?: ChatSessionWithState;
+          sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
+        save: (params: {
+          projectId: string;
+          sessionId: string;
+          state: ChatSessionState;
+        }) => Promise<{
+          success: boolean;
+          session?: ChatSessionSummary;
+          error?: string;
+        }>;
+        rename: (params: {
+          projectId: string;
+          sessionId: string;
+          title: string;
+        }) => Promise<{
+          success: boolean;
+          session?: ChatSessionSummary;
+          sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
+        setPinned: (params: {
+          projectId: string;
+          sessionId: string;
+          pinned: boolean;
+        }) => Promise<{
+          success: boolean;
+          session?: ChatSessionSummary;
+          sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
       };
       auth: {
         getState: () => Promise<AuthState>;
