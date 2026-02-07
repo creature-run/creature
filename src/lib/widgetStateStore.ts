@@ -69,6 +69,12 @@ interface WidgetStateEntry {
   updatedAt: number;
 }
 
+export interface WidgetStateChangeEvent {
+  type: "set" | "delete" | "clear" | "clearConversation";
+  widgetId?: string;
+  conversationId?: string;
+}
+
 /**
  * Widget State Store
  *
@@ -80,6 +86,13 @@ interface WidgetStateEntry {
  */
 class WidgetStateStore {
   private store: Map<string, WidgetStateEntry> = new Map();
+  private listeners: Set<(event: WidgetStateChangeEvent) => void> = new Set();
+
+  private emit(event: WidgetStateChangeEvent): void {
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
 
   /**
    * Get widget state by key.
@@ -120,6 +133,11 @@ class WidgetStateStore {
       hasPrivateContent: !!state.privateContent,
       imageIds: state.imageIds?.length ?? 0,
     });
+    this.emit({
+      type: "set",
+      widgetId,
+      conversationId: parseWidgetId(widgetId)?.conversationId,
+    });
   }
 
   /**
@@ -131,6 +149,11 @@ class WidgetStateStore {
     const deleted = this.store.delete(widgetId);
     if (deleted) {
       console.debug(`[WidgetStateStore] Deleted state for ${widgetId}`);
+      this.emit({
+        type: "delete",
+        widgetId,
+        conversationId: parseWidgetId(widgetId)?.conversationId,
+      });
     }
     return deleted;
   }
@@ -154,6 +177,10 @@ class WidgetStateStore {
 
     if (cleared > 0) {
       console.debug(`[WidgetStateStore] Cleared ${cleared} entries for conversation ${conversationId}`);
+      this.emit({
+        type: "clearConversation",
+        conversationId,
+      });
     }
 
     return cleared;
@@ -167,6 +194,9 @@ class WidgetStateStore {
     const size = this.store.size;
     this.store.clear();
     console.debug(`[WidgetStateStore] Cleared all ${size} entries`);
+    if (size > 0) {
+      this.emit({ type: "clear" });
+    }
   }
 
   /**
@@ -213,6 +243,17 @@ class WidgetStateStore {
    */
   size(): number {
     return this.store.size;
+  }
+
+  /**
+   * Subscribe to widget state changes.
+   * Used by chat persistence to save state even when no messages changed.
+   */
+  onChange(listener: (event: WidgetStateChangeEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 }
 

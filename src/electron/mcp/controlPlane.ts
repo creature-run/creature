@@ -49,6 +49,24 @@ import { resolveInstanceIdForTool, type RoutingResult } from "./routing";
 
 export type { WidgetState };
 
+export interface PersistedPipSnapshot {
+  instanceId: string;
+  serverName: string;
+  resourceUri: string;
+  toolName: string;
+  title: string;
+  createdAt: number;
+  triggeredByTool?: boolean;
+  openInBackground?: boolean;
+  widgetState?: WidgetState;
+}
+
+export interface PersistedPipState {
+  pips: PersistedPipSnapshot[];
+  pipOrder: string[];
+  activePipId: string | null;
+}
+
 /**
  * BROWSER MCP SPECIAL HANDLING
  *
@@ -165,6 +183,149 @@ const sendToPipWindow = (instanceId: string, channel: string, data: unknown) => 
   }
 };
 
+const normalizeWidgetState = (value: unknown): WidgetState | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const next: WidgetState = {};
+
+  if (
+    raw.modelContent === null ||
+    typeof raw.modelContent === "string" ||
+    (typeof raw.modelContent === "object" && !Array.isArray(raw.modelContent))
+  ) {
+    next.modelContent = raw.modelContent as WidgetState["modelContent"];
+  }
+
+  if (
+    raw.privateContent === null ||
+    (typeof raw.privateContent === "object" && !Array.isArray(raw.privateContent))
+  ) {
+    next.privateContent = raw.privateContent as WidgetState["privateContent"];
+  }
+
+  if (Array.isArray(raw.imageIds)) {
+    next.imageIds = raw.imageIds.filter((id): id is string => typeof id === "string");
+  }
+
+  if (
+    next.modelContent === undefined &&
+    next.privateContent === undefined &&
+    next.imageIds === undefined
+  ) {
+    return undefined;
+  }
+
+  return next;
+};
+
+const normalizePersistedPipSnapshot = (value: unknown): PersistedPipSnapshot | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.instanceId !== "string" ||
+    typeof raw.serverName !== "string" ||
+    typeof raw.resourceUri !== "string" ||
+    typeof raw.toolName !== "string" ||
+    typeof raw.title !== "string"
+  ) {
+    return null;
+  }
+
+  if (
+    raw.instanceId.length === 0 ||
+    raw.serverName.length === 0 ||
+    raw.resourceUri.length === 0
+  ) {
+    return null;
+  }
+
+  const normalized: PersistedPipSnapshot = {
+    instanceId: raw.instanceId,
+    serverName: raw.serverName,
+    resourceUri: raw.resourceUri,
+    toolName: raw.toolName,
+    title: raw.title,
+    createdAt:
+      typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt)
+        ? Number(raw.createdAt)
+        : Date.now(),
+  };
+
+  if (typeof raw.triggeredByTool === "boolean") {
+    normalized.triggeredByTool = raw.triggeredByTool;
+  }
+
+  if (typeof raw.openInBackground === "boolean") {
+    normalized.openInBackground = raw.openInBackground;
+  }
+
+  const widgetState = normalizeWidgetState(raw.widgetState);
+  if (widgetState) {
+    normalized.widgetState = widgetState;
+  }
+
+  return normalized;
+};
+
+const normalizePersistedPipState = (value: unknown): PersistedPipState => {
+  if (!value || typeof value !== "object") {
+    return {
+      pips: [],
+      pipOrder: [],
+      activePipId: null,
+    };
+  }
+
+  const raw = value as {
+    pips?: unknown;
+    pipOrder?: unknown;
+    activePipId?: unknown;
+  };
+
+  const pips = Array.isArray(raw.pips)
+    ? raw.pips
+        .map(normalizePersistedPipSnapshot)
+        .filter((snapshot): snapshot is PersistedPipSnapshot => !!snapshot)
+    : [];
+
+  const pipIds = new Set(pips.map((snapshot) => snapshot.instanceId));
+  const pipOrder: string[] = [];
+  const addPipOrder = (instanceId: string) => {
+    if (!pipIds.has(instanceId)) return;
+    if (pipOrder.includes(instanceId)) return;
+    pipOrder.push(instanceId);
+  };
+
+  if (Array.isArray(raw.pipOrder)) {
+    for (const value of raw.pipOrder) {
+      if (typeof value === "string") {
+        addPipOrder(value);
+      }
+    }
+  }
+
+  for (const snapshot of pips) {
+    addPipOrder(snapshot.instanceId);
+  }
+
+  const activePipId =
+    typeof raw.activePipId === "string" && pipIds.has(raw.activePipId)
+      ? raw.activePipId
+      : null;
+
+  return {
+    pips,
+    pipOrder,
+    activePipId,
+  };
+};
+
 /**
  * Create a new Pip Instance for a UI Resource.
  * Fetches HTML content and notifies the renderer to create iframe.
@@ -177,6 +338,10 @@ const sendToPipWindow = (instanceId: string, channel: string, data: unknown) => 
  * @param creatureAuth - Creature auth configuration from tool metadata
  * @param triggeredByTool - Whether pip was opened by a tool call (vs user action)
  * @param openInBackground - Whether pip should open in background when another pip is active
+ * @param restored - Whether pip is being restored from persisted session state
+ * @param initialTitle - Optional initial title for restored pips
+ * @param initialWidgetState - Optional initial widget state for restored pips
+ * @param createdAt - Optional creation timestamp for restored pips
  */
 export const createPipInstance = async ({
   resourceUri,
@@ -186,6 +351,10 @@ export const createPipInstance = async ({
   creatureAuth,
   triggeredByTool = true,
   openInBackground = false,
+  restored = false,
+  initialTitle = "",
+  initialWidgetState,
+  createdAt,
 }: {
   resourceUri: string;
   serverName: string;
@@ -194,6 +363,10 @@ export const createPipInstance = async ({
   creatureAuth?: { managed?: boolean };
   triggeredByTool?: boolean;
   openInBackground?: boolean;
+  restored?: boolean;
+  initialTitle?: string;
+  initialWidgetState?: WidgetState;
+  createdAt?: number;
 }): Promise<PipInstance> => {
   // Fetch HTML content and icon from MCP server
   const { html: htmlContent, icon } = await readResource({
@@ -212,13 +385,14 @@ export const createPipInstance = async ({
     resourceUri,
     serverName,
     toolName,
-    title: "",
+    title: initialTitle,
     htmlContent,
     icon,
-    createdAt: Date.now(),
+    createdAt: typeof createdAt === "number" && Number.isFinite(createdAt) ? Number(createdAt) : Date.now(),
     ready: false,
     readyPromise,
     resolveReady,
+    ...(initialWidgetState ? { widgetState: initialWidgetState } : {}),
   };
 
   pipInstances.set(pip.instanceId, pip);
@@ -236,6 +410,7 @@ export const createPipInstance = async ({
     creatureAuth,
     triggeredByTool,
     openInBackground,
+    restored,
   });
 
   return pip;
@@ -722,6 +897,141 @@ export const closeAllPips = async (): Promise<void> => {
     console.warn(`[Control Plane] Force clearing ${pipInstances.size} remaining pips`);
     pipInstances.clear();
   }
+};
+
+export interface RestorePipsResult {
+  restoredInstanceIds: string[];
+  skipped: Array<{ instanceId: string; reason: string }>;
+  activePipId: string | null;
+}
+
+/**
+ * Restore PIP tabs from persisted session state.
+ * Restores tabs as docked (not popped out), preserving instance IDs and widget state.
+ */
+export const restorePips = async ({
+  pipState,
+}: {
+  pipState: PersistedPipState;
+}): Promise<RestorePipsResult> => {
+  const normalized = normalizePersistedPipState(pipState);
+  if (normalized.pips.length === 0) {
+    return {
+      restoredInstanceIds: [],
+      skipped: [],
+      activePipId: null,
+    };
+  }
+
+  const snapshotByInstanceId = new Map(
+    normalized.pips.map((snapshot) => [snapshot.instanceId, snapshot])
+  );
+
+  const orderedSnapshots: PersistedPipSnapshot[] = [];
+  for (const instanceId of normalized.pipOrder) {
+    const snapshot = snapshotByInstanceId.get(instanceId);
+    if (snapshot) {
+      orderedSnapshots.push(snapshot);
+      snapshotByInstanceId.delete(instanceId);
+    }
+  }
+  for (const snapshot of snapshotByInstanceId.values()) {
+    orderedSnapshots.push(snapshot);
+  }
+
+  const restoredInstanceIds: string[] = [];
+  const skipped: Array<{ instanceId: string; reason: string }> = [];
+
+  for (const snapshot of orderedSnapshots) {
+    const existing = pipInstances.get(snapshot.instanceId);
+    if (existing) {
+      try {
+        const { html: htmlContent, icon } = await readResource({
+          serverName: snapshot.serverName,
+          uri: snapshot.resourceUri,
+        });
+
+        let resolveReady: () => void = () => {};
+        const readyPromise = new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        });
+
+        existing.resourceUri = snapshot.resourceUri;
+        existing.serverName = snapshot.serverName;
+        existing.toolName = snapshot.toolName;
+        existing.title = snapshot.title;
+        existing.htmlContent = htmlContent;
+        existing.icon = icon;
+        existing.createdAt = snapshot.createdAt;
+        existing.ready = false;
+        existing.readyPromise = readyPromise;
+        existing.resolveReady = resolveReady;
+
+        if (snapshot.widgetState) {
+          existing.widgetState = snapshot.widgetState;
+        } else {
+          delete existing.widgetState;
+        }
+
+        sendToRenderer("pip:created", {
+          instanceId: existing.instanceId,
+          resourceUri: existing.resourceUri,
+          htmlContent: existing.htmlContent,
+          icon: existing.icon,
+          mcpServer: existing.serverName,
+          toolName: existing.toolName,
+          title: existing.title,
+          createdAt: existing.createdAt,
+          triggeredByTool: snapshot.triggeredByTool ?? false,
+          openInBackground: snapshot.openInBackground ?? false,
+          restored: true,
+        });
+
+        restoredInstanceIds.push(existing.instanceId);
+      } catch (error) {
+        skipped.push({
+          instanceId: snapshot.instanceId,
+          reason:
+            error instanceof Error
+              ? error.message
+              : "Failed to restore pip",
+        });
+      }
+      continue;
+    }
+
+    try {
+      await createPipInstance({
+        resourceUri: snapshot.resourceUri,
+        serverName: snapshot.serverName,
+        toolName: snapshot.toolName,
+        instanceId: snapshot.instanceId,
+        triggeredByTool: snapshot.triggeredByTool ?? false,
+        openInBackground: snapshot.openInBackground ?? false,
+        restored: true,
+        initialTitle: snapshot.title,
+        initialWidgetState: snapshot.widgetState,
+        createdAt: snapshot.createdAt,
+      });
+      restoredInstanceIds.push(snapshot.instanceId);
+    } catch (error) {
+      skipped.push({
+        instanceId: snapshot.instanceId,
+        reason: error instanceof Error ? error.message : "Failed to restore pip",
+      });
+    }
+  }
+
+  const activePipId =
+    normalized.activePipId && restoredInstanceIds.includes(normalized.activePipId)
+      ? normalized.activePipId
+      : restoredInstanceIds[0] || null;
+
+  return {
+    restoredInstanceIds,
+    skipped,
+    activePipId,
+  };
 };
 
 // =============================================================================

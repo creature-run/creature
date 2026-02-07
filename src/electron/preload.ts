@@ -165,12 +165,31 @@ export interface ChatTokenUsage {
   totalTokens: number;
 }
 
+export interface PersistedPipSnapshot {
+  instanceId: string;
+  serverName: string;
+  resourceUri: string;
+  toolName: string;
+  title: string;
+  createdAt: number;
+  triggeredByTool?: boolean;
+  openInBackground?: boolean;
+  widgetState?: WidgetState;
+}
+
+export interface PersistedPipState {
+  pips: PersistedPipSnapshot[];
+  pipOrder: string[];
+  activePipId: string | null;
+}
+
 export interface ChatSessionState {
   streamedMessages: unknown[];
   injectedMessages: unknown[];
   messageOrder: Record<string, number>;
   nextOrder: number;
   tokenUsage: ChatTokenUsage;
+  pipState: PersistedPipState;
 }
 
 export interface ChatSessionWithState {
@@ -209,6 +228,11 @@ export interface McpPip {
    * Whether this pip should open in background when another pip is active.
    */
   openInBackground?: boolean;
+  /**
+   * Whether this pip was recreated during session restore.
+   * Used by renderer to set openContext.triggeredBy = "restore".
+   */
+  restored?: boolean;
 }
 
 /**
@@ -611,6 +635,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
       } | null;
     }): Promise<{ success: boolean }> =>
       ipcRenderer.invoke("pip:updateWidgetState", { instanceId: params.instanceId, widgetState: params.widgetState }),
+
+    /**
+     * Restore pip tabs from persisted chat session state.
+     */
+    restorePips: (params: { pipState: PersistedPipState }): Promise<{
+      restoredInstanceIds: string[];
+      skipped: Array<{ instanceId: string; reason: string }>;
+      activePipId: string | null;
+    }> => ipcRenderer.invoke("pip:restore", params),
 
     // Call a tool on an MCP server (for UI-initiated tool calls per MCP Apps spec)
     callTool: (params: {
@@ -1155,6 +1188,11 @@ declare global {
             imageIds?: string[];
           } | null;
         }) => Promise<{ success: boolean }>;
+        restorePips: (params: { pipState: PersistedPipState }) => Promise<{
+          restoredInstanceIds: string[];
+          skipped: Array<{ instanceId: string; reason: string }>;
+          activePipId: string | null;
+        }>;
         callTool: (params: {
           serverName: string;
           toolName: string;

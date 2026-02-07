@@ -115,6 +115,11 @@ export interface Pip {
    * Whether this pip should open in background when another pip is active.
    */
   openInBackground?: boolean;
+
+  /**
+   * Whether this pip was restored from persisted session state.
+   */
+  restored?: boolean;
 }
 
 interface PipsState {
@@ -591,11 +596,15 @@ export function AppProvider({ children }: AppProviderProps) {
         creatureAuth: cpPip.creatureAuth,
         triggeredByTool: cpPip.triggeredByTool,
         openInBackground: cpPip.openInBackground,
+        restored: cpPip.restored,
       };
 
       setPipsList((prev) => [...prev, pip]);
       setPipOrder((prev) => [...prev, pip.instanceId]);
       setActivePipIdState((currentActive) => {
+        if (cpPip.restored === true && currentActive) {
+          return currentActive;
+        }
         if (cpPip.triggeredByTool === true && cpPip.openInBackground === true && currentActive) {
           return currentActive;
         }

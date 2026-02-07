@@ -25,7 +25,14 @@ import { Input } from "./Input";
 import { cn, startUpgrade } from "../lib/utils";
 import { useTheme } from "../contexts/ThemeContext";
 import { useApp } from "../contexts/AppContext";
-import type { ChatSessionState, ChatSessionSummary, ChatSessionWithState } from "../electron/preload";
+import { widgetStateStore, makePipWidgetId, parseWidgetId } from "../lib/widgetStateStore";
+import type {
+  ChatSessionState,
+  ChatSessionSummary,
+  ChatSessionWithState,
+  PersistedPipState,
+  PersistedPipSnapshot,
+} from "../electron/preload";
 
 /**
  * Maps file extensions to IANA media types for images.
@@ -111,6 +118,88 @@ const sortSessionSummaries = (sessions: ChatSessionSummary[]): ChatSessionSummar
   });
 };
 
+const normalizePersistedPipState = (value: unknown): PersistedPipState => {
+  if (!value || typeof value !== "object") {
+    return {
+      pips: [],
+      pipOrder: [],
+      activePipId: null,
+    };
+  }
+
+  const raw = value as {
+    pips?: unknown;
+    pipOrder?: unknown;
+    activePipId?: unknown;
+  };
+
+  const pips = Array.isArray(raw.pips)
+    ? raw.pips
+        .map((pip): PersistedPipSnapshot | null => {
+          if (!pip || typeof pip !== "object") return null;
+          const snapshot = pip as Partial<PersistedPipSnapshot>;
+          if (
+            typeof snapshot.instanceId !== "string" ||
+            typeof snapshot.serverName !== "string" ||
+            typeof snapshot.resourceUri !== "string" ||
+            typeof snapshot.toolName !== "string" ||
+            typeof snapshot.title !== "string"
+          ) {
+            return null;
+          }
+          return {
+            instanceId: snapshot.instanceId,
+            serverName: snapshot.serverName,
+            resourceUri: snapshot.resourceUri,
+            toolName: snapshot.toolName,
+            title: snapshot.title,
+            createdAt:
+              typeof snapshot.createdAt === "number" && Number.isFinite(snapshot.createdAt)
+                ? Number(snapshot.createdAt)
+                : Date.now(),
+            ...(typeof snapshot.triggeredByTool === "boolean"
+              ? { triggeredByTool: snapshot.triggeredByTool }
+              : {}),
+            ...(typeof snapshot.openInBackground === "boolean"
+              ? { openInBackground: snapshot.openInBackground }
+              : {}),
+            ...(snapshot.widgetState ? { widgetState: snapshot.widgetState } : {}),
+          };
+        })
+        .filter((pip): pip is PersistedPipSnapshot => !!pip)
+    : [];
+
+  const instanceIds = new Set(pips.map((pip) => pip.instanceId));
+  const pipOrder: string[] = [];
+  const pushOrder = (instanceId: string) => {
+    if (!instanceIds.has(instanceId) || pipOrder.includes(instanceId)) return;
+    pipOrder.push(instanceId);
+  };
+
+  if (Array.isArray(raw.pipOrder)) {
+    for (const value of raw.pipOrder) {
+      if (typeof value === "string") {
+        pushOrder(value);
+      }
+    }
+  }
+
+  for (const pip of pips) {
+    pushOrder(pip.instanceId);
+  }
+
+  const activePipId =
+    typeof raw.activePipId === "string" && instanceIds.has(raw.activePipId)
+      ? raw.activePipId
+      : null;
+
+  return {
+    pips,
+    pipOrder,
+    activePipId,
+  };
+};
+
 // ============================================================================
 // ChatSession Component (Internal)
 // ============================================================================
@@ -132,7 +221,7 @@ interface ChatSessionProps {
  */
 function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: ChatSessionProps) {
   const { isDarkMode } = useTheme();
-  const { session, setProject, setSessionId, closeAllPips } = useApp();
+  const { session, setProject, setSessionId, closeAllPips, pips, setActivePipId } = useApp();
   const [input, setInput] = useState("");
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({ ...DEFAULT_TOKEN_USAGE });
@@ -149,8 +238,10 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [isSessionMenuOpen, setIsSessionMenuOpen] = useState(false);
+  const [widgetStateRevision, setWidgetStateRevision] = useState(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratingSessionRef = useRef(true);
+  const restoreGenerationRef = useRef(0);
 
   /**
    * Separate state for UI-injected messages (pip events, UI tool calls).
@@ -337,10 +428,132 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
     });
   }, []);
 
+  const buildPersistedPipState = useCallback((): PersistedPipState => {
+    const pipSnapshots: PersistedPipSnapshot[] = pips.pips
+      .filter((pip) => pip.pipType === "mcp" && pip.mcpServer && pip.resourceUri)
+      .map((pip) => {
+        const widgetState = widgetStateStore.get(
+          makePipWidgetId({ conversationId: session.sessionId, instanceId: pip.instanceId })
+        );
+
+        const snapshot: PersistedPipSnapshot = {
+          instanceId: pip.instanceId,
+          serverName: pip.mcpServer!,
+          resourceUri: pip.resourceUri!,
+          toolName: pip.toolName || "",
+          title: pip.title || "",
+          createdAt: Number.isFinite(pip.createdAt) ? pip.createdAt : Date.now(),
+        };
+
+        if (typeof pip.triggeredByTool === "boolean") {
+          snapshot.triggeredByTool = pip.triggeredByTool;
+        }
+
+        if (typeof pip.openInBackground === "boolean") {
+          snapshot.openInBackground = pip.openInBackground;
+        }
+
+        if (widgetState) {
+          snapshot.widgetState = widgetState;
+        }
+
+        return snapshot;
+      });
+
+    const snapshotIds = new Set(pipSnapshots.map((snapshot) => snapshot.instanceId));
+    const pipOrder: string[] = [];
+    const pushOrder = (instanceId: string) => {
+      if (!snapshotIds.has(instanceId) || pipOrder.includes(instanceId)) return;
+      pipOrder.push(instanceId);
+    };
+
+    for (const instanceId of pips.pipOrder) {
+      pushOrder(instanceId);
+    }
+    for (const snapshot of pipSnapshots) {
+      pushOrder(snapshot.instanceId);
+    }
+
+    const activePipId =
+      pips.activePipId && snapshotIds.has(pips.activePipId) ? pips.activePipId : null;
+
+    return {
+      pips: pipSnapshots,
+      pipOrder,
+      activePipId,
+    };
+  }, [pips.activePipId, pips.pipOrder, pips.pips, session.sessionId, widgetStateRevision]);
+
+  const restoreWidgetStateStoreForSession = useCallback(
+    (conversationId: string, pipState: PersistedPipState) => {
+      for (const key of widgetStateStore.keys()) {
+        const parsed = parseWidgetId(key);
+        if (parsed?.conversationId === conversationId && parsed.type === "pip") {
+          widgetStateStore.delete(key);
+        }
+      }
+
+      for (const snapshot of pipState.pips) {
+        if (!snapshot.widgetState) continue;
+
+        const widgetId = makePipWidgetId({
+          conversationId,
+          instanceId: snapshot.instanceId,
+        });
+        widgetStateStore.set(widgetId, snapshot.widgetState, {
+          mcpServerName: snapshot.serverName,
+          resourceUri: snapshot.resourceUri,
+          instanceId: snapshot.instanceId,
+          conversationId,
+        });
+      }
+    },
+    []
+  );
+
+  const restorePipsForSession = useCallback(
+    async ({
+      pipState,
+      generation,
+    }: {
+      pipState: PersistedPipState;
+      generation: number;
+    }) => {
+      if (!session.project?.id || pipState.pips.length === 0) {
+        return;
+      }
+
+      try {
+        const result = await window.electronAPI.controlPlane.restorePips({ pipState });
+        if (restoreGenerationRef.current !== generation) {
+          return;
+        }
+
+        const activePipId =
+          result.activePipId ||
+          pipState.activePipId ||
+          result.restoredInstanceIds[0] ||
+          null;
+
+        if (activePipId) {
+          requestAnimationFrame(() => {
+            if (restoreGenerationRef.current === generation) {
+              setActivePipId(activePipId);
+            }
+          });
+        }
+      } catch (error) {
+        console.error("[ViewChat] Failed to restore pips:", error);
+      }
+    },
+    [session.project?.id, setActivePipId]
+  );
+
   const hydrateFromSession = useCallback(
     (payload: ChatSessionWithState, allSessions: ChatSessionSummary[]) => {
       const nextStreamed = toUiMessages(payload.state.streamedMessages);
       const nextInjected = toInjectedUiMessages(payload.state.injectedMessages);
+      const nextPipState = normalizePersistedPipState(payload.state.pipState);
       const nextOrderEntries = Object.entries(payload.state.messageOrder ?? {});
       const nextOrderMap = new Map<string, number>();
       for (const [id, value] of nextOrderEntries) {
@@ -372,12 +585,26 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       setRenameDraft("");
       setIsSessionMenuOpen(false);
       setSessionId(payload.summary.id);
+      restoreGenerationRef.current += 1;
+      const restoreGeneration = restoreGenerationRef.current;
+
+      restoreWidgetStateStoreForSession(payload.summary.id, nextPipState);
+      void restorePipsForSession({
+        pipState: nextPipState,
+        generation: restoreGeneration,
+      });
 
       setTimeout(() => {
         hydratingSessionRef.current = false;
       }, 0);
     },
-    [setSessionId, toInjectedUiMessages, toUiMessages]
+    [
+      restorePipsForSession,
+      restoreWidgetStateStoreForSession,
+      setSessionId,
+      toInjectedUiMessages,
+      toUiMessages,
+    ]
   );
 
   const buildPersistedState = useCallback((): ChatSessionState => {
@@ -392,8 +619,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       messageOrder,
       nextOrder: messageOrderCounterRef.current,
       tokenUsage,
+      pipState: buildPersistedPipState(),
     };
-  }, [streamedMessages, injectedMessages, tokenUsage]);
+  }, [buildPersistedPipState, streamedMessages, injectedMessages, tokenUsage]);
 
   const persistState = useCallback(
     async (state: ChatSessionState) => {
@@ -425,6 +653,17 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   useEffect(() => {
     flushPendingSaveRef.current = flushPendingSave;
   }, [flushPendingSave]);
+
+  useEffect(() => {
+    const unsubscribe = widgetStateStore.onChange((event) => {
+      if (event.conversationId && event.conversationId !== session.sessionId) {
+        return;
+      }
+      setWidgetStateRevision((value) => value + 1);
+    });
+
+    return unsubscribe;
+  }, [session.sessionId]);
 
   const applySessionUpdate = useCallback(
     (result: { session?: ChatSessionSummary; sessions?: ChatSessionSummary[] }) => {
@@ -585,6 +824,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   useEffect(() => {
     const projectId = session.project?.id;
     hydratingSessionRef.current = true;
+    restoreGenerationRef.current += 1;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
