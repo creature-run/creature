@@ -3,6 +3,8 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CaretRight,
   CaretDown,
@@ -117,6 +119,9 @@ const sortSessionSummaries = (sessions: ChatSessionSummary[]): ChatSessionSummar
     return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
   });
 };
+
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+const MARKDOWN_ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 const normalizePersistedPipState = (value: unknown): PersistedPipState => {
   if (!value || typeof value !== "object") {
@@ -1202,6 +1207,224 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
     return unsubscribe;
   }, [getNextOrder]);
 
+  const handleMarkdownLinkClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>, href?: string) => {
+      event.preventDefault();
+
+      if (!href) return;
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(href);
+      } catch {
+        return;
+      }
+
+      if (!MARKDOWN_ALLOWED_PROTOCOLS.has(parsedUrl.protocol)) {
+        return;
+      }
+
+      void window.electronAPI.shell.openExternal(parsedUrl.toString()).catch((openError) => {
+        console.error("[ViewChat] Failed to open markdown link:", openError);
+      });
+    },
+    []
+  );
+
+  const markdownComponents = useMemo<Components>(
+    () => ({
+      a: ({ href, children, ...props }) => (
+        <a
+          {...props}
+          href={href}
+          rel="noopener noreferrer"
+          onClick={(event) => handleMarkdownLinkClick(event, href)}
+        >
+          {children}
+        </a>
+      ),
+    }),
+    [handleMarkdownLinkClick]
+  );
+
+  const renderMarkdownBlock = useCallback(
+    (text: string, key: string) => (
+      <ReactMarkdown key={key} remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
+    ),
+    [markdownComponents]
+  );
+
+  const renderMessageParts = useCallback(
+    (msg: UIMessage, role: "assistant" | "user") => {
+      const rendered: React.ReactNode[] = [];
+      const parts = msg.parts || [];
+      const isCurrentStreamingMessage =
+        role === "assistant" && isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
+
+      let textBuffer = "";
+      let textStartIndex: number | null = null;
+
+      const flushTextBuffer = () => {
+        if (textStartIndex === null || textBuffer.length === 0) return;
+        rendered.push(renderMarkdownBlock(textBuffer, `${msg.id}-md-${textStartIndex}`));
+        textBuffer = "";
+        textStartIndex = null;
+      };
+
+      for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+        const part = parts[partIndex];
+
+        if (part.type === "text") {
+          if (textStartIndex === null) {
+            textStartIndex = partIndex;
+          }
+          textBuffer += part.text;
+          continue;
+        }
+
+        flushTextBuffer();
+
+        if (part.type === "step-start") {
+          continue;
+        }
+
+        if (role === "user") {
+          continue;
+        }
+
+        if (part.type.startsWith("tool-")) {
+          const toolPart = part as {
+            type: string;
+            toolName?: string;
+            state: string;
+            input?: unknown;
+            output?: unknown;
+          };
+          const toolName = part.type.substring(5);
+
+          const stuckAtInputAvailable =
+            toolPart.state === "input-available" && !isCurrentStreamingMessage;
+
+          const isRunning =
+            (toolPart.state === "input-streaming" || toolPart.state === "input-available") &&
+            !stuckAtInputAvailable;
+          const isComplete = toolPart.state === "output-available" || stuckAtInputAvailable;
+          const isError = toolPart.state === "output-error";
+
+          const output = toolPart.output as {
+            _inlineDisplay?: {
+              resourceUri: string;
+              serverName: string;
+              toolName: string;
+              displayModes: string[];
+            };
+            hasUi?: boolean;
+            terminalUrl?: string;
+            _mcpResource?: { text?: string };
+            sessionId?: string;
+          } | undefined;
+
+          const hasMcpUi = !!(
+            output?.hasUi ||
+            output?.terminalUrl ||
+            output?._mcpResource?.text
+          );
+          const inlineDisplay = output?._inlineDisplay;
+          const toolId = `${msg.id}-${partIndex}`;
+          const isExpanded = expandedTools.has(toolId);
+
+          if (isComplete && inlineDisplay?.resourceUri) {
+            rendered.push(
+              <InlineWidget
+                key={toolId}
+                resourceUri={inlineDisplay.resourceUri}
+                toolInput={(toolPart.input as Record<string, unknown>) || {}}
+                toolResult={toolPart.output}
+                toolName={inlineDisplay.toolName}
+                serverName={inlineDisplay.serverName}
+                displayModes={inlineDisplay.displayModes}
+                messageId={msg.id}
+                onExpandToPip={() => {
+                  // For multi-session MCPs (like terminal), the tool result
+                  // contains a sessionId. We should restore the session
+                  // rather than re-run the command, preserving output history.
+                  const structuredContent = (toolPart.output as { structuredContent?: { sessionId?: string } })?.structuredContent;
+                  const sessionId = structuredContent?.sessionId;
+
+                  if (sessionId && inlineDisplay.toolName === "terminal_run") {
+                    // Use terminal_get to restore session without clearing buffer
+                    window.electronAPI.controlPlane.callTool({
+                      serverName: inlineDisplay.serverName,
+                      toolName: "terminal_get",
+                      args: { sessionId, displayMode: "pip" },
+                    });
+                  } else {
+                    // Default: re-run the tool with pip mode
+                    window.electronAPI.controlPlane.callTool({
+                      serverName: inlineDisplay.serverName,
+                      toolName: inlineDisplay.toolName,
+                      args: {
+                        ...((toolPart.input as Record<string, unknown>) || {}),
+                        displayMode: "pip",
+                      },
+                    });
+                  }
+                }}
+              />
+            );
+            continue;
+          }
+
+          const hasOutput =
+            isComplete && toolPart.output && !hasMcpUi && !inlineDisplay;
+
+          rendered.push(
+            <div
+              key={toolId}
+              className={cn(
+                "bg-background-secondary border border-border-primary rounded-md px-3.5 py-2.5 my-2 text-sm overflow-hidden",
+                isError && "border-l-2 border-l-red-400"
+              )}
+            >
+              <div
+                className={cn(
+                  "flex items-center gap-2",
+                  hasOutput && "cursor-pointer"
+                )}
+                onClick={() => hasOutput && toggleToolExpanded(toolId)}
+              >
+                {isRunning && (
+                  <Spinner size={12} />
+                )}
+                {isError && (
+                  <span className="text-red-400 text-xs font-bold">✕</span>
+                )}
+                <span className="text-text-primary/70 font-medium">{toolName}</span>
+                {hasOutput && (
+                  <span className="text-text-secondary ml-auto">
+                    {isExpanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                  </span>
+                )}
+              </div>
+              {hasOutput && isExpanded && (
+                <span className="block mt-2 text-text-secondary whitespace-pre-wrap break-all text-[11px] font-mono">
+                  {JSON.stringify(toolPart.output, null, 2)}
+                </span>
+              )}
+            </div>
+          );
+        }
+      }
+
+      flushTextBuffer();
+
+      return rendered;
+    },
+    [expandedTools, isStreaming, renderMarkdownBlock, streamedMessages, toggleToolExpanded]
+  );
+
   return (
     <div
       className={cn("flex-col h-full relative", isActive ? "flex" : "hidden")}
@@ -1420,157 +1643,14 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                         })}
                       </div>
                     )}
-                    <span className="text-text-primary text-base leading-relaxed">
-                      {msg.parts?.map((part, i) => {
-                        if (part.type === "text") {
-                          return <span key={i}>{part.text}</span>;
-                        }
-                        return null;
-                      })}
-                    </span>
+                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-secondary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-border-primary [&_blockquote]:pl-3 [&_blockquote]:text-text-secondary [&_table]:my-2 [&_table]:w-full [&_table]:text-sm [&_table]:border-collapse [&_th]:border [&_th]:border-border-primary [&_th]:px-2 [&_th]:py-1 [&_th]:font-medium [&_th]:text-left [&_td]:border [&_td]:border-border-primary [&_td]:px-2 [&_td]:py-1 [&_hr]:my-3 [&_hr]:border-border-primary [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline [&_input[type='checkbox']]:mr-1.5">
+                      {renderMessageParts(msg, "user")}
+                    </div>
                   </div>
                 ) : (
                   <div className="bg-background-secondary rounded-md p-4 mb-4 overflow-hidden">
-                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-tertiary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-tertiary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline">
-                      {msg.parts?.map((part, i) => {
-                        if (part.type === "text") {
-                          return <ReactMarkdown key={i}>{part.text}</ReactMarkdown>;
-                        }
-
-                        // Skip step-start parts (internal markers)
-                        if (part.type === "step-start") {
-                          return null;
-                        }
-
-                        // AI SDK v6 format: tool-{toolName}
-                        if (part.type.startsWith("tool-")) {
-                          const toolPart = part as {
-                            type: string;
-                            toolName?: string;
-                            state: string;
-                            input?: unknown;
-                            output?: unknown;
-                          };
-                          const toolName = part.type.substring(5);
-
-                          const isCurrentStreamingMessage =
-                            isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
-                          const stuckAtInputAvailable =
-                            toolPart.state === "input-available" && !isCurrentStreamingMessage;
-
-                          const isRunning =
-                            (toolPart.state === "input-streaming" ||
-                              toolPart.state === "input-available") &&
-                            !stuckAtInputAvailable;
-                          const isComplete =
-                            toolPart.state === "output-available" || stuckAtInputAvailable;
-                          const isError = toolPart.state === "output-error";
-
-                          const output = toolPart.output as {
-                            _inlineDisplay?: {
-                              resourceUri: string;
-                              serverName: string;
-                              toolName: string;
-                              displayModes: string[];
-                            };
-                            hasUi?: boolean;
-                            terminalUrl?: string;
-                            _mcpResource?: { text?: string };
-                            sessionId?: string;
-                          } | undefined;
-
-                          const hasMcpUi = !!(
-                            output?.hasUi ||
-                            output?.terminalUrl ||
-                            output?._mcpResource?.text
-                          );
-                          const inlineDisplay = output?._inlineDisplay;
-                          const toolId = `${msg.id}-${i}`;
-                          const isExpanded = expandedTools.has(toolId);
-
-                          if (isComplete && inlineDisplay?.resourceUri) {
-                            return (
-                              <InlineWidget
-                                key={toolId}
-                                resourceUri={inlineDisplay.resourceUri}
-                                toolInput={(toolPart.input as Record<string, unknown>) || {}}
-                                toolResult={toolPart.output}
-                                toolName={inlineDisplay.toolName}
-                                serverName={inlineDisplay.serverName}
-                                displayModes={inlineDisplay.displayModes}
-                                messageId={msg.id}
-                                onExpandToPip={() => {
-                                  // For multi-session MCPs (like terminal), the tool result
-                                  // contains a sessionId. We should restore the session
-                                  // rather than re-run the command, preserving output history.
-                                  const structuredContent = (toolPart.output as { structuredContent?: { sessionId?: string } })?.structuredContent;
-                                  const sessionId = structuredContent?.sessionId;
-
-                                  if (sessionId && inlineDisplay.toolName === "terminal_run") {
-                                    // Use terminal_get to restore session without clearing buffer
-                                    window.electronAPI.controlPlane.callTool({
-                                      serverName: inlineDisplay.serverName,
-                                      toolName: "terminal_get",
-                                      args: { sessionId, displayMode: "pip" },
-                                    });
-                                  } else {
-                                    // Default: re-run the tool with pip mode
-                                    window.electronAPI.controlPlane.callTool({
-                                      serverName: inlineDisplay.serverName,
-                                      toolName: inlineDisplay.toolName,
-                                      args: {
-                                        ...((toolPart.input as Record<string, unknown>) || {}),
-                                        displayMode: "pip",
-                                      },
-                                    });
-                                  }
-                                }}
-                              />
-                            );
-                          }
-
-                          const hasOutput =
-                            isComplete && toolPart.output && !hasMcpUi && !inlineDisplay;
-
-                          return (
-                            <div
-                              key={i}
-                              className={cn(
-                                "bg-background-secondary border border-border-primary rounded-md px-3.5 py-2.5 my-2 text-sm overflow-hidden",
-                                isError && "border-l-2 border-l-red-400"
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "flex items-center gap-2",
-                                  hasOutput && "cursor-pointer"
-                                )}
-                                onClick={() => hasOutput && toggleToolExpanded(toolId)}
-                              >
-                                {isRunning && (
-                                  <Spinner size={12} />
-                                )}
-                                {isError && (
-                                  <span className="text-red-400 text-xs font-bold">✕</span>
-                                )}
-                                <span className="text-text-primary/70 font-medium">{toolName}</span>
-                                {hasOutput && (
-                                  <span className="text-text-secondary ml-auto">
-                                    {isExpanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
-                                  </span>
-                                )}
-                              </div>
-                              {hasOutput && isExpanded && (
-                                <span className="block mt-2 text-text-secondary whitespace-pre-wrap break-all text-[11px] font-mono">
-                                  {JSON.stringify(toolPart.output, null, 2)}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        }
-
-                        return null;
-                      })}
+                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-tertiary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-tertiary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-border-primary [&_blockquote]:pl-3 [&_blockquote]:text-text-secondary [&_table]:my-2 [&_table]:w-full [&_table]:text-sm [&_table]:border-collapse [&_th]:border [&_th]:border-border-primary [&_th]:px-2 [&_th]:py-1 [&_th]:font-medium [&_th]:text-left [&_td]:border [&_td]:border-border-primary [&_td]:px-2 [&_td]:py-1 [&_hr]:my-3 [&_hr]:border-border-primary [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline [&_input[type='checkbox']]:mr-1.5">
+                      {renderMessageParts(msg, "assistant")}
                     </div>
                   </div>
                 )}
