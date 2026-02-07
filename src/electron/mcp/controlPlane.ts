@@ -402,12 +402,18 @@ export const createPipInstance = async ({
 };
 
 /**
- * Refresh all pips belonging to a specific MCP server.
- * Closes pips whose resourceUri no longer exists (MCP app was rewritten).
- * Re-fetches HTML content and icon for valid pips.
- * Called when an MCP server is restarted.
+ * Reconcile pips for an MCP server after reconnection.
+ *
+ * Structural cleanup only — closes pips whose resourceUri no longer exists
+ * (e.g., the MCP app was rewritten with different resources). Does NOT
+ * fetch new HTML or touch pip readiness. Existing pips keep their current
+ * HTML content until the UI build completes and triggers a separate refresh.
+ *
+ * This separation prevents the primary "stuck loading" failure mode:
+ * eagerly refreshing HTML before vite finishes rebuilding destroys the
+ * working iframe and replaces it with incomplete HTML that never initializes.
  */
-export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
+export const reconcilePipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
   const pipsForMcp = Array.from(pipInstances.values()).filter(
     (p) => p.serverName === mcpName
   );
@@ -416,11 +422,10 @@ export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promi
     return;
   }
 
-  // Get valid resource URIs from the MCP server
   const validUris = getResourceUrisForMcp(mcpName);
+  console.debug(`[PipLifecycle] reconcile ${mcpName}: ${pipsForMcp.length} pip(s), ${validUris.size} valid URI(s)`);
 
   for (const pip of pipsForMcp) {
-    // Close pips with stale resourceUri (MCP app was rewritten with different resources)
     if (!validUris.has(pip.resourceUri)) {
       console.log(`[Control Plane] Closing stale pip (resource no longer exists)`, {
         instanceId: pip.instanceId,
@@ -428,44 +433,49 @@ export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promi
       });
       pipInstances.delete(pip.instanceId);
       sendToRenderer("pip:closed", pip.instanceId);
-      continue;
-    }
-
-    // Refresh valid pips with fresh content
-    try {
-      const { html: htmlContent, icon } = await readResource({
-        serverName: pip.serverName,
-        uri: pip.resourceUri,
-      });
-
-      pip.htmlContent = htmlContent;
-      pip.icon = icon;
-      pip.ready = false;
-
-      let resolveReady: () => void = () => {};
-      const readyPromise = new Promise<void>((resolve) => {
-        resolveReady = resolve;
-      });
-      pip.readyPromise = readyPromise;
-      pip.resolveReady = resolveReady;
-
-      sendToRenderer("pip:refresh", {
-        instanceId: pip.instanceId,
-        htmlContent: pip.htmlContent,
-        icon: pip.icon,
-      });
-
-      console.log(`[Control Plane] Refreshed pip`, { instanceId: pip.instanceId });
-    } catch (error) {
-      console.error(`[Control Plane] Failed to refresh pip`, { instanceId: pip.instanceId, error });
+    } else {
+      console.debug(`[PipLifecycle] reconcile kept pip ${pip.instanceId} (ready=${pip.ready})`);
     }
   }
 };
 
 /**
+ * Refresh HTML content for all pips belonging to a specific MCP server.
+ *
+ * Called when the UI build completes (detected via "App UI reloaded" in
+ * stdout). This is the ONLY path that should refresh pip HTML during
+ * development — it runs after vite has finished writing the complete
+ * singlefile HTML, so the content is guaranteed to be valid.
+ */
+export const refreshAllPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
+  const pipsForMcp = Array.from(pipInstances.values()).filter(
+    (p) => p.serverName === mcpName
+  );
+
+  console.debug(`[PipLifecycle] refreshAll ${mcpName}: ${pipsForMcp.length} pip(s)`);
+
+  for (const pip of pipsForMcp) {
+    await refreshSinglePip({ instanceId: pip.instanceId });
+  }
+};
+
+/**
+ * Per-pip refresh lock. Prevents concurrent refreshes on the same pip
+ * from racing and orphaning readyPromise references. When two refresh
+ * triggers fire in rapid succession (e.g., HMR notification overlapping
+ * with stdout watcher), the second waits for the first to finish before
+ * proceeding with potentially newer content.
+ */
+const pipRefreshLocks = new Map<string, Promise<void>>();
+
+/**
  * Refresh a single pip's HTML content and icon.
- * Clears the resource cache and re-fetches fresh content.
- * Does NOT restart the MCP server - just refreshes the UI content.
+ *
+ * Clears the resource cache, re-fetches fresh HTML from the MCP server,
+ * and sends the new content to the renderer. Serialized per-pip via
+ * pipRefreshLocks to prevent concurrent refresh races.
+ *
+ * Does NOT restart the MCP server — just refreshes the UI content.
  */
 export const refreshSinglePip = async ({
   instanceId,
@@ -477,25 +487,64 @@ export const refreshSinglePip = async ({
     return { success: false, error: `Pip not found: ${instanceId}` };
   }
 
+  // Serialize: wait for any in-flight refresh on this pip to complete
+  const existingLock = pipRefreshLocks.get(instanceId);
+  if (existingLock) {
+    console.debug(`[PipLifecycle] refresh waiting on lock for ${instanceId}`);
+    try { await existingLock; } catch { /* ignore prior failure */ }
+  }
+
+  let resolveLock: () => void = () => {};
+  const lock = new Promise<void>((resolve) => { resolveLock = resolve; });
+  pipRefreshLocks.set(instanceId, lock);
+
   try {
-    // Clear the resource cache so we get fresh content
     clearResourceCache({
       serverName: pip.serverName,
       uri: pip.resourceUri,
     });
 
-    // Fetch fresh HTML content and icon
     const { html: htmlContent, icon } = await readResource({
       serverName: pip.serverName,
       uri: pip.resourceUri,
     });
 
-    // Update pip instance
+    // Skip refresh if HTML content hasn't changed — avoids wasteful iframe
+    // remounts when both the HMR handler and stdout watcher fire for the
+    // same vite build.
+    if (htmlContent === pip.htmlContent) {
+      console.debug(`[PipLifecycle] refresh skipped (HTML unchanged)`, { instanceId });
+      return { success: true };
+    }
+
+    // Guard against replacing working HTML with broken/incomplete HTML.
+    // During multi-file edits, the server may temporarily serve a minimal
+    // placeholder or error page (e.g. when the html path was changed but
+    // vite hasn't rebuilt to the new directory yet). If the new HTML is
+    // drastically smaller than the existing content, skip the refresh.
+    // The next build cycle will deliver correct HTML.
+    //
+    // Thresholds: skip if the new HTML is under 90% of existing size AND
+    // the existing HTML is substantial (over 10KB). This avoids blocking
+    // legitimate first-load or small-app scenarios.
+    const existingLength = pip.htmlContent?.length ?? 0;
+    const SIGNIFICANT_SIZE = 10_000;
+    const SHRINK_RATIO = 0.1;
+    if (
+      existingLength > SIGNIFICANT_SIZE &&
+      htmlContent.length < existingLength * SHRINK_RATIO
+    ) {
+      console.warn(
+        `[PipLifecycle] refresh skipped (HTML suspiciously small: ${htmlContent.length} bytes vs existing ${existingLength} bytes)`,
+        { instanceId }
+      );
+      return { success: true };
+    }
+
     pip.htmlContent = htmlContent;
     pip.icon = icon;
     pip.ready = false;
 
-    // Create new ready promise
     let resolveReady: () => void = () => {};
     const readyPromise = new Promise<void>((resolve) => {
       resolveReady = resolve;
@@ -512,11 +561,17 @@ export const refreshSinglePip = async ({
     console.debug(`[Control Plane] Pip refreshed`, { instanceId: pip.instanceId, htmlLength: pip.htmlContent?.length });
     return { success: true };
   } catch (error) {
-    console.error(`[Control Plane] Pip refresh failed`, { instanceId, error });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[Control Plane] Pip refresh failed`, { instanceId, error: errorMessage });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
     };
+  } finally {
+    resolveLock();
+    if (pipRefreshLocks.get(instanceId) === lock) {
+      pipRefreshLocks.delete(instanceId);
+    }
   }
 };
 
@@ -530,9 +585,12 @@ export const refreshSinglePip = async ({
  */
 export const markPipReady = (instanceId: string): boolean => {
   const pip = pipInstances.get(instanceId);
-  if (!pip) return false;
+  if (!pip) {
+    console.debug(`[PipLifecycle] markReady IGNORED — pip ${instanceId} not found`);
+    return false;
+  }
 
-  const wasReady = pip.ready;
+  console.debug(`[PipLifecycle] markReady ${instanceId} (wasReady=${pip.ready})`);
 
   if (!pip.ready) {
     pip.ready = true;
@@ -570,13 +628,16 @@ export const markPipReady = (instanceId: string): boolean => {
  * creating the pip (see pendingSingleModePips). Once the pip exists,
  * waits for its readyPromise to resolve (renderer sends pip:ready).
  *
- * Times out after 15 seconds total (appearance + ready).
+ * Non-fatal: returns false on timeout instead of throwing, so callers
+ * don't produce unhandled rejections that crash the agent stream.
+ * The pip may still become ready later (e.g. after a server restart
+ * delivers correct HTML).
  */
-const waitForPipReady = async (instanceId: string): Promise<void> => {
+const waitForPipReady = async (instanceId: string): Promise<boolean> => {
   let pip = pipInstances.get(instanceId);
 
   // Pip may not exist yet if a concurrent call is still creating it.
-  // Poll briefly for it to appear before throwing.
+  // Poll briefly for it to appear.
   if (!pip) {
     const MAX_APPEAR_WAIT = 15000;
     const POLL_MS = 50;
@@ -586,30 +647,38 @@ const waitForPipReady = async (instanceId: string): Promise<void> => {
       pip = pipInstances.get(instanceId);
     }
     if (!pip) {
-      throw new Error(`Pip not found: ${instanceId}`);
+      console.warn(`[PipLifecycle] waitForReady ${instanceId} — pip never appeared`);
+      return false;
     }
   }
 
   if (pip.ready) {
-    return;
+    console.debug(`[PipLifecycle] waitForReady ${instanceId} — already ready`);
+    return true;
   }
+
+  console.debug(`[PipLifecycle] waitForReady ${instanceId} — waiting (htmlLength=${pip.htmlContent?.length})`);
 
   const TIMEOUT = 15000;
   let timeoutId: ReturnType<typeof setTimeout>;
-  let resolved = false;
-  
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      if (!resolved) {
-        console.error(`[Control Plane] Pip ready timeout`, { instanceId, timeoutMs: TIMEOUT });
-        reject(new Error(`Pip ready timeout: ${instanceId}`));
-      }
-    }, TIMEOUT);
+
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timeoutId = setTimeout(() => resolve("timeout"), TIMEOUT);
   });
 
   try {
-    await Promise.race([pip.readyPromise, timeoutPromise]);
-    resolved = true;
+    const result = await Promise.race([
+      pip.readyPromise.then(() => "ready" as const),
+      timeoutPromise,
+    ]);
+
+    if (result === "timeout") {
+      console.warn(`[PipLifecycle] waitForReady ${instanceId} — timed out (${TIMEOUT}ms), pip may recover later`);
+      return false;
+    }
+
+    console.debug(`[PipLifecycle] waitForReady ${instanceId} — resolved`);
+    return true;
   } finally {
     clearTimeout(timeoutId!);
   }
@@ -1342,8 +1411,14 @@ export const handleToolCall = async ({
     if (isReusingReadyPip) {
       sendToPipWindow(instanceId, "pip:tool-input", toolInputPayload);
     } else {
-      waitForPipReady(instanceId).then(() => {
-        sendToPipWindow(instanceId, "pip:tool-input", toolInputPayload);
+      waitForPipReady(instanceId).then((ready) => {
+        if (ready) {
+          sendToPipWindow(instanceId, "pip:tool-input", toolInputPayload);
+        } else {
+          console.warn(`[Control Plane] Skipping tool-input for ${instanceId} — pip not ready`);
+        }
+      }).catch((err) => {
+        console.error(`[Control Plane] waitForPipReady failed for tool-input`, { instanceId, error: String(err) });
       });
     }
   }
@@ -1408,8 +1483,14 @@ export const handleToolCall = async ({
     if (isReusingReadyPip) {
       sendToPipWindow(instanceId, "pip:tool-result", toolResultPayload);
     } else {
-      waitForPipReady(instanceId).then(() => {
-        sendToPipWindow(instanceId, "pip:tool-result", toolResultPayload);
+      waitForPipReady(instanceId).then((ready) => {
+        if (ready) {
+          sendToPipWindow(instanceId, "pip:tool-result", toolResultPayload);
+        } else {
+          console.warn(`[Control Plane] Skipping tool-result for ${instanceId} — pip not ready`);
+        }
+      }).catch((err) => {
+        console.error(`[Control Plane] waitForPipReady failed for tool-result`, { instanceId, error: String(err) });
       });
     }
   }

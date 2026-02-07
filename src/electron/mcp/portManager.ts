@@ -26,15 +26,42 @@ import * as net from "net";
  *   development environment or other running applications
  * - Silently skipping busy ports is safe and transparent to the user
  */
-const isPortFree = (port: number): Promise<boolean> => {
+const canBindToHost = (port: number, host: string): Promise<"free" | "in-use" | "unsupported"> => {
   return new Promise((resolve) => {
     const server = net.createServer();
-    server.once("error", () => resolve(false));
-    server.once("listening", () => {
-      server.close(() => resolve(true));
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        resolve("in-use");
+        return;
+      }
+      if (err.code === "EADDRNOTAVAIL" || err.code === "EAFNOSUPPORT") {
+        resolve("unsupported");
+        return;
+      }
+      resolve("in-use");
     });
-    server.listen(port, "127.0.0.1");
+    server.once("listening", () => {
+      server.close(() => resolve("free"));
+    });
+    server.listen(port, host);
   });
+};
+
+const isPortFree = async (port: number): Promise<boolean> => {
+  const hostsToCheck = ["127.0.0.1", "0.0.0.0", "::1", "::"];
+  let hadSupportedHost = false;
+
+  for (const host of hostsToCheck) {
+    const result = await canBindToHost(port, host);
+    if (result === "in-use") {
+      return false;
+    }
+    if (result === "free") {
+      hadSupportedHost = true;
+    }
+  }
+
+  return hadSupportedHost;
 };
 
 /**

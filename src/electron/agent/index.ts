@@ -2,11 +2,16 @@
  * Agent Module
  *
  * Creates and manages the AI agent with full tool access.
- * Tools include pip management and all MCP server tools.
- * File operations are provided by the ide MCP server.
+ *
+ * Uses a proxy architecture: a single stable `mcp_tool` forwards calls to
+ * any connected MCP server, while `prepareStep` injects a fresh tool listing
+ * before every model step. This decouples the AI SDK's tool registration
+ * from actual MCP tools, so mid-turn server restarts (that rename/add/remove
+ * tools) never crash the stream.
  */
 
 import {
+  tool,
   ToolLoopAgent,
   wrapLanguageModel,
   validateUIMessages,
@@ -14,12 +19,15 @@ import {
   pruneMessages,
   UIMessage,
   SystemModelMessage,
+  NoSuchToolError,
 } from "ai";
+import type { ToolCallRepairFunction, ToolSet } from "ai";
+import { z } from "zod";
 import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { app } from "electron";
 import { createPipTools } from "./tools";
 import { createProvider } from "./provider";
-import { getMcpToolsForAgent, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
+import { getAllTools, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
 import { getProfileInstructions } from "./profileInstructions";
 import {
   getActivePipsForPrompt,
@@ -274,12 +282,142 @@ export const getCurrentSystemPrompt = (): string => {
 };
 
 /**
- * Creates the main chat agent with full tool access.
- * Tools include pip management and all MCP server tools.
- * File operations are provided by the ide MCP server.
+ * Build the dynamic MCP tools system message from live CachedTool[] data.
  *
- * Note: The system prompt includes current pip state and is built fresh
- * for each chat request to reflect the latest pip information.
+ * This is called by `prepareStep` before every model step, so the model
+ * always sees the current tool set — even mid-turn after a server restart
+ * that renames, adds, or removes tools. The message tells the model what
+ * tools exist and how to call them via the `mcp_tool` proxy.
+ */
+const buildMcpToolsSystemMessage = (): string => {
+  const allTools = getAllTools();
+
+  // Group tools by server name
+  const byServer = new Map<string, typeof allTools>();
+  for (const t of allTools) {
+    const list = byServer.get(t.serverName) ?? [];
+    list.push(t);
+    byServer.set(t.serverName, list);
+  }
+
+  if (byServer.size === 0) {
+    return "# Connected MCP Apps\n\nNo MCP servers are connected.";
+  }
+
+  let message = "# Connected MCP Apps\n\nCall these tools using the `mcp_tool` tool with the serverName, toolName, and args.\n";
+
+  for (const [serverName, tools] of byServer) {
+    message += `\n### ${serverName}\n`;
+    for (const t of tools) {
+      // Build parameter signature from inputSchema properties
+      const props = (t.inputSchema?.properties ?? {}) as Record<string, { type?: string; description?: string }>;
+      const required = (t.inputSchema?.required ?? []) as string[];
+      const params = Object.entries(props)
+        .map(([name, schema]) => {
+          const opt = required.includes(name) ? "" : "?";
+          const type = schema.type ?? "any";
+          return `${name}${opt}: ${type}`;
+        })
+        .join(", ");
+
+      message += `- ${t.name}(${params}): ${t.description ?? ""}\n`;
+    }
+  }
+
+  return message;
+};
+
+/**
+ * Create the single mcp_tool proxy that forwards calls to any MCP server.
+ *
+ * The model calls this with serverName + toolName + args. The proxy routes
+ * through the existing handleToolCall in controlPlane, which handles pip
+ * routing, instance resolution, and all downstream MCP communication.
+ *
+ * Because this is a single stable tool, the AI SDK's tool map never changes,
+ * so mid-turn server restarts never cause AI_NoSuchToolError.
+ */
+const createMcpProxyTool = () => {
+  return tool({
+    description:
+      "Call a tool on a connected MCP server. Use the serverName and toolName from the Connected MCP Apps listing.",
+    inputSchema: z.object({
+      serverName: z.string().describe("The MCP server name"),
+      toolName: z.string().describe("The tool name on that server"),
+      args: z
+        .record(z.unknown())
+        .optional()
+        .default({})
+        .describe("Tool arguments as key-value pairs"),
+    }),
+    execute: async ({ serverName, toolName, args }) => {
+      try {
+        const result = await handleToolCall({
+          serverName,
+          toolName,
+          args: args as Record<string, unknown>,
+          source: "agent",
+        });
+        return result;
+      } catch (error) {
+        console.error(`[Agent Proxy] ${serverName}/${toolName} failed:`, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  });
+};
+
+/**
+ * Repair function for tool calls that fail AI SDK validation.
+ *
+ * The most common failure: the model calls a tool by its raw MCP name
+ * (e.g. "bookmarks_create") instead of wrapping it in mcp_tool. This
+ * intercepts the NoSuchToolError, finds the owning server, and rewrites
+ * the call as a valid mcp_tool invocation — avoiding a stream crash.
+ */
+const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
+  toolCall,
+  error,
+}) => {
+  if (!NoSuchToolError.isInstance(error)) return null;
+
+  const calledName = toolCall.toolName;
+  const allTools = getAllTools();
+  const match = allTools.find((t) => t.name === calledName);
+
+  if (!match) {
+    console.warn(`[Agent Repair] No MCP tool found for "${calledName}", cannot repair`);
+    return null;
+  }
+
+  console.log(`[Agent Repair] Rewriting "${calledName}" → mcp_tool(${match.serverName}/${calledName})`);
+
+  const originalArgs = JSON.parse(toolCall.input || "{}");
+  return {
+    ...toolCall,
+    toolName: "mcp_tool",
+    input: JSON.stringify({
+      serverName: match.serverName,
+      toolName: calledName,
+      args: originalArgs,
+    }),
+  };
+};
+
+/**
+ * Creates the main chat agent with proxy architecture.
+ *
+ * Tools are a fixed set: `pip_close` + `mcp_tool` (proxy). The actual MCP
+ * tool listing is injected as a dynamic system message via `prepareStep`,
+ * which runs before every model step. This means:
+ * - Static instructions benefit from Anthropic's prompt caching
+ * - MCP tool listings are always fresh (rebuilt from live CachedTool[])
+ * - Mid-turn server restarts with tool changes are handled gracefully
+ * - If the model bypasses the proxy and calls a tool by name, repairToolCall
+ *   intercepts and rewrites it as a valid mcp_tool call
  */
 export const createAgent = async ({
   folderPath,
@@ -293,9 +431,7 @@ export const createAgent = async ({
   sessionSummary?: string | null;
 }) => {
   const pipTools = createPipTools({ closePipInstance });
-  // Pass handleToolCall to route all agent tool calls through Control Plane
-  // File tools are now provided by the ide MCP server
-  const mcpTools = await getMcpToolsForAgent(handleToolCall);
+  const mcpProxyTool = createMcpProxyTool();
 
   const { provider, modelId } = createProvider(credentials);
   const baseModel = provider(modelId);
@@ -307,7 +443,7 @@ export const createAgent = async ({
         middleware: devToolsMiddleware(),
       });
 
-  // Build system prompt with current pip state, custom instructions, and session summary
+  // Build static system prompt (personality, guidelines, profile, context)
   const systemPrompt = buildSystemPrompt({
     folderPath,
     customInstructions,
@@ -317,7 +453,29 @@ export const createAgent = async ({
   return new ToolLoopAgent({
     model,
     instructions: systemPrompt,
-    tools: { ...pipTools, ...mcpTools },
+    tools: { ...pipTools, mcp_tool: mcpProxyTool },
+    /**
+     * Runs before every model step in the tool loop.
+     * Rebuilds the MCP tools listing from live CachedTool[] data
+     * so the model always sees current tools — even mid-turn.
+     */
+    prepareStep: async () => {
+      const mcpToolsMessage = buildMcpToolsSystemMessage();
+      return {
+        system: [
+          ...systemPrompt,
+          {
+            content: mcpToolsMessage,
+            role: "system" as const,
+          },
+        ],
+      };
+    },
+    /**
+     * Catches tool calls the model makes by raw MCP name instead of
+     * through the mcp_tool proxy, and rewrites them to valid proxy calls.
+     */
+    experimental_repairToolCall: repairToolCall,
   });
 };
 

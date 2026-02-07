@@ -19,7 +19,6 @@ import type {
   ToolResultContent,
   ToolUseContent,
 } from "@modelcontextprotocol/sdk/types.js";
-import { tool } from "ai";
 import { z } from "zod";
 import path from "node:path";
 import { app } from "electron";
@@ -30,9 +29,10 @@ import { injectCSP, type CspConfig } from "./csp";
 import { injectConsoleOverride } from "./consoleCapture";
 import { getMainWindow } from "../window/mainWindow";
 import { buildSpawnEnv, getExtendedPath, resolveBundledCommand } from "../utils/env";
-import { closeAllPips, getPipInstances, refreshPipsForMcp } from "./controlPlane";
+import { closeAllPips, getPipInstances, reconcilePipsForMcp, refreshAllPipsForMcp } from "./controlPlane";
 import { logAggregator, type LogLevel } from "../logging";
 import { portManager } from "./portManager";
+import { cleanupOrphanedMcpProcesses, registerMcpProcess, unregisterMcpProcess } from "./processRegistry";
 import { findWorkspaceRoot } from "../utils/workspace";
 import { getMcpStorageDir } from "../storage/mcpStorageDir";
 import { getMcpRepoDir } from "../storage/mcpRepoDir";
@@ -1726,6 +1726,24 @@ const spawnHttpServerProcess = async (
     shell: process.platform === "win32" ? "powershell.exe" : true,
   });
 
+  const isDevMcpProcess =
+    env.NODE_ENV === "development" && typeof env.MCP_HMR_PORT === "string" && !!env.MCP_HMR_PORT;
+
+  if (proc.pid && isDevMcpProcess) {
+    registerMcpProcess({
+      pid: proc.pid,
+      serverName,
+      command,
+      args,
+      cwd,
+      ports: {
+        mcp: env.MCP_PORT ? Number(env.MCP_PORT) : undefined,
+        hmr: env.MCP_HMR_PORT ? Number(env.MCP_HMR_PORT) : undefined,
+      },
+      kind: "dev-mcp",
+    });
+  }
+
   /**
    * Route HTTP MCP server output to the log aggregator.
    * This formats logs the same way as stdio MCPs so they appear
@@ -1771,6 +1789,9 @@ const spawnHttpServerProcess = async (
 
   proc.on("exit", () => {
     // Process exit handled by connection cleanup
+    if (proc.pid) {
+      unregisterMcpProcess({ pid: proc.pid, serverName });
+    }
   });
 
   // Wait for the server to be ready by polling the health endpoint
@@ -2517,7 +2538,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     connectionPromises.delete(serverName);
 
     // Close old pips that reference the spawn key
-    await refreshPipsForMcp({ mcpName: serverName });
+    await reconcilePipsForMcp({ mcpName: serverName });
 
     // Remove old sidebar icon
     const mainWindow = getMainWindow();
@@ -2529,16 +2550,50 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   connections.set(canonicalName, connection);
   setMcpStatus(canonicalName, "ok");
 
-  // Proactive restart detection for dev MCP servers.
-  // During development, tsx watch restarts the underlying server process
-  // when source files change. The parent npm process stays alive, so the
-  // spawned process doesn't exit — only the HTTP server restarts on the
-  // same port with a new session. The MCP SDK convention is to log
-  // "listening on http://localhost:PORT/mcp" on startup, so any subsequent
-  // occurrence of this pattern indicates a restart. A settling delay ensures
-  // the initial startup message is ignored.
+  // Dev MCP stdout watchers.
+  // Two separate concerns are handled by watching the spawned process output:
+  //
+  // 1. Server restart detection ("listening on"):
+  //    tsx watch restarts the server process when source files change. The
+  //    parent npm process stays alive, so the spawned process doesn't exit —
+  //    only the HTTP server restarts on the same port with a new session.
+  //    We detect this via "listening on" in stdout and reconnect the MCP
+  //    client. A 5-second settling delay avoids catching the initial startup.
+  //    reconnectServer only reconciles pips structurally (closing stale ones)
+  //    but does NOT refresh HTML — that waits for the UI build to finish.
+  //
+  // 2. UI build completion ("App UI reloaded"):
+  //    vite build --watch rebuilds the UI HTML when source files change.
+  //    The SDK's vite plugin logs "App UI reloaded" when the build finishes
+  //    and HMR clients are notified. This is the ONLY reliable signal that
+  //    the singlefile HTML is complete and safe to inject into pip iframes.
+  //    We debounce by 500ms to handle rapid rebuilds, then refresh all pips.
+  //    No settling delay — we want to catch initial builds and rebuilds.
   if (!app.isPackaged && spawnedProcess && actualTransportType === "streamable-http") {
     const storedName = canonicalName;
+
+    // UI build completion → pip HTML refresh (no settling delay)
+    let uiReloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const UI_RELOAD_DEBOUNCE_MS = 500;
+
+    const onUiReloaded = (data: Buffer) => {
+      if (!data.toString().includes("App UI reloaded")) return;
+      console.log(`[MCP] UI build complete for ${storedName}`);
+
+      if (uiReloadTimer) clearTimeout(uiReloadTimer);
+      uiReloadTimer = setTimeout(async () => {
+        try {
+          await refreshAllPipsForMcp({ mcpName: storedName });
+        } catch (err) {
+          console.warn(`[MCP] UI reload refresh failed for ${storedName}:`, err);
+        }
+      }, UI_RELOAD_DEBOUNCE_MS);
+    };
+
+    spawnedProcess.stdout?.on("data", onUiReloaded);
+    spawnedProcess.stderr?.on("data", onUiReloaded);
+
+    // Server restart detection → reconnect only (5-second settling delay)
     setTimeout(() => {
       if (spawnedProcess.killed || !connections.has(storedName)) return;
 
@@ -2546,7 +2601,6 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
         if (!data.toString().includes("listening on")) return;
         console.log(`[MCP] Detected dev server restart for ${storedName}`);
 
-        // Brief delay to let the new server fully initialize before reconnecting
         setTimeout(async () => {
           try {
             await reconnectServer(storedName);
@@ -2619,6 +2673,9 @@ export const initMcpsForProject = async ({
 
   // Allow new connections (reset shutdown flag)
   mcpsShutdown = false;
+
+  // Clean up orphaned MCP processes from prior runs before allocating ports.
+  await cleanupOrphanedMcpProcesses({ reason: "project-init" });
 
   // Close any existing connections first
   await closeAllConnections();
@@ -2735,6 +2792,9 @@ const closeConnection = async ({ name }: { name: string }): Promise<void> => {
       if (conn.spawnedProcess && !conn.spawnedProcess.killed) {
         killProcessTree(conn.spawnedProcess);
       }
+      if (conn.spawnedProcess?.pid) {
+        unregisterMcpProcess({ pid: conn.spawnedProcess.pid, serverName: name });
+      }
       // Release ports so they can be reused
       portManager.release({ serverName: name });
       portManager.release({ serverName: `${name}-hmr` });
@@ -2797,7 +2857,7 @@ export const restartMcp = async ({ name, config }: {
       await closeConnection({ name: oldName });
 
       // Close old pips and sidebar icon immediately
-      await refreshPipsForMcp({ mcpName: oldName });
+      await reconcilePipsForMcp({ mcpName: oldName });
       const mainWindow = getMainWindow();
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("mcp:disabled", { name: oldName });
@@ -2812,8 +2872,9 @@ export const restartMcp = async ({ name, config }: {
   try {
     await getConnection(name);
 
-    // Refresh pips (handles non-rename restarts where content changed)
-    await refreshPipsForMcp({ mcpName: name });
+    // Structural reconciliation only — close pips whose resources no longer exist.
+    // HTML refresh happens separately when the UI build completes ("App UI reloaded").
+    await reconcilePipsForMcp({ mcpName: name });
 
     const mainWindow = getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2908,6 +2969,9 @@ export const closeAllConnections = async (): Promise<void> => {
         killProcessTree(conn.spawnedProcess);
         portManager.release({ serverName: name });
         portManager.release({ serverName: `${name}-hmr` });
+      }
+      if (conn.spawnedProcess?.pid) {
+        unregisterMcpProcess({ pid: conn.spawnedProcess.pid, serverName: name });
       }
     }
   }
@@ -3143,114 +3207,6 @@ export const getMcpInfo = async ({
   };
 };
 
-/**
- * Convert JSON Schema to Zod schema for AI SDK tools.
- * Recursively handles nested object schemas.
- */
-const jsonSchemaToZod = (schema: Record<string, unknown>): z.ZodType => {
-  // Handle undefined/null schemas
-  if (!schema || typeof schema !== "object") {
-    return z.object({});
-  }
-
-  const type = schema.type as string;
-  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
-  const required = schema.required as string[] | undefined;
-
-  // Handle object type (with or without properties)
-  if (type === "object") {
-    if (properties) {
-      const shape: Record<string, z.ZodType> = {};
-      for (const [key, propSchema] of Object.entries(properties)) {
-        let propZod = jsonSchemaToZod(propSchema);
-        if (!required?.includes(key)) {
-          propZod = propZod.optional();
-        }
-        shape[key] = propZod;
-      }
-      return z.object(shape);
-    }
-    // Object without properties - return empty object schema
-    return z.object({});
-  }
-
-  if (type === "string") return z.string();
-  if (type === "number") return z.number();
-  if (type === "integer") return z.number().int();
-  if (type === "boolean") return z.boolean();
-  if (type === "array") return z.array(z.unknown());
-
-  // Default to empty object for unknown/missing types (Anthropic requires type field)
-  return z.object({});
-};
-
-/**
- * Get MCP tools formatted for the AI agent.
- * Routes tool calls through the provided handleToolCall function.
- *
- * All agent-initiated tool calls are marked with source: 'agent' to distinguish
- * them from UI-initiated calls. This prevents duplicate entries in conversation
- * history since agent calls are already tracked by the AI SDK.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const getMcpToolsForAgent = async (
-  handleToolCall: (params: {
-    serverName: string;
-    toolName: string;
-    args: Record<string, unknown>;
-    instanceId?: string;
-    source: "agent" | "ui";
-  }) => Promise<unknown>
-): Promise<Record<string, unknown>> => {
-  // Refresh dev MCP tools before building the agent's tool map.
-  // During development, MCP servers restart via tsx watch and the cached
-  // tool list becomes stale. Without this, the AI SDK throws
-  // AI_NoSuchToolError for new/renamed tools before execute() is reached.
-  await refreshDevConnectionTools();
-
-  const allTools = getAllTools();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const agentTools: Record<string, any> = {};
-
-  for (const t of allTools) {
-    // Use the MCP tool's inputSchema directly - no _meta injection needed.
-    // Pip routing is handled by Control Plane via instanceId lookup when
-    // the agent passes instanceId in the tool args.
-    const zodSchema = jsonSchemaToZod(t.inputSchema);
-
-    agentTools[t.name] = tool({
-      description: t.description,
-      inputSchema: zodSchema,
-      // providerOptions: {
-      //   anthropic: {
-      //     cacheControl: { type: 'ephemeral' }
-      //   }
-      // },
-      execute: async (args: Record<string, unknown>) => {
-        try {
-          // Route through handleToolCall in controlPlane.
-          // Control Plane will look up the pip by instanceId if present in args.
-          // Mark as 'agent' source - these calls are already in the AI SDK's conversation history.
-          const result = await handleToolCall({
-            serverName: t.serverName,
-            toolName: t.name,
-            args,
-            source: "agent",
-          });
-          return result;
-        } catch (error) {
-          console.error(`[Agent Tool] ${t.name} failed:`, error);
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
-        }
-      },
-    });
-  }
-
-  return agentTools;
-};
 
 /**
  * Result of reading a UI resource - includes HTML content and icon.
@@ -3425,16 +3381,17 @@ const isSessionInvalidError = (error: unknown): boolean => {
  * renamed it), createConnection handles the re-keying and UI cleanup.
  */
 const reconnectServer = async (serverName: string): Promise<void> => {
+  console.debug(`[PipLifecycle] reconnectServer START ${serverName}`);
   await closeConnection({ name: serverName });
 
   // Create new connection — createConnection handles name reconciliation
   await getConnection(serverName);
 
-  // Refresh pips for this MCP so stale pips get new HTML content
-  // and pips whose resources no longer exist are cleaned up.
-  // Without this, session-error reconnects leave stale pips with
-  // broken AppBridge connections stuck in loading state.
-  await refreshPipsForMcp({ mcpName: serverName });
+  // Structural reconciliation — close pips whose resources no longer exist.
+  // Does NOT refresh HTML content. The existing pip keeps its current
+  // (working) HTML until the UI build completes and the "App UI reloaded"
+  // stdout watcher triggers refreshAllPipsForMcp.
+  await reconcilePipsForMcp({ mcpName: serverName });
 
   // Notify renderer so sidebar refreshes resource list
   const mainWindow = getMainWindow();
@@ -3445,51 +3402,6 @@ const reconnectServer = async (serverName: string): Promise<void> => {
   console.log(`[MCP] Reconnected to ${serverName}`);
 };
 
-/**
- * Refresh tools for development MCP connections.
- *
- * During development, MCP servers may restart (e.g., tsx watch file changes)
- * without the client knowing. The cached tool definitions become stale,
- * causing AI_NoSuchToolError when the model tries to call new/renamed tools.
- *
- * This re-lists tools from each dev HTTP connection before the agent is
- * created. If the session is invalid (server restarted), a full reconnect
- * is triggered first so the agent always has the latest tool definitions.
- *
- * Only runs in development mode and only targets HTTP connections with
- * spawned processes (dev MCPs).
- */
-const refreshDevConnectionTools = async (): Promise<void> => {
-  if (app.isPackaged) return;
-
-  for (const [name, conn] of connections.entries()) {
-    // Only refresh streamable-http connections with spawned processes.
-    // These are the dev MCPs that restart via tsx watch / npm run dev.
-    if (conn.transportType !== "streamable-http" || !conn.spawnedProcess) continue;
-
-    try {
-      const toolsResult = await conn.client.listTools();
-      const freshTools = parseToolsFromServer({ serverName: name, rawTools: toolsResult.tools });
-
-      // Only update if tools actually changed to avoid unnecessary churn
-      const oldNames = Array.from(conn.tools.keys()).sort().join(",");
-      const newNames = Array.from(freshTools.keys()).sort().join(",");
-      if (oldNames !== newNames) {
-        console.log(`[MCP] Tools changed for ${name}: [${oldNames}] → [${newNames}]`);
-        conn.tools = freshTools;
-        // Refresh instructions too since the server may have updated them
-        conn.instructions = conn.client.getInstructions();
-      }
-    } catch (error) {
-      if (isSessionInvalidError(error)) {
-        console.log(`[MCP] Session invalid for ${name} (server likely restarted), reconnecting...`);
-        await reconnectServer(name);
-      } else {
-        console.warn(`[MCP] Failed to refresh tools for ${name}:`, error);
-      }
-    }
-  }
-};
 
 /**
  * Call a tool on an MCP server.

@@ -154,20 +154,6 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const hydratingSessionRef = useRef(true);
 
   /**
-   * Tracks whether an MCP server restarted while the agent was streaming.
-   * Set to true by the mcp:restarted IPC listener, cleared after auto-continuation.
-   */
-  const mcpRestartedDuringStreamRef = useRef(false);
-
-  /**
-   * Prevents infinite auto-continuation loops.
-   * Set to true after the first auto-continue fires for a given user message.
-   * Reset to false when the user sends a new message (in handleSubmit).
-   * This hard-caps auto-continuation at 1 retry per user message.
-   */
-  const hasAutoContinuedRef = useRef(false);
-
-  /**
    * Separate state for UI-injected messages (pip events, UI tool calls).
    *
    * CRITICAL: These messages MUST be kept separate from useChat's messages.
@@ -852,11 +838,6 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       if (isSessionBusy) return;
       if (!finalContent.trim() && images.length === 0) return;
 
-      // Reset auto-continuation tracking for the new user message.
-      // This allows 1 auto-continue per user-initiated message.
-      hasAutoContinuedRef.current = false;
-      mcpRestartedDuringStreamRef.current = false;
-
       // Re-enable auto-scroll when user sends a new message
       userScrolledUpRef.current = false;
 
@@ -930,61 +911,6 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       sendMessage({ text: nextMessage });
     }
   }, [isStreaming, messageQueue, sendMessage]);
-
-  /**
-   * Listen for MCP restart events during active streaming.
-   * When an MCP server restarts (e.g., tsx watch file changes), the agent's
-   * tool map becomes stale and the current stream may terminate. This listener
-   * captures that a restart happened so we can auto-continue with fresh tools.
-   *
-   * The listener is only active while streaming to avoid false positives
-   * from restarts that happen between user messages (those are handled by
-   * refreshDevConnectionTools before agent creation).
-   */
-  useEffect(() => {
-    if (!isStreaming) return;
-
-    const cleanup = window.electronAPI.mcp.onRestarted(() => {
-      console.log("[ViewChat] MCP restarted during active stream — will auto-continue");
-      mcpRestartedDuringStreamRef.current = true;
-    });
-
-    return cleanup;
-  }, [isStreaming]);
-
-  /**
-   * Auto-continue the agent after an MCP restart terminates the stream.
-   *
-   * When an MCP server restarts mid-stream, the agent's tool calls may fail
-   * because its tool map is stale. The stream ends, but the user shouldn't
-   * have to manually re-prompt. This effect detects that scenario and
-   * automatically sends a continuation message so a new agent is created
-   * with fresh tools and picks up where the previous one left off.
-   *
-   * Infinite loop prevention: hasAutoContinuedRef caps this at 1 retry
-   * per user message. It's reset in handleSubmit when the user sends
-   * a new message.
-   */
-  useEffect(() => {
-    if (
-      !isStreaming &&
-      mcpRestartedDuringStreamRef.current &&
-      !hasAutoContinuedRef.current
-    ) {
-      mcpRestartedDuringStreamRef.current = false;
-      hasAutoContinuedRef.current = true;
-
-      // Brief delay to let the UI settle after the previous stream ends
-      const timer = setTimeout(() => {
-        console.log("[ViewChat] Auto-continuing after MCP restart");
-        sendMessage({
-          text: "[System: MCP tools were refreshed. Continue where you left off with the updated tools.]",
-        });
-      }, 500);
-
-      return () => clearTimeout(timer);
-    }
-  }, [isStreaming, sendMessage]);
 
   /**
    * Listen for pip destroyed events and inject into conversation history.
@@ -1295,7 +1221,13 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                             input?: unknown;
                             output?: unknown;
                           };
-                          const toolName = part.type.substring(5);
+                          // For the mcp_tool proxy, show the actual serverName/toolName
+                          // from the input args instead of the generic "mcp_tool" label
+                          const rawToolName = part.type.substring(5);
+                          const toolInput = toolPart.input as { serverName?: string; toolName?: string } | undefined;
+                          const toolName = rawToolName === "mcp_tool" && toolInput?.serverName && toolInput?.toolName
+                            ? `${toolInput.serverName}/${toolInput.toolName}`
+                            : rawToolName;
 
                           const isCurrentStreamingMessage =
                             isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
