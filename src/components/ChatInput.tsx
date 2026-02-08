@@ -1188,7 +1188,7 @@ export function ChatInput({
               <button
                 type="button"
                 disabled={auth.providerType !== "anthropic" || isUpdatingChatModel}
-                className="h-6 min-w-[120px] rounded-md border border-border-secondary bg-background-secondary px-2.5 text-xs text-text-primary inline-flex items-center justify-between gap-2 transition-colors hover:bg-background-tertiary disabled:opacity-50 disabled:cursor-not-allowed"
+                className="h-6 min-w-[120px] rounded-md px-2.5 text-xs text-text-secondary inline-flex items-center justify-between gap-2 transition-colors hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{modelLabel}</span>
                 <CaretDown size={10} weight="bold" className="text-text-secondary" />

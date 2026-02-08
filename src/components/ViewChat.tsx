@@ -1225,9 +1225,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                           // from the input args instead of the generic "mcp_tool" label
                           const rawToolName = part.type.substring(5);
                           const toolInput = toolPart.input as { serverName?: string; toolName?: string } | undefined;
-                          const toolName = rawToolName === "mcp_tool" && toolInput?.serverName && toolInput?.toolName
-                            ? `${toolInput.serverName}/${toolInput.toolName}`
-                            : rawToolName;
+                          const isMcpProxy = rawToolName === "mcp_tool" && !!toolInput?.serverName && !!toolInput?.toolName;
+                          const toolServerName = isMcpProxy ? toolInput!.serverName : null;
+                          const toolDisplayName = isMcpProxy ? toolInput!.toolName : rawToolName;
 
                           const isCurrentStreamingMessage =
                             isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
@@ -1323,19 +1323,27 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                             >
                               <div
                                 className={cn(
-                                  "flex items-center gap-2",
+                                  "flex items-center gap-1.5",
                                   hasOutput && "cursor-pointer"
                                 )}
                                 onClick={() => hasOutput && toggleToolExpanded(toolId)}
                               >
-                                {isRunning && (
-                                  <Spinner size={12} />
-                                )}
                                 {isError && (
                                   <span className="text-red-400 text-xs font-bold">✕</span>
                                 )}
-                                <span className="text-text-primary/70 font-medium">{toolName}</span>
-                                {hasOutput && (
+                                {toolServerName && (
+                                  <>
+                                    <span className="text-text-primary/70 font-medium">{toolServerName}</span>
+                                    <CaretRight size={10} weight="bold" className="text-text-secondary/50" />
+                                  </>
+                                )}
+                                <span className="text-text-primary/70 font-medium">{toolDisplayName}</span>
+                                {isRunning && (
+                                  <span className="ml-auto">
+                                    <Spinner size={12} />
+                                  </span>
+                                )}
+                                {hasOutput && !isRunning && (
                                   <span className="text-text-secondary ml-auto">
                                     {isExpanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
                                   </span>
