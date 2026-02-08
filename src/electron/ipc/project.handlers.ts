@@ -537,9 +537,6 @@ export const registerProjectHandlers = () => {
               local_directory: { path: projectRoot },
             },
             mcps: [
-              { name: "browser", enabled: true },
-              { name: "todos", enabled: true },
-              { name: "notes", enabled: true },
               { name: "ide", enabled: true },
               { name: "terminal", enabled: true },
               { name: "devkit", enabled: true },

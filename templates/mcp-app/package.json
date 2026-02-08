@@ -13,7 +13,7 @@
     "start": "node dist/server/index.js"
   },
   "dependencies": {
-    "open-mcp-app": "file:./lib/open-mcp-app",
+    "open-mcp-app": "0.0.7",
     "nanoid": "^5.0.0",
     "zod": "^3.22.0"
   },

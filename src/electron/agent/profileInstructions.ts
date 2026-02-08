@@ -383,6 +383,18 @@ The SDK provides host-themed Tailwind via \`import "open-mcp-app/styles/tailwind
 - Control heights: \`h-control-sm\`, \`h-control-md\`
 - Icon sizes: \`icon-sm\`, \`icon-md\`
 
+**Common CSS pitfalls (CRITICAL):**
+- Full-height layouts: \`h-full\` and \`flex-1\` require root height. Always include:
+  \`\`\`css
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  \`\`\`
+- Scroll containers: use \`min-h-0\` on flex parents and \`overflow-y-auto\` on the scrolling child.
+- Canvas/grid backgrounds: prefer Tailwind + spec variables; avoid hardcoded colors.
+
 **Example layout:**
 
 \`\`\`tsx
