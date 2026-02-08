@@ -104,16 +104,18 @@ const DEV_MCP_INSTRUCTIONS = `Profile: dev-mcp
 
 # MCP App Development
 
-You are building an MCP App using the \`open-mcp-app\` SDK from \`desktop/artifacts/sdk\`.
+You are building an MCP App using the \`open-mcp-app\` SDK.
+
+The project starts from a minimal skeleton template with no tools and a placeholder UI. You build it from scratch based on the user's request.
 
 ## Architecture & Principles
-
-These are the best practices and principles for building MCP Apps.
 
 **Server** (\`src/server/\`): MCP protocol, tools, data logic. Runs in Node.js.
 **UI** (\`src/ui/\`): React components rendered in host iframe. No direct server access.
 
 Communication flows: Agent -> Tool -> Server -> Tool Result -> UI (via host)
+
+**Build incrementally.** Add one tool at a time. Verify it works before adding the next. Don't build the entire server and UI in one pass — transient crashes from partial state are hard to debug and leave the user with a broken experience.
 
 ## Project Structure
 
@@ -144,7 +146,7 @@ const app = createApp({
 app.resource({
   name: "My App",
   uri: "ui://my-app/main",
-  html: "../../dist/ui/main.html",
+  html: "ui/index.html",
   displayModes: ["pip"],
   instanceMode: "multiple", // or "single" - see below
   views: {
@@ -155,6 +157,8 @@ app.resource({
 
 app.start();
 \`\`\`
+
+**Resource icon:** Add an SVG icon string using \`icon: { svg: "<svg>...</svg>", alt: "My App" }\`. Use Phosphor icons with \`currentColor\` fill for host theming.
 
 ## Instance Mode Decision
 
@@ -196,6 +200,14 @@ app.tool(
 - \`["model"]\`: Only AI can call (background operations)
 - \`["model", "app"]\`: AI and UI can call (most tools)
 - Tools without \`ui\` don't open/update UI
+
+## Multi-File Editing Discipline
+
+When changing types, interfaces, or data structures that are shared across files, update ALL files that reference them in a single pass. Partial updates cause the server to crash with missing export errors because \`tsx watch\` restarts the server after each file save.
+
+**Bad pattern:** Edit \`lib/types.ts\` to rename a field, then edit \`tools/items.ts\` second. The server crashes between the two edits because \`items.ts\` still imports the old name.
+
+**Good pattern:** Edit all files that share the changed interface in quick succession. Keep shared types minimal and stable.
 
 ## UI: React + SDK
 
@@ -248,6 +260,22 @@ function ListView() {
   // View switches automatically via useViews when tool completes
 }
 \`\`\`
+
+## Defensive UI Patterns
+
+Data arrives asynchronously via tool results. The UI renders before data exists, so always handle missing data gracefully:
+
+\`\`\`tsx
+// GOOD: Guard against missing data
+const items = data?.items ?? [];
+const title = data?.item?.title ?? "Untitled";
+
+// BAD: Will throw TypeError if data is undefined
+const items = data.items;
+const title = data.item.title;
+\`\`\`
+
+Always provide fallback UI for empty/loading states. Never assume \`data\` from \`useViews\` or tool results will be defined on first render.
 
 ## Widget State
 
