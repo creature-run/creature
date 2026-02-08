@@ -40,9 +40,10 @@
  */
 
 import { BrowserWindow, app } from "electron";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, restartMcp, type ResourceIcon, type Views } from "./client";
+import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, restartMcp, getAllDevMcpInfo, type ResourceIcon, type Views } from "./client";
 import { getPopoutWindow } from "../window/popoutWindows";
 import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
@@ -84,6 +85,65 @@ const BROWSER_MCP_NAME = "browser";
 const DEVKIT_MCP_NAME = "devkit";
 
 /**
+ * Parsed TypeScript error from tsc output.
+ */
+interface TscError {
+  file: string;
+  line: number;
+  col: number;
+  code: string;
+  message: string;
+}
+
+/**
+ * Run `npx tsc --noEmit` in a directory and parse the output into structured errors.
+ *
+ * Uses `--pretty false` for machine-readable output format:
+ *   src/server/tools/items.ts(16,3): error TS2353: Object literal may only specify known properties...
+ *
+ * Returns an empty errors array when type checking passes.
+ * Rejects only on spawn/execution failures, not on type errors (those are returned as data).
+ */
+const runTypecheck = ({ cwd }: { cwd: string }): Promise<{ errors: TscError[] }> => {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "npx",
+      ["tsc", "--noEmit", "--pretty", "false"],
+      { cwd, timeout: 30_000, shell: true, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        // tsc exits with code 2 when there are type errors — that's not a failure
+        const output = (stdout || "") + (stderr || "");
+
+        if (err && err.killed) {
+          reject(new Error("Typecheck timed out after 30 seconds"));
+          return;
+        }
+
+        // Parse tsc output lines into structured errors
+        // Format: file(line,col): error TSxxxx: message
+        const errorPattern = /^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/;
+        const errors: TscError[] = [];
+
+        for (const line of output.split("\n")) {
+          const match = line.trim().match(errorPattern);
+          if (match) {
+            errors.push({
+              file: match[1],
+              line: parseInt(match[2], 10),
+              col: parseInt(match[3], 10),
+              code: match[4],
+              message: match[5],
+            });
+          }
+        }
+
+        resolve({ errors });
+      }
+    );
+  });
+};
+
+/**
  * Handle devkit tool calls.
  *
  * All devkit tools are executed by the Host, not the MCP server.
@@ -92,6 +152,7 @@ const DEVKIT_MCP_NAME = "devkit";
  * Tools:
  * - devkit_get_logs: Read from LogAggregator
  * - devkit_reload_mcp_app: Restart an MCP App via restartMcp()
+ * - devkit_typecheck: Run tsc --noEmit on a dev MCP App
  * - devkit_get_mcp_app_sdk_docs: Read SDK reference from disk
  */
 const handleDevkitToolCall = async ({
@@ -159,6 +220,54 @@ const handleDevkitToolCall = async ({
       return {
         content: [{ type: "text", text: `Failed to restart MCP App "${mcpName}": ${errorMessage}` }],
         structuredContent: { type: "refresh", success: false, mcpName, error: errorMessage },
+        isError: true,
+      };
+    }
+  }
+
+  if (action === "typecheck") {
+    const mcpName = args.mcpName as string;
+    if (!mcpName) {
+      return {
+        content: [{ type: "text", text: "Error: mcpName is required" }],
+        structuredContent: { type: "typecheck", success: false, mcpName: "", error: "mcpName is required" },
+        isError: true,
+      };
+    }
+
+    // Find the dev MCP's project directory
+    const devMcps = getAllDevMcpInfo();
+    const target = devMcps.find((d) => d.name === mcpName);
+    if (!target) {
+      return {
+        content: [{ type: "text", text: `Error: "${mcpName}" is not a development MCP App (available: ${devMcps.map((d) => d.name).join(", ") || "none"})` }],
+        structuredContent: { type: "typecheck", success: false, mcpName, error: "Not a dev MCP" },
+        isError: true,
+      };
+    }
+
+    try {
+      const result = await runTypecheck({ cwd: target.path });
+      if (result.errors.length === 0) {
+        return {
+          content: [{ type: "text", text: `TypeScript type check passed — no errors in "${mcpName}"` }],
+          structuredContent: { type: "typecheck", success: true, mcpName, errors: [] },
+        };
+      }
+
+      const summary = result.errors
+        .map((e) => `${e.file}(${e.line},${e.col}): ${e.code} — ${e.message}`)
+        .join("\n");
+
+      return {
+        content: [{ type: "text", text: `TypeScript found ${result.errors.length} error(s) in "${mcpName}":\n\n${summary}` }],
+        structuredContent: { type: "typecheck", success: false, mcpName, errors: result.errors },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        content: [{ type: "text", text: `Failed to run typecheck on "${mcpName}": ${errorMessage}` }],
+        structuredContent: { type: "typecheck", success: false, mcpName, error: errorMessage },
         isError: true,
       };
     }
@@ -246,6 +355,13 @@ export interface PipInstance {
     toolName: string;
     arguments: Record<string, unknown>;
   };
+  /**
+   * Whether the pip's UI has reported a runtime error.
+   * When true, refreshSinglePip will force a refresh even if the
+   * HTML content is unchanged — giving the iframe a fresh render
+   * attempt after the underlying code may have been fixed.
+   */
+  hasUiError?: boolean;
 }
 
 // Pip Instance registry
@@ -372,7 +488,7 @@ export const createPipInstance = async ({
     resourceUri,
     serverName,
     toolName,
-    title: title || "",
+    title: title || deriveResourceTitle(resourceUri),
     htmlContent,
     icon,
     createdAt: Date.now(),
@@ -511,10 +627,16 @@ export const refreshSinglePip = async ({
 
     // Skip refresh if HTML content hasn't changed — avoids wasteful iframe
     // remounts when both the HMR handler and stdout watcher fire for the
-    // same vite build.
-    if (htmlContent === pip.htmlContent) {
+    // same vite build. Exception: if the pip has a UI error, force the
+    // refresh so the iframe gets a clean re-render attempt. The error
+    // overlay blocks the UI until this happens, even if the underlying
+    // code was fixed via a server-side-only change.
+    if (htmlContent === pip.htmlContent && !pip.hasUiError) {
       console.debug(`[PipLifecycle] refresh skipped (HTML unchanged)`, { instanceId });
       return { success: true };
+    }
+    if (htmlContent === pip.htmlContent && pip.hasUiError) {
+      console.debug(`[PipLifecycle] forcing refresh despite unchanged HTML (pip has UI error)`, { instanceId });
     }
 
     // Guard against replacing working HTML with broken/incomplete HTML.
@@ -544,6 +666,7 @@ export const refreshSinglePip = async ({
     pip.htmlContent = htmlContent;
     pip.icon = icon;
     pip.ready = false;
+    pip.hasUiError = false;
 
     let resolveReady: () => void = () => {};
     const readyPromise = new Promise<void>((resolve) => {
@@ -806,6 +929,21 @@ export const getPipInstance = (instanceId: string): PipInstance | undefined => {
 };
 
 /**
+ * Mark all pips for a given MCP server as having a UI error.
+ * Called when the renderer reports a runtime error from the iframe.
+ * This flag causes refreshSinglePip to force a refresh even when
+ * the HTML content is unchanged, giving the iframe a fresh render
+ * attempt after the underlying code may have been fixed.
+ */
+export const markPipUiError = ({ serverName }: { serverName: string }): void => {
+  for (const pip of pipInstances.values()) {
+    if (pip.serverName === serverName) {
+      pip.hasUiError = true;
+    }
+  }
+};
+
+/**
  * Update a pip's title.
  * Used by browser pips to sync the webpage title to the pip tab.
  */
@@ -914,18 +1052,13 @@ export const launchResourcePip = async ({
   const instanceId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   try {
-    // Extract resource name from URI for the title (e.g., "ui://server/dashboard" -> "dashboard")
     const resourceName = resourceUri.split("/").pop() || "App";
-    // Capitalize first letter for a cleaner display title
-    const formattedName = resourceName.replace(/-/g, " ").replace(/_/g, " ");
-    const title = formattedName.charAt(0).toUpperCase() + formattedName.slice(1);
 
     const pip = await createPipInstance({
       resourceUri,
       serverName,
       toolName: resourceName,
       instanceId,
-      title,
       triggeredByTool: false,
     });
 
@@ -1018,6 +1151,19 @@ const extractInstanceId = (result: unknown): string | undefined => {
   }
 
   return undefined;
+};
+
+/**
+ * Derive a human-readable title from a resource URI.
+ * Extracts the last segment, replaces dashes/underscores with spaces,
+ * and capitalizes the first letter.
+ *
+ * e.g. "ui://devkit/devkit" -> "Devkit", "ui://browser/main" -> "Main"
+ */
+const deriveResourceTitle = (resourceUri: string): string => {
+  const segment = resourceUri.split("/").pop() || "App";
+  const formatted = segment.replace(/[-_]/g, " ");
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 };
 
 /**

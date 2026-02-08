@@ -16,6 +16,8 @@ import { ipcMain } from "electron";
 import { logAggregator, type LogLevel } from "../logging";
 import { openDevConsoleWindow } from "../window/devConsoleWindow";
 import { setCurrentConversation } from "./chat.handlers";
+import { bufferUiError } from "../mcp/client";
+import { markPipUiError } from "../mcp/controlPlane";
 
 /**
  * Register IPC handlers for the Dev Console.
@@ -39,6 +41,19 @@ export const registerDevConsoleHandlers = () => {
       level: data.level as LogLevel,
       message: data.message,
     });
+
+    // Buffer error-level UI logs so the agent's prepareStep can inject
+    // them as system messages. This surfaces UI runtime errors (TypeError,
+    // unhandled rejections, etc.) directly to the model for self-correction.
+    // Also mark pips for this MCP as having UI errors so the next pip
+    // refresh forces a re-render even if the HTML content is unchanged.
+    if (data.level === "error") {
+      bufferUiError({
+        serverName: data.mcpServer,
+        message: data.message,
+      });
+      markPipUiError({ serverName: data.mcpServer });
+    }
   });
 
   /**

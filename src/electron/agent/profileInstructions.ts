@@ -437,6 +437,10 @@ if (exp.kvIsAvailable()) {
 
 **CRITICAL: NEVER rebuild the server** - HMR handles UI changes automatically. Just edit code and it reloads.
 
+**vite.config.ts is name-independent.** The UI output path (\`dist/ui/\`) does not depend on the app name. You should NOT need to change \`vite.config.ts\` when renaming or transforming the app.
+
+**Debugging type errors:** Use \`devkit_typecheck\` to run TypeScript type checking on the MCP App. This catches issues like wrong parameter names that \`tsx watch\` won't catch (it only transpiles, no type checking). Use this when a tool returns unexpected errors like "not found" — it's often a parameter name mismatch.
+
 **If something isn't working**, the user should check the Dev Console (View -> Dev Console):
 - Server logs (use \`console.error()\` - stdout is MCP protocol)
 - System prompt and context

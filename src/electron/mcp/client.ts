@@ -1792,6 +1792,10 @@ const spawnHttpServerProcess = async (
     const stripped = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\[2J\[3J\[H/g, "");
     if (!stripped.trim()) return;
 
+    // Collect lines that match server crash patterns so we can buffer
+    // the full multi-line error message for the agent's prepareStep.
+    const crashLines: string[] = [];
+
     // Split by newlines and log each line separately
     for (const line of stripped.split("\n")) {
       const trimmed = line.trim();
@@ -1807,6 +1811,21 @@ const spawnHttpServerProcess = async (
         sourceName: serverName,
         level,
         message: trimmed,
+      });
+
+      // Check if this line matches a known server crash pattern.
+      // If so, collect it for the pending error buffer so the agent
+      // sees the crash immediately in prepareStep.
+      if (isError && SERVER_CRASH_PATTERNS.some((p) => p.test(trimmed))) {
+        crashLines.push(trimmed);
+      }
+    }
+
+    // Buffer crash errors so the agent sees them without calling devkit_get_logs
+    if (crashLines.length > 0) {
+      bufferServerError({
+        serverName,
+        message: crashLines.join("\n"),
       });
     }
   };
@@ -3148,6 +3167,84 @@ export const getAllTools = (): CachedTool[] => {
     }
   }
   return allTools;
+};
+
+// =============================================================================
+// Pending Server Errors
+// =============================================================================
+
+/**
+ * Represents an error detected from an MCP process or its UI.
+ * Buffered and drained by the agent's prepareStep so the model
+ * is immediately aware of errors without needing to call devkit_get_logs.
+ */
+interface PendingAgentError {
+  /** Where the error originated: "server" for tsx watch crashes, "ui" for iframe runtime errors */
+  source: "server" | "ui";
+  serverName: string;
+  message: string;
+  timestamp: string;
+}
+
+/**
+ * Buffer for errors detected from MCP processes and their UIs.
+ * Drained by the agent's prepareStep hook, which injects them as a system
+ * message so the model sees crashes and UI errors immediately and can self-correct.
+ */
+const pendingAgentErrors: PendingAgentError[] = [];
+
+/**
+ * Patterns that indicate a server crash in tsx watch output.
+ * These are fatal errors that kill the running server process,
+ * which tsx watch then automatically restarts.
+ */
+const SERVER_CRASH_PATTERNS = [
+  /^SyntaxError:/,
+  /^TypeError:/,
+  /^ReferenceError:/,
+  /^Error \[ERR_MODULE_NOT_FOUND\]/,
+  /^Error: Cannot find module/,
+  /does not provide an export named/,
+  /is not a function/,
+  /Cannot read properties of (null|undefined)/,
+];
+
+/**
+ * Buffer a server crash error for the agent to see in the next prepareStep.
+ * Called by handleProcessOutput when stderr output matches crash patterns.
+ */
+const bufferServerError = ({ serverName, message }: { serverName: string; message: string }): void => {
+  pendingAgentErrors.push({
+    source: "server",
+    serverName,
+    message,
+    timestamp: new Date().toISOString(),
+  });
+  console.debug(`[MCP] Buffered server error for agent: ${serverName} — ${message.slice(0, 120)}`);
+};
+
+/**
+ * Buffer a UI runtime error for the agent to see in the next prepareStep.
+ * Called by devconsole handlers when an error-level UI log arrives.
+ */
+export const bufferUiError = ({ serverName, message }: { serverName: string; message: string }): void => {
+  pendingAgentErrors.push({
+    source: "ui",
+    serverName,
+    message,
+    timestamp: new Date().toISOString(),
+  });
+  console.debug(`[MCP] Buffered UI error for agent: ${serverName} — ${message.slice(0, 120)}`);
+};
+
+/**
+ * Drain all pending errors (server + UI) and return them.
+ * Called by the agent's prepareStep hook so errors are injected as system
+ * messages and the buffer is cleared for the next step.
+ */
+export const drainPendingAgentErrors = (): PendingAgentError[] => {
+  if (pendingAgentErrors.length === 0) return [];
+  return pendingAgentErrors.splice(0);
 };
 
 /**

@@ -34,6 +34,7 @@ const app = createApp({
 Tools:
 - devkit_get_logs { filter?, mcpName? }: Fetch recent logs from Creature's aggregated log system. Filter by "all" (last 50), "current_mcp_app" (logs for a specific MCP App by name), or "errors" (error-level entries only).
 - devkit_reload_mcp_app { mcpName }: Restart an MCP App server and reload all its pip instances. Use this when the user has made code changes to their MCP App.
+- devkit_typecheck { mcpName }: Run TypeScript type checking (tsc --noEmit) on an MCP App. Returns structured errors with file, line, and message. Use this to catch type errors like wrong parameter names that tsx watch won't catch (it only transpiles, no type checking).
 - devkit_get_mcp_app_sdk_docs: Fetch the MCP App SDK reference documentation. Use this to learn how to build MCP Apps with the open-mcp-app SDK.
 - devkit_get_conversation: (App-only) Fetch the current conversation history for inspection.
 - devkit_get_system_prompt: (App-only) Fetch the current system prompt for inspection.
@@ -63,6 +64,7 @@ app.resource({
     "/": [
       "devkit_get_logs",
       "devkit_reload_mcp_app",
+      "devkit_typecheck",
       "devkit_get_mcp_app_sdk_docs",
       "devkit_get_conversation",
       "devkit_get_system_prompt",
@@ -122,6 +124,32 @@ app.tool(
   async () => ({
     data: { placeholder: true },
     text: "MCP App refreshed",
+  })
+);
+
+/**
+ * Run TypeScript type checking on an MCP App.
+ *
+ * Host-managed: the control plane spawns `npm run typecheck` in the
+ * MCP App's directory and parses the TSC output into structured errors.
+ * This handler is a no-op placeholder.
+ */
+app.tool(
+  "devkit_typecheck",
+  {
+    description: "Run TypeScript type checking (tsc --noEmit) on an MCP App. Catches type errors like wrong parameter names that tsx watch won't catch.",
+    input: z.object({
+      mcpName: z.string().describe("The MCP App server name to type-check"),
+    }),
+    ui: DEVKIT_UI_URI,
+    visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
+  },
+  async () => ({
+    data: { placeholder: true },
+    text: "Typecheck complete",
   })
 );
 

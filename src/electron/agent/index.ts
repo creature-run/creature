@@ -25,7 +25,7 @@ import { z } from "zod";
 import { app } from "electron";
 import { createPipTools } from "./tools";
 import { createProvider } from "./provider";
-import { getAllTools, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
+import { getAllTools, getDevMcpInfo, getCurrentProjectProfile, drainPendingAgentErrors } from "../mcp/client";
 import { getProfileInstructions } from "./profileInstructions";
 import {
   getActivePipsForPrompt,
@@ -455,17 +455,34 @@ export const createAgent = async ({
      * Runs before every model step in the tool loop.
      * Rebuilds the MCP tools listing from live CachedTool[] data
      * so the model always sees current tools — even mid-turn.
+     * Also drains any pending server crash errors and injects them
+     * so the model is immediately aware of crashes without needing
+     * to call devkit_get_logs.
      */
     prepareStep: async () => {
       const mcpToolsMessage = buildMcpToolsSystemMessage();
+
+      const dynamicMessages: SystemModelMessage[] = [
+        { content: mcpToolsMessage, role: "system" as const },
+      ];
+
+      // Drain pending errors (server crashes + UI runtime errors) and inject
+      // as a system message. This surfaces tsx watch crashes (SyntaxError,
+      // missing exports, etc.) and UI errors (TypeError, unhandled rejections)
+      // directly to the model so it can self-correct immediately.
+      const pendingErrors = drainPendingAgentErrors();
+      if (pendingErrors.length > 0) {
+        const errorLines = pendingErrors.map(
+          (e) => `[${e.source}:${e.serverName}] ${e.message}`
+        );
+        dynamicMessages.push({
+          content: `# Errors Detected\n\nThe following errors occurred in the MCP App. Fix them before continuing:\n\n${errorLines.join("\n\n")}`,
+          role: "system" as const,
+        });
+      }
+
       return {
-        system: [
-          ...systemPrompt,
-          {
-            content: mcpToolsMessage,
-            role: "system" as const,
-          },
-        ],
+        system: [...systemPrompt, ...dynamicMessages],
       };
     },
     /**
