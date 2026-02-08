@@ -2,3 +2,12 @@
  * App-specific CSS overrides.
  * Prefer Tailwind utility classes over custom CSS.
  */
+
+/**
+ * Full-height layout foundation.
+ * Ensures Tailwind's h-full works by giving the full chain a defined height.
+ */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}

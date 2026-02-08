@@ -3059,6 +3059,9 @@ export interface UIResourceInfo {
  * Get all UI resources from connected MCP servers.
  * Returns resources with `ui://` URI scheme for sidebar display.
  * Only returns unique resources (one per resourceUri across all servers).
+ *
+ * In dev-mcp profile, dev MCP resources are sorted to the top of the list
+ * so the app being developed is always the first icon in the sidebar.
  */
 export const getUIResources = (): UIResourceInfo[] => {
   const resources: UIResourceInfo[] = [];
@@ -3075,6 +3078,17 @@ export const getUIResources = (): UIResourceInfo[] => {
         });
       }
     }
+  }
+
+  // In dev-mcp profile, sort dev MCP resources to the top so the app
+  // being developed is always the first icon in the sidebar.
+  if (currentProjectProfile === "dev-mcp") {
+    const devMcpNames = new Set(devMcpPathToName.values());
+    resources.sort((a, b) => {
+      const aIsDev = devMcpNames.has(a.serverName) ? 0 : 1;
+      const bIsDev = devMcpNames.has(b.serverName) ? 0 : 1;
+      return aIsDev - bIsDev;
+    });
   }
   
   return resources;

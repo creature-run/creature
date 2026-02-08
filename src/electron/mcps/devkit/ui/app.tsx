@@ -171,30 +171,245 @@ const StatusBar = ({ children }: { children: React.ReactNode }) => (
 // =============================================================================
 
 /**
- * Color-coded badge for log severity levels.
- * Maps each level to a consistent color for quick visual scanning.
+ * Log level color map matching the DevConsole's CSS variables.
+ * Uses inline styles for exact color parity across dark/light mode.
  */
-const LevelBadge = memo(({ level }: { level: string }) => {
-  const colorMap: Record<string, string> = {
-    debug: "text-txt-tertiary bg-bg-secondary",
-    info: "text-blue-400 bg-blue-400/10",
-    notice: "text-blue-400 bg-blue-400/10",
-    warning: "text-yellow-400 bg-yellow-400/10",
-    error: "text-red-400 bg-red-400/10",
-    critical: "text-red-400 bg-red-400/10",
-  };
+const LOG_LEVEL_COLORS: Record<string, string> = {
+  debug: "#666666",
+  info: "#ABABAB",
+  notice: "#58A6FF",
+  warning: "#D29922",
+  error: "#F85149",
+  critical: "#F85149",
+  alert: "#F85149",
+  emergency: "#F85149",
+};
+
+/**
+ * Color palette for MCP server source labels.
+ * Each MCP gets a unique color assigned in order as they first appear.
+ * #7EE787 is reserved for Host logs and excluded from this palette.
+ */
+const MCP_COLOR_PALETTE = [
+  "#58A6FF", "#FFB347", "#F778BA", "#A5D6FF", "#FFA657",
+  "#D2A8FF", "#79C0FF", "#FDDF68", "#FF7B72", "#9ECBFF",
+  "#FFAB70", "#E0A458", "#F692CE", "#B392F0", "#FFCB6B",
+  "#89DDFF", "#C792EA", "#82AAFF", "#F07178", "#56D364",
+];
+
+const mcpColorCache = new Map<string, string>();
+let nextMcpColorIndex = 0;
+
+/**
+ * Assign a consistent color to an MCP server name.
+ * Colors are assigned in order from the palette and cached so
+ * the same server always gets the same color within a session.
+ */
+const getMcpColor = (mcpName: string): string => {
+  if (!mcpColorCache.has(mcpName)) {
+    mcpColorCache.set(mcpName, MCP_COLOR_PALETTE[nextMcpColorIndex % MCP_COLOR_PALETTE.length]);
+    nextMcpColorIndex++;
+  }
+  return mcpColorCache.get(mcpName)!;
+};
+
+/**
+ * Format a source label for display, matching DevConsole conventions.
+ * Host -> "Host", MCP -> "name [server]", UI -> "name [ui]"
+ */
+const getSourceDisplay = (entry: LogEntry): string => {
+  if (entry.source === "host") return "Host";
+  if (entry.sourceName) {
+    if (entry.source === "mcp") return `${entry.sourceName} [server]`;
+    if (entry.source === "ui") return `${entry.sourceName} [ui]`;
+    return entry.sourceName;
+  }
+  return entry.source;
+};
+
+/**
+ * Get the display color for a log entry's source label.
+ * Host logs get green (#7EE787), MCP/UI logs get a palette color.
+ */
+const getSourceColor = (entry: LogEntry): string | undefined => {
+  if (entry.source === "host") return "#7EE787";
+  if ((entry.source === "mcp" || entry.source === "ui") && entry.sourceName) {
+    return getMcpColor(entry.sourceName);
+  }
+  return undefined;
+};
+
+/**
+ * Format timestamp with milliseconds (HH:MM:SS.mmm).
+ * Matches the DevConsole's timestamp format for consistency.
+ */
+const formatTimestamp = (isoString: string): string => {
+  const d = new Date(isoString);
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `${h}:${m}:${s}.${ms}`;
+};
+
+/**
+ * Generate a short preview for a JSON object.
+ * Arrays show "Array(N)", objects show first 2 keys with ellipsis.
+ */
+const getJSONPreview = (obj: unknown): string => {
+  if (Array.isArray(obj)) return `Array(${obj.length})`;
+  if (typeof obj === "object" && obj !== null) {
+    const keys = Object.keys(obj);
+    if (keys.length <= 2) return `{ ${keys.join(", ")} }`;
+    return `{ ${keys.slice(0, 2).join(", ")}, ... }`;
+  }
+  return String(obj);
+};
+
+/**
+ * Recursively build syntax-highlighted JSX for a JSON value.
+ * Uses the same color scheme as the DevConsole:
+ *   keys: #79C0FF, strings: #A5D6FF, numbers: #FFA657,
+ *   booleans: #FF7B72, null: #8B949E
+ */
+const HighlightedJSON = memo(({ value, indent = 0 }: { value: unknown; indent?: number }) => {
+  const spaces = "  ".repeat(indent);
+  const innerSpaces = "  ".repeat(indent + 1);
+
+  if (value === null) return <span style={{ color: "#8B949E" }}>null</span>;
+  if (typeof value === "boolean") return <span style={{ color: "#FF7B72" }}>{String(value)}</span>;
+  if (typeof value === "number") return <span style={{ color: "#FFA657" }}>{String(value)}</span>;
+  if (typeof value === "string") return <span style={{ color: "#A5D6FF" }}>"{value}"</span>;
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <>{"[]"}</>;
+    return (
+      <>
+        {"[\n"}
+        {value.map((item, i) => (
+          <span key={i}>
+            {innerSpaces}
+            <HighlightedJSON value={item} indent={indent + 1} />
+            {i < value.length - 1 ? ",\n" : "\n"}
+          </span>
+        ))}
+        {spaces}{"]"}
+      </>
+    );
+  }
+
+  if (typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length === 0) return <>{"{}"}  </>;
+    return (
+      <>
+        {"{\n"}
+        {keys.map((key, i) => (
+          <span key={key}>
+            {innerSpaces}
+            <span style={{ color: "#79C0FF" }}>"{key}"</span>
+            {": "}
+            <HighlightedJSON value={(value as Record<string, unknown>)[key]} indent={indent + 1} />
+            {i < keys.length - 1 ? ",\n" : "\n"}
+          </span>
+        ))}
+        {spaces}{"}"}
+      </>
+    );
+  }
+
+  return <>{String(value)}</>;
+});
+
+/**
+ * Collapsible JSON viewer with preview toggle, copy button, and
+ * syntax-highlighted expanded content. Matches the DevConsole's
+ * collapsible JSON behavior and styling.
+ */
+const CollapsibleJSON = memo(({
+  json,
+  isExpanded,
+  onToggle,
+}: {
+  json: unknown;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(JSON.stringify(json, null, 2)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [json]);
 
   return (
-    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 uppercase ${colorMap[level] || "text-txt-secondary bg-bg-secondary"}`}>
-      {level.slice(0, 5)}
+    <span className="inline-flex flex-wrap items-center gap-0.5" style={{ maxWidth: "100%" }}>
+      <span
+        onClick={onToggle}
+        className="inline-flex items-center gap-1 cursor-pointer select-none rounded-sm px-1.5 transition-colors hover:bg-bg-secondary"
+        style={{ color: "var(--txt-tertiary)", border: "1px solid var(--bdr-secondary)", fontSize: "11px" }}
+      >
+        <span
+          className="inline-block transition-transform duration-150"
+          style={{ transform: isExpanded ? "rotate(90deg)" : "none" }}
+        >
+          ▶
+        </span>
+        {getJSONPreview(json)}
+      </span>
+      <span
+        onClick={handleCopy}
+        className="inline-flex items-center justify-center cursor-pointer rounded-sm transition-colors hover:bg-bg-secondary"
+        style={{
+          width: 20,
+          height: 20,
+          marginLeft: 4,
+          border: `1px solid ${copied ? "#7EE787" : "var(--bdr-secondary)"}`,
+          color: copied ? "#7EE787" : "var(--txt-tertiary)",
+          fontSize: 12,
+        }}
+        title="Copy JSON"
+      >
+        {copied ? (
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+            <path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z" />
+          </svg>
+        ) : (
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+            <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z" />
+          </svg>
+        )}
+      </span>
+      {isExpanded && (
+        <pre
+          className="mt-1 p-2 rounded-sm overflow-y-auto overflow-x-hidden"
+          style={{
+            width: "100%",
+            flexBasis: "100%",
+            border: "1px solid var(--bdr-secondary)",
+            fontFamily: "'SF Mono', Monaco, Inconsolata, 'Fira Mono', monospace",
+            fontSize: "11px",
+            lineHeight: 1.4,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            maxHeight: 300,
+            margin: 0,
+          }}
+        >
+          <HighlightedJSON value={json} />
+        </pre>
+      )}
     </span>
   );
 });
 
 /**
- * A single log entry row with expandable JSON content.
- * Tracks expanded state via the parent's expandedIds set so state
- * persists across data refreshes without resetting.
+ * A single log entry row matching the DevConsole's look and feel.
+ * Features colored log levels, MCP source colors, collapsible JSON
+ * with preview/syntax-highlighting, and copy support.
  */
 const LogRow = memo(({
   entry,
@@ -205,44 +420,44 @@ const LogRow = memo(({
   isExpanded: boolean;
   onToggle: () => void;
 }) => {
-  const time = new Date(entry.timestamp).toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
+  const time = formatTimestamp(entry.timestamp);
   const jsonContent = tryParseJSON(entry.message);
+  const sourceLabel = getSourceDisplay(entry);
+  const sourceColor = getSourceColor(entry);
+  const levelColor = LOG_LEVEL_COLORS[entry.level] || "#ABABAB";
 
   return (
-    <div className="border-b border-bdr-secondary">
-      <div
-        className="flex items-start gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary transition-colors cursor-pointer"
-        onClick={jsonContent ? onToggle : undefined}
+    <div
+      className="flex items-start gap-1.5 py-0.5 px-3 transition-colors hover:bg-bg-secondary"
+      style={{ fontFamily: "'SF Mono', Monaco, Inconsolata, 'Fira Mono', monospace", fontSize: "12px" }}
+    >
+      <span className="shrink-0 whitespace-nowrap" style={{ color: "var(--txt-tertiary)" }}>
+        {time}
+      </span>
+      <span
+        className="shrink-0 whitespace-nowrap uppercase"
+        style={{ color: levelColor, fontWeight: 600, fontSize: "11px" }}
       >
-        <span className="text-txt-tertiary font-mono shrink-0">{time}</span>
-        <LevelBadge level={entry.level} />
-        {entry.sourceName && (
-          <span className="text-txt-secondary font-mono shrink-0 max-w-[80px] truncate">
-            {entry.sourceName}
-          </span>
+        {entry.level}
+      </span>
+      <span
+        className="shrink-0 whitespace-nowrap truncate"
+        style={{ color: sourceColor, fontWeight: 600, fontSize: "11px", maxWidth: 120 }}
+        title={sourceLabel}
+      >
+        {sourceLabel}
+      </span>
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words" style={{ color: "var(--txt-primary)" }}>
+        {jsonContent ? (
+          <>
+            {jsonContent.prefix && <span style={{ color: "var(--txt-primary)" }}>{jsonContent.prefix}</span>}
+            <CollapsibleJSON json={jsonContent.json} isExpanded={isExpanded} onToggle={onToggle} />
+            {jsonContent.suffix && <span style={{ color: "var(--txt-primary)" }}>{jsonContent.suffix}</span>}
+          </>
+        ) : (
+          entry.message
         )}
-        <span className="text-txt-primary break-all whitespace-pre-wrap min-w-0 flex-1">
-          {jsonContent ? jsonContent.prefix || entry.message.slice(0, 80) : entry.message}
-        </span>
-        {jsonContent && (
-          <span className="text-txt-tertiary shrink-0 text-[10px]">
-            {isExpanded ? "▼" : "▶"}
-          </span>
-        )}
-      </div>
-      {isExpanded && jsonContent && (
-        <pre className="px-3 py-2 text-[11px] font-mono text-txt-secondary bg-bg-secondary/50 whitespace-pre-wrap break-all overflow-x-hidden">
-          {jsonContent.prefix && <span className="text-txt-tertiary">{jsonContent.prefix}</span>}
-          {JSON.stringify(jsonContent.json, null, 2)}
-          {jsonContent.suffix && <span className="text-txt-tertiary">{jsonContent.suffix}</span>}
-        </pre>
-      )}
+      </span>
     </div>
   );
 });
@@ -285,7 +500,7 @@ const LogsView = ({
       <Toolbar onRefresh={onRefresh} isLoading={isLoading}>
         <span>{data?.filter === "errors" ? "Errors only" : data?.filter === "current_mcp_app" && data?.mcpName ? `MCP: ${data.mcpName}` : "All logs"}</span>
       </Toolbar>
-      <div ref={parentRef} className="flex-1 overflow-y-auto min-h-0">
+      <div ref={parentRef} className="flex-1 overflow-y-auto min-h-0 py-1">
         {logs.length === 0 ? (
           <EmptyState message="No logs yet" />
         ) : (
@@ -329,6 +544,17 @@ const LogsView = ({
 // =============================================================================
 // Conversation View
 // =============================================================================
+
+/**
+ * Role color map for conversation message labels.
+ * Uses the same inline-style approach as log level colors for consistency.
+ */
+const ROLE_COLORS: Record<string, string> = {
+  user: "#58A6FF",
+  assistant: "#7EE787",
+  system: "#D29922",
+  tool: "#D2A8FF",
+};
 
 /**
  * Count tool calls in a conversation message.
@@ -391,22 +617,96 @@ const getMessagePreview = (msg: ConversationMessage): string => {
 };
 
 /**
- * Role badge color for conversation messages.
+ * Recursively render a JSON value as an interactive tree with expand/collapse
+ * on objects and arrays. Primitive values are syntax-highlighted inline.
+ * Matches the DevConsole's JSON color scheme:
+ *   keys: #79C0FF, strings: #A5D6FF, numbers: #FFA657,
+ *   booleans: #FF7B72, null: #8B949E
  */
-const roleBadgeClass = (role: string): string => {
-  switch (role) {
-    case "user": return "text-blue-400 bg-blue-400/10";
-    case "assistant": return "text-green-400 bg-green-400/10";
-    case "system": return "text-yellow-400 bg-yellow-400/10";
-    case "tool": return "text-purple-400 bg-purple-400/10";
-    default: return "text-txt-secondary bg-bg-secondary";
+const JSONTreeNode = ({
+  value,
+  indent = 0,
+  defaultExpanded = false,
+}: {
+  value: unknown;
+  indent?: number;
+  defaultExpanded?: boolean;
+}) => {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const innerSpaces = "  ".repeat(indent + 1);
+  const closingSpaces = "  ".repeat(indent);
+
+  if (value === null) return <span style={{ color: "#8B949E" }}>null</span>;
+  if (typeof value === "boolean") return <span style={{ color: "#FF7B72" }}>{String(value)}</span>;
+  if (typeof value === "number") return <span style={{ color: "#FFA657" }}>{String(value)}</span>;
+
+  if (typeof value === "string") {
+    // Long strings get a truncated preview when in a tree context
+    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return <span style={{ color: "#A5D6FF" }}>"{escaped}"</span>;
   }
+
+  const isArray = Array.isArray(value);
+  const entries: [string, unknown][] = isArray
+    ? (value as unknown[]).map((v, i) => [String(i), v])
+    : Object.entries(value as Record<string, unknown>);
+  const openBrace = isArray ? "[" : "{";
+  const closeBrace = isArray ? "]" : "}";
+
+  if (entries.length === 0) return <>{openBrace}{closeBrace}</>;
+
+  // Preview: Array(N) or { key1, key2, ... }
+  const preview = isArray
+    ? `Array(${entries.length})`
+    : entries.length <= 2
+      ? `{ ${entries.map(([k]) => k).join(", ")} }`
+      : `{ ${entries.slice(0, 2).map(([k]) => k).join(", ")}, … }`;
+
+  if (!expanded) {
+    return (
+      <span
+        onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+        className="cursor-pointer select-none"
+      >
+        <span style={{ color: "var(--txt-tertiary)" }}>▶ </span>
+        <span style={{ color: "var(--txt-tertiary)" }}>{preview}</span>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <span
+        onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+        className="cursor-pointer select-none"
+        style={{ color: "var(--txt-tertiary)" }}
+      >
+        ▼{" "}
+      </span>
+      {openBrace + "\n"}
+      {entries.map(([key, val], i) => (
+        <span key={key + i}>
+          {innerSpaces}
+          {!isArray && (
+            <>
+              <span style={{ color: "#79C0FF" }}>"{key}"</span>
+              {": "}
+            </>
+          )}
+          <JSONTreeNode value={val} indent={indent + 1} />
+          {i < entries.length - 1 ? ",\n" : "\n"}
+        </span>
+      ))}
+      {closingSpaces}{closeBrace}
+    </>
+  );
 };
 
 /**
- * A single conversation message row.
- * Expandable: collapsed shows role + preview, expanded shows full JSON.
- * Uses memo and stable onToggle to avoid unnecessary re-renders.
+ * A single conversation message row matching the log viewer's look and feel.
+ * Collapsed: shows role label, tool count, message ID, and preview.
+ * Expanded: shows syntax-highlighted, interactive JSON tree with
+ * collapsible nested objects/arrays and a copy button.
  */
 const MessageRow = memo(({
   message,
@@ -419,35 +719,94 @@ const MessageRow = memo(({
   isExpanded: boolean;
   onToggle: () => void;
 }) => {
+  const [copied, setCopied] = useState(false);
   const role = message.role || "unknown";
   const toolCount = countToolCalls(message);
   const preview = getMessagePreview(message);
   const msgId = message.id || `msg-${index}`;
+  const roleColor = ROLE_COLORS[role] || "#ABABAB";
+
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(JSON.stringify(message, null, 2)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [message]);
 
   return (
-    <div className="border-b border-bdr-secondary">
+    <div>
       <div
-        className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary transition-colors cursor-pointer"
+        className="flex items-center gap-1.5 px-3 py-0.5 hover:bg-bg-secondary transition-colors cursor-pointer"
+        style={{ fontFamily: "'SF Mono', Monaco, Inconsolata, 'Fira Mono', monospace", fontSize: "12px" }}
         onClick={onToggle}
       >
-        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 uppercase ${roleBadgeClass(role)}`}>
+        <span
+          className="shrink-0 whitespace-nowrap uppercase"
+          style={{ color: roleColor, fontWeight: 600, fontSize: "11px" }}
+        >
           {role}
         </span>
         {toolCount > 0 && (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 text-purple-400 bg-purple-400/10">
+          <span
+            className="shrink-0 whitespace-nowrap"
+            style={{ color: "#D2A8FF", fontWeight: 600, fontSize: "11px" }}
+          >
             {toolCount} tool{toolCount > 1 ? "s" : ""}
           </span>
         )}
-        <span className="text-[10px] text-txt-tertiary font-mono shrink-0">{msgId}</span>
-        <span className="text-txt-secondary truncate min-w-0 flex-1">{preview}</span>
-        <span className="text-txt-tertiary shrink-0 text-[10px]">
+        <span className="shrink-0 whitespace-nowrap" style={{ color: "var(--txt-tertiary)", fontSize: "11px" }}>
+          {msgId}
+        </span>
+        <span className="truncate min-w-0 flex-1" style={{ color: "var(--txt-secondary)" }}>
+          {preview}
+        </span>
+        <span className="shrink-0" style={{ color: "var(--txt-tertiary)", fontSize: "10px" }}>
           {isExpanded ? "▼" : "▶"}
         </span>
       </div>
       {isExpanded && (
-        <pre className="px-3 py-2 text-[11px] font-mono text-txt-secondary bg-bg-secondary/50 whitespace-pre-wrap break-all overflow-x-hidden max-h-[400px] overflow-y-auto">
-          {JSON.stringify(message, null, 2)}
-        </pre>
+        <div className="mx-3 my-1">
+          <div className="flex items-center gap-1 mb-1">
+            <span
+              onClick={handleCopy}
+              className="inline-flex items-center justify-center cursor-pointer rounded-sm transition-colors hover:bg-bg-secondary"
+              style={{
+                width: 20,
+                height: 20,
+                border: `1px solid ${copied ? "#7EE787" : "var(--bdr-secondary)"}`,
+                color: copied ? "#7EE787" : "var(--txt-tertiary)",
+                fontSize: 12,
+              }}
+              title="Copy message JSON"
+            >
+              {copied ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+                  <path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+                  <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z" />
+                </svg>
+              )}
+            </span>
+          </div>
+          <pre
+            className="p-2 rounded-sm overflow-y-auto overflow-x-hidden"
+            style={{
+              border: "1px solid var(--bdr-secondary)",
+              fontFamily: "'SF Mono', Monaco, Inconsolata, 'Fira Mono', monospace",
+              fontSize: "11px",
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxHeight: 400,
+              margin: 0,
+            }}
+          >
+            <JSONTreeNode value={message} defaultExpanded />
+          </pre>
+        </div>
       )}
     </div>
   );
@@ -506,7 +865,7 @@ const ConversationView = ({
           </button>
         ) : undefined}
       />
-      <div ref={parentRef} className="flex-1 overflow-y-auto min-h-0">
+      <div ref={parentRef} className="flex-1 overflow-y-auto min-h-0 py-1">
         {messages.length === 0 ? (
           <EmptyState message="No conversation history" />
         ) : (

@@ -2,6 +2,8 @@
  * Pip IPC Handlers
  *
  * Handles Control Plane pip-related IPC events.
+ * Includes rate limiting and deduplication for UI-initiated tool calls
+ * to prevent infinite re-render loops from crashing the MCP server connection.
  */
 
 import { ipcMain } from "electron";
@@ -17,6 +19,98 @@ import {
   type WidgetState,
 } from "../mcp/controlPlane";
 import { readResource, clearResourceCache } from "../mcp/client";
+
+/**
+ * Rate limiter for UI-initiated tool calls.
+ *
+ * Prevents runaway React re-render loops from flooding the MCP server
+ * with thousands of identical calls per second. Provides three defenses:
+ *
+ * 1. Deduplication: identical in-flight calls (same tool + args) share one promise
+ * 2. Sliding window rate limit: max calls per server per time window
+ * 3. Concurrent cap: max simultaneous in-flight calls per server
+ *
+ * All limits are per-server to isolate apps from each other.
+ */
+const UI_TOOL_CALL_RATE_LIMIT = {
+  windowMs: 1000,
+  maxCallsPerWindow: 60,
+  maxConcurrentPerServer: 20,
+};
+
+/** Tracks per-server call timestamps for the sliding window */
+const serverCallTimestamps = new Map<string, number[]>();
+
+/** Tracks per-server concurrent in-flight count */
+const serverConcurrentCalls = new Map<string, number>();
+
+/** Tracks in-flight calls for deduplication (key -> promise) */
+const inFlightCalls = new Map<string, Promise<unknown>>();
+
+/** Tracks whether a rate-limit warning has already been logged for a server */
+const rateLimitWarned = new Set<string>();
+
+/**
+ * Generates a dedup key for a UI tool call.
+ * Identical tool + args on the same server share one in-flight promise.
+ */
+const makeDedupKey = ({ serverName, toolName, args }: {
+  serverName: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): string => {
+  return `${serverName}/${toolName}:${JSON.stringify(args)}`;
+};
+
+/**
+ * Checks if a UI tool call should be rejected by the rate limiter.
+ * Returns an error string if rejected, null if allowed.
+ */
+const checkRateLimit = ({ serverName }: { serverName: string }): string | null => {
+  const now = Date.now();
+
+  // Check concurrent limit
+  const concurrent = serverConcurrentCalls.get(serverName) ?? 0;
+  if (concurrent >= UI_TOOL_CALL_RATE_LIMIT.maxConcurrentPerServer) {
+    return `Too many concurrent UI tool calls (${concurrent}/${UI_TOOL_CALL_RATE_LIMIT.maxConcurrentPerServer})`;
+  }
+
+  // Check sliding window
+  let timestamps = serverCallTimestamps.get(serverName);
+  if (!timestamps) {
+    timestamps = [];
+    serverCallTimestamps.set(serverName, timestamps);
+  }
+
+  // Prune old timestamps outside the window
+  const windowStart = now - UI_TOOL_CALL_RATE_LIMIT.windowMs;
+  while (timestamps.length > 0 && timestamps[0] < windowStart) {
+    timestamps.shift();
+  }
+
+  if (timestamps.length >= UI_TOOL_CALL_RATE_LIMIT.maxCallsPerWindow) {
+    return `UI tool call rate limit exceeded (${timestamps.length}/${UI_TOOL_CALL_RATE_LIMIT.maxCallsPerWindow} calls in ${UI_TOOL_CALL_RATE_LIMIT.windowMs}ms)`;
+  }
+
+  // Record this call
+  timestamps.push(now);
+  return null;
+};
+
+/**
+ * Increments the concurrent call counter for a server.
+ */
+const trackConcurrentStart = ({ serverName }: { serverName: string }) => {
+  serverConcurrentCalls.set(serverName, (serverConcurrentCalls.get(serverName) ?? 0) + 1);
+};
+
+/**
+ * Decrements the concurrent call counter for a server.
+ */
+const trackConcurrentEnd = ({ serverName }: { serverName: string }) => {
+  const current = serverConcurrentCalls.get(serverName) ?? 1;
+  serverConcurrentCalls.set(serverName, Math.max(0, current - 1));
+};
 
 /**
  * Register pip-related IPC handlers.
@@ -85,6 +179,9 @@ export const registerPipHandlers = () => {
    * Routes through handleToolCall with source: 'ui' so the tool call
    * gets emitted as a ui-tool:executed event for conversation history injection.
    * This ensures the agent knows about user interactions with pips.
+   *
+   * Includes rate limiting, deduplication, and concurrent call capping to prevent
+   * runaway React re-render loops from flooding the MCP server and crashing the connection.
    */
   ipcMain.handle(
     "cp:call-tool",
@@ -98,16 +195,53 @@ export const registerPipHandlers = () => {
       }
     ) => {
       try {
-        // Route through handleToolCall with source: 'ui'
-        // This triggers the ui-tool:executed event for conversation history
-        const result = await handleToolCall({
+        const dedupKey = makeDedupKey(params);
+
+        // Deduplication: if this exact call is already in-flight, return the same promise.
+        // This prevents identical concurrent calls from consuming server resources.
+        const existing = inFlightCalls.get(dedupKey);
+        if (existing) {
+          return existing;
+        }
+
+        // Rate limit check: reject if the UI is calling too fast (likely a re-render loop)
+        const rateLimitError = checkRateLimit({ serverName: params.serverName });
+        if (rateLimitError) {
+          if (!rateLimitWarned.has(params.serverName)) {
+            rateLimitWarned.add(params.serverName);
+            console.error(`[IPC] UI tool call rate-limited — likely a re-render loop in the MCP App UI`, {
+              serverName: params.serverName,
+              toolName: params.toolName,
+              reason: rateLimitError,
+            });
+            // Clear the warning flag after the window resets so it can warn again if the loop resumes
+            setTimeout(() => rateLimitWarned.delete(params.serverName), UI_TOOL_CALL_RATE_LIMIT.windowMs * 2);
+          }
+          return {
+            content: [{ type: "text", text: `Rate limited: ${rateLimitError}. This usually indicates an infinite re-render loop in the UI code.` }],
+            isError: true,
+          };
+        }
+
+        // Track concurrent calls
+        trackConcurrentStart({ serverName: params.serverName });
+
+        // Create the actual call promise and register it for deduplication
+        const callPromise = handleToolCall({
           serverName: params.serverName,
           toolName: params.toolName,
           args: params.args,
           instanceId: params.instanceId,
           source: "ui",
+        }).finally(() => {
+          // Clean up dedup entry and concurrent count when call completes
+          inFlightCalls.delete(dedupKey);
+          trackConcurrentEnd({ serverName: params.serverName });
         });
-        return result;
+
+        inFlightCalls.set(dedupKey, callPromise);
+
+        return await callPromise;
       } catch (error) {
         // Shutdown errors are expected when closing project - return gracefully, don't throw
         const isShutdownError = error instanceof Error && error.message.includes("shutdown in progress");
