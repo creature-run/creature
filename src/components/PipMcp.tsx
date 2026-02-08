@@ -186,10 +186,13 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
      * Bridge must be ready BEFORE real content is injected.
      */
     const initBridge = async () => {
+      console.debug(`[PipMcp:${pip.instanceId}] initBridge starting for version ${versionKey}`);
+
       // Brief wait for iframe element to be fully ready
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       if (isCleanedUp || !iframe.contentWindow) {
+        console.debug(`[PipMcp:${pip.instanceId}] initBridge aborted (cleanedUp=${isCleanedUp}, hasWindow=${!!iframe.contentWindow})`);
         return;
       }
 
@@ -279,9 +282,11 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
 
     return () => {
       isCleanedUp = true;
+      console.debug(`[PipMcp:${pip.instanceId}] Effect cleanup — tearing down bridge for version ${versionKey}`);
 
-      // Clean up either pending bridge OR current bridge
-      // (pendingBridge may be null if unmount happens before initBridge completes)
+      // Clean up either pending bridge OR current bridge.
+      // Cleanup is fire-and-forget — the short teardown timeout in appBridge.ts
+      // ensures this completes quickly even if the Guest is unresponsive.
       const bridgeToCleanup = pendingBridge || bridgeRef.current;
       if (bridgeToCleanup) {
         bridgeToCleanup.cleanup().catch(console.error);
@@ -326,6 +331,7 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
     }
 
     // Inject real content now that bridge is listening
+    console.debug(`[PipMcp:${pip.instanceId}] Phase 2 — injecting HTML (${pip.htmlContent.length} bytes, v${pip.refreshVersion ?? 0})`);
     iframe.srcdoc = pip.htmlContent;
   }, [bridgeReady, pip.htmlContent, pip.instanceId, pip.refreshVersion]);
 

@@ -485,14 +485,15 @@ export const createCreatureAppBridge = async ({
 
       // Schedule refresh after debounce period
       hmrDebounceTimer = setTimeout(async () => {
-        console.log(`[AppBridge] HMR reload triggered (debounced)`, { instanceId });
+        console.log(`[AppBridge:${instanceId}] HMR reload — requesting pip refresh`);
         
         // Trigger pip refresh via control plane
         // This clears the resource cache and re-fetches fresh HTML
         try {
           await window.electronAPI.controlPlane.refreshSinglePip({ instanceId });
+          console.debug(`[AppBridge:${instanceId}] HMR refresh request completed`);
         } catch (error) {
-          console.error(`[AppBridge] HMR refresh failed`, { instanceId, error });
+          console.error(`[AppBridge:${instanceId}] HMR refresh failed`, error);
         }
       }, HMR_DEBOUNCE_MS);
     }
@@ -526,19 +527,34 @@ export const createCreatureAppBridge = async ({
   // The actual handshake (ui/initialize → response → ui/notifications/initialized) happens
   // asynchronously via the request/notification handlers set up above.
   await bridge.connect(transport);
-  console.log(`[AppBridge] Transport connected`, { instanceId });
+  console.debug(`[AppBridge:${instanceId}] Transport connected, waiting for Guest initialization`);
 
   // Track cleanup state to make cleanup idempotent and avoid double-teardown errors
   let cleanedUp = false;
 
   /**
+   * Maximum time to wait for the Guest to respond to teardownResource.
+   *
+   * Teardown is a courtesy notification — if the Guest doesn't respond
+   * promptly (e.g. iframe is unloading during HMR, MCP server restarted),
+   * we close the bridge anyway. A short timeout prevents blocking pip
+   * refresh cycles. Without this, the SDK's default request timeout
+   * (often 30s+) blocks cleanup, which in the popout path is awaited
+   * and delays the entire refresh-and-reinitialize sequence.
+   */
+  const TEARDOWN_TIMEOUT_MS = 1500;
+
+  /**
    * Cleanup function - idempotent, safe to call multiple times.
-   * Sends teardown request to Guest and closes the bridge connection.
-   * Silently handles "Not connected" errors which occur when Host closes pip first.
+   * Sends teardown request to Guest with a short timeout, then closes the bridge.
+   * Silently handles "Not connected" and timeout errors which occur during
+   * normal HMR refresh and rapid close sequences.
    */
   const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
+
+    console.debug(`[AppBridge:${instanceId}] Cleanup starting`);
 
     // Remove debug message handler
     window.removeEventListener("message", debugMessageHandler);
@@ -550,17 +566,33 @@ export const createCreatureAppBridge = async ({
     }
 
     try {
-      // Send teardown request and wait for response
-      await bridge.teardownResource({});
+      // Race teardown against a short timeout. Teardown is a courtesy
+      // notification to the Guest — if it doesn't respond quickly
+      // (iframe unloading, server restarted), we proceed with close.
+      const teardownResult = await Promise.race([
+        bridge.teardownResource({}).then(() => "done" as const),
+        new Promise<"timeout">((resolve) =>
+          setTimeout(() => resolve("timeout"), TEARDOWN_TIMEOUT_MS)
+        ),
+      ]);
+
+      if (teardownResult === "timeout") {
+        console.debug(`[AppBridge:${instanceId}] Teardown timed out after ${TEARDOWN_TIMEOUT_MS}ms, proceeding with close`);
+      }
     } catch (error) {
-      // Silently ignore "Not connected" errors - these occur when Host closes pip
-      // before cleanup runs, which is normal during rapid close sequences.
+      // Silently ignore "Not connected" errors — these occur when Host closes
+      // pip before cleanup runs, which is normal during rapid close sequences.
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes("Not connected")) {
-        console.warn("[AppBridge] Teardown error:", error);
+        console.debug(`[AppBridge:${instanceId}] Teardown error (non-fatal): ${errorMessage}`);
       }
     } finally {
-      await bridge.close();
+      try {
+        await bridge.close();
+      } catch (closeError) {
+        console.debug(`[AppBridge:${instanceId}] Close error (non-fatal):`, closeError);
+      }
+      console.debug(`[AppBridge:${instanceId}] Cleanup complete`);
     }
   };
 

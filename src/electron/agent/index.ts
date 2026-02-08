@@ -13,7 +13,6 @@
 import {
   tool,
   ToolLoopAgent,
-  wrapLanguageModel,
   validateUIMessages,
   convertToModelMessages,
   pruneMessages,
@@ -23,7 +22,6 @@ import {
 } from "ai";
 import type { ToolCallRepairFunction, ToolSet } from "ai";
 import { z } from "zod";
-import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { app } from "electron";
 import { createPipTools } from "./tools";
 import { createProvider } from "./provider";
@@ -434,14 +432,7 @@ export const createAgent = async ({
   const mcpProxyTool = createMcpProxyTool();
 
   const { provider, modelId } = createProvider(credentials);
-  const baseModel = provider(modelId);
-  // Only use devtools middleware in development (causes /.devtools error in packaged builds)
-  const model = app.isPackaged
-    ? baseModel
-    : wrapLanguageModel({
-        model: baseModel,
-        middleware: devToolsMiddleware(),
-      });
+  const model = provider(modelId);
 
   // Build static system prompt (personality, guidelines, profile, context)
   const systemPrompt = buildSystemPrompt({

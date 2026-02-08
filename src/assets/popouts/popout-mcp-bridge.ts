@@ -485,14 +485,16 @@ const setupTeardownListener = (instanceId: string): void => {
   window.electronAPI.controlPlane.onPipTeardown(async (data) => {
     if (data.instanceId !== instanceId || !bridgeInstance) return;
 
+    console.debug("[Popout] Teardown requested, cleaning up bridge");
     try {
-      // AppBridge handles sending ui/resource-teardown and waiting for response
+      // AppBridge handles sending ui/resource-teardown with a short timeout
       await bridgeInstance.cleanup();
     } catch {
       // Teardown errors are expected if pip already closed
     }
 
     // Notify control plane that teardown is complete
+    console.debug("[Popout] Teardown complete, notifying control plane");
     window.electronAPI.controlPlane.pipTeardownComplete(instanceId);
   });
 };
@@ -573,7 +575,7 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
   window.electronAPI.controlPlane.onPipRefresh(async (data) => {
     if (data.instanceId !== instanceId) return;
     
-    console.log("[Popout] Pip refresh received, updating content", { 
+    console.log("[Popout] Pip refresh received", { 
       instanceId, 
       htmlLength: data.htmlContent?.length || 0 
     });
@@ -581,14 +583,18 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
     // Show loading overlay while new content boots
     showLoadingOverlay();
 
-    // Clean up existing bridge before loading new content
+    // Clean up existing bridge before loading new content.
+    // The cleanup function has a short teardown timeout (1.5s) so this
+    // won't block for long even if the Guest is unresponsive.
     if (bridgeInstance) {
+      console.debug("[Popout] Cleaning up existing bridge before refresh");
       try {
         await bridgeInstance.cleanup();
       } catch {
-        // Cleanup errors are expected
+        // Cleanup errors are expected during HMR — Guest may be unloading
       }
       bridgeInstance = null;
+      console.debug("[Popout] Previous bridge cleaned up");
     }
 
     // Reset UI error overlay for fresh content
@@ -621,6 +627,7 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
     }
 
     // Recreate bridge with fresh content
+    console.debug("[Popout] Recreating AppBridge after refresh");
     try {
       bridgeInstance = await createCreatureAppBridge({
         iframe,
@@ -665,6 +672,7 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
           });
         },
       });
+      console.debug("[Popout] AppBridge recreated, waiting for Guest initialization");
     } catch (error) {
       console.error("[Popout] Failed to recreate AppBridge after refresh:", error);
     }
