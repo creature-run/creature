@@ -357,9 +357,7 @@ export interface PipInstance {
   };
   /**
    * Whether the pip's UI has reported a runtime error.
-   * When true, refreshSinglePip will force a refresh even if the
-   * HTML content is unchanged — giving the iframe a fresh render
-   * attempt after the underlying code may have been fixed.
+   * Tracked so the agent can see error state; cleared on reload.
    */
   hasUiError?: boolean;
 }
@@ -522,12 +520,8 @@ export const createPipInstance = async ({
  *
  * Structural cleanup only — closes pips whose resourceUri no longer exists
  * (e.g., the MCP app was rewritten with different resources). Does NOT
- * fetch new HTML or touch pip readiness. Existing pips keep their current
- * HTML content until the UI build completes and triggers a separate refresh.
- *
- * This separation prevents the primary "stuck loading" failure mode:
- * eagerly refreshing HTML before vite finishes rebuilding destroys the
- * working iframe and replaces it with incomplete HTML that never initializes.
+ * fetch new HTML or touch pip readiness. The caller handles pip reloads
+ * separately via refreshAllPipsForMcp after the build completes.
  */
 export const reconcilePipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
   const pipsForMcp = Array.from(pipInstances.values()).filter(
@@ -556,19 +550,18 @@ export const reconcilePipsForMcp = async ({ mcpName }: { mcpName: string }): Pro
 };
 
 /**
- * Refresh HTML content for all pips belonging to a specific MCP server.
+ * Force-reload all pips belonging to a specific MCP server.
  *
- * Called when the UI build completes (detected via "App UI reloaded" in
- * stdout). This is the ONLY path that should refresh pip HTML during
- * development — it runs after vite has finished writing the complete
- * singlefile HTML, so the content is guaranteed to be valid.
+ * Unconditionally clears caches and reloads every pip iframe.
+ * Called after a dev MCP rebuild completes (detected via "App UI reloaded"
+ * in stdout) and after successful MCP reconnection.
  */
 export const refreshAllPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
   const pipsForMcp = Array.from(pipInstances.values()).filter(
     (p) => p.serverName === mcpName
   );
 
-  console.debug(`[PipLifecycle] refreshAll ${mcpName}: ${pipsForMcp.length} pip(s)`);
+  console.debug(`[PipLifecycle] reloadAll ${mcpName}: ${pipsForMcp.length} pip(s)`);
 
   for (const pip of pipsForMcp) {
     await refreshSinglePip({ instanceId: pip.instanceId });
@@ -576,22 +569,12 @@ export const refreshAllPipsForMcp = async ({ mcpName }: { mcpName: string }): Pr
 };
 
 /**
- * Per-pip refresh lock. Prevents concurrent refreshes on the same pip
- * from racing and orphaning readyPromise references. When two refresh
- * triggers fire in rapid succession (e.g., HMR notification overlapping
- * with stdout watcher), the second waits for the first to finish before
- * proceeding with potentially newer content.
- */
-const pipRefreshLocks = new Map<string, Promise<void>>();
-
-/**
- * Refresh a single pip's HTML content and icon.
+ * Force-reload a single pip's HTML content and icon.
  *
  * Clears the resource cache, re-fetches fresh HTML from the MCP server,
- * and sends the new content to the renderer. Serialized per-pip via
- * pipRefreshLocks to prevent concurrent refresh races.
- *
- * Does NOT restart the MCP server — just refreshes the UI content.
+ * and unconditionally sends it to the renderer. No diffing, no size
+ * guards — every call produces a clean iframe reload. This eliminates
+ * stale-state bugs caused by conditional refresh logic.
  */
 export const refreshSinglePip = async ({
   instanceId,
@@ -603,17 +586,6 @@ export const refreshSinglePip = async ({
     return { success: false, error: `Pip not found: ${instanceId}` };
   }
 
-  // Serialize: wait for any in-flight refresh on this pip to complete
-  const existingLock = pipRefreshLocks.get(instanceId);
-  if (existingLock) {
-    console.debug(`[PipLifecycle] refresh waiting on lock for ${instanceId}`);
-    try { await existingLock; } catch { /* ignore prior failure */ }
-  }
-
-  let resolveLock: () => void = () => {};
-  const lock = new Promise<void>((resolve) => { resolveLock = resolve; });
-  pipRefreshLocks.set(instanceId, lock);
-
   try {
     clearResourceCache({
       serverName: pip.serverName,
@@ -624,44 +596,6 @@ export const refreshSinglePip = async ({
       serverName: pip.serverName,
       uri: pip.resourceUri,
     });
-
-    // Skip refresh if HTML content hasn't changed — avoids wasteful iframe
-    // remounts when both the HMR handler and stdout watcher fire for the
-    // same vite build. Exception: if the pip has a UI error, force the
-    // refresh so the iframe gets a clean re-render attempt. The error
-    // overlay blocks the UI until this happens, even if the underlying
-    // code was fixed via a server-side-only change.
-    if (htmlContent === pip.htmlContent && !pip.hasUiError) {
-      console.debug(`[PipLifecycle] refresh skipped (HTML unchanged)`, { instanceId });
-      return { success: true };
-    }
-    if (htmlContent === pip.htmlContent && pip.hasUiError) {
-      console.debug(`[PipLifecycle] forcing refresh despite unchanged HTML (pip has UI error)`, { instanceId });
-    }
-
-    // Guard against replacing working HTML with broken/incomplete HTML.
-    // During multi-file edits, the server may temporarily serve a minimal
-    // placeholder or error page (e.g. when the html path was changed but
-    // vite hasn't rebuilt to the new directory yet). If the new HTML is
-    // drastically smaller than the existing content, skip the refresh.
-    // The next build cycle will deliver correct HTML.
-    //
-    // Thresholds: skip if the new HTML is under 90% of existing size AND
-    // the existing HTML is substantial (over 10KB). This avoids blocking
-    // legitimate first-load or small-app scenarios.
-    const existingLength = pip.htmlContent?.length ?? 0;
-    const SIGNIFICANT_SIZE = 10_000;
-    const SHRINK_RATIO = 0.1;
-    if (
-      existingLength > SIGNIFICANT_SIZE &&
-      htmlContent.length < existingLength * SHRINK_RATIO
-    ) {
-      console.warn(
-        `[PipLifecycle] refresh skipped (HTML suspiciously small: ${htmlContent.length} bytes vs existing ${existingLength} bytes)`,
-        { instanceId }
-      );
-      return { success: true };
-    }
 
     pip.htmlContent = htmlContent;
     pip.icon = icon;
@@ -681,20 +615,15 @@ export const refreshSinglePip = async ({
       icon: pip.icon,
     });
 
-    console.debug(`[Control Plane] Pip refreshed`, { instanceId: pip.instanceId, htmlLength: pip.htmlContent?.length });
+    console.debug(`[PipLifecycle] Pip reloaded`, { instanceId: pip.instanceId, htmlLength: pip.htmlContent?.length });
     return { success: true };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`[Control Plane] Pip refresh failed`, { instanceId, error: errorMessage });
+    console.error(`[PipLifecycle] Pip reload failed`, { instanceId, error: errorMessage });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
     };
-  } finally {
-    resolveLock();
-    if (pipRefreshLocks.get(instanceId) === lock) {
-      pipRefreshLocks.delete(instanceId);
-    }
   }
 };
 
@@ -931,9 +860,7 @@ export const getPipInstance = (instanceId: string): PipInstance | undefined => {
 /**
  * Mark all pips for a given MCP server as having a UI error.
  * Called when the renderer reports a runtime error from the iframe.
- * This flag causes refreshSinglePip to force a refresh even when
- * the HTML content is unchanged, giving the iframe a fresh render
- * attempt after the underlying code may have been fixed.
+ * Tracked for visibility; the next reload clears the flag.
  */
 export const markPipUiError = ({ serverName }: { serverName: string }): void => {
   for (const pip of pipInstances.values()) {

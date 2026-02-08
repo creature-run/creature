@@ -235,6 +235,16 @@ export const createFromTemplate = async ({
     console.log(`[MCP] Copying template from ${templatePath} to ${mcpDir}`);
     copyDirectory({ src: templatePath, dest: mcpDir, excludeDirs: ["node_modules", "dist", ".creature"] });
 
+    // Step 1a: Copy vendored SDK lib directory WITHOUT exclusions.
+    // The main copy above strips all node_modules/ and dist/ dirs recursively,
+    // but the vendored SDK at lib/open-mcp-app/ needs both its dist/ (actual code)
+    // and node_modules/ (SDK's own deps like @modelcontextprotocol/ext-apps).
+    const libSrc = path.join(templatePath, "lib");
+    if (fs.existsSync(libSrc)) {
+      const libDest = path.join(mcpDir, "lib");
+      copyDirectory({ src: libSrc, dest: libDest, excludeDirs: [] });
+    }
+
     // Step 1b: Remove package-lock.json if copied (it may have stale file: references)
     const lockFilePath = path.join(mcpDir, "package-lock.json");
     if (fs.existsSync(lockFilePath)) {

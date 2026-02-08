@@ -30,8 +30,8 @@ const renameToIndex = (): Plugin => ({
  * Vite config for Notes MCP.
  *
  * Development mode:
- * - Uses standard Vite dev server with HMR for instant updates
- * - No singlefile inlining (allows proper HMR via WebSocket)
+ * - Uses Vite build --watch to rebuild UI HTML on change
+ * - No singlefile inlining (faster incremental rebuilds)
  * 
  * Production mode:
  * - Uses vite-plugin-singlefile to inline all JS/CSS into the HTML file

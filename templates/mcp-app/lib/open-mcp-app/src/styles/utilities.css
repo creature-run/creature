@@ -1,0 +1,98 @@
+/* =============================================
+  Heading utilities (combine size + weight + line-height)
+  
+  Uses spec-compliant --font-weight-* variables.
+  All headings use semibold weight by default.
+============================================= */
+@utility heading-xs {
+  font-size: var(--font-heading-xs-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--font-heading-xs-line-height);
+}
+
+@utility heading-sm {
+  font-size: var(--font-heading-sm-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--font-heading-sm-line-height);
+}
+
+@utility heading-md {
+  font-size: var(--font-heading-md-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--font-heading-md-line-height);
+}
+
+@utility heading-lg {
+  font-size: var(--font-heading-lg-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--font-heading-lg-line-height);
+}
+
+@utility heading-xl {
+  font-size: var(--font-heading-xl-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--font-heading-xl-line-height);
+}
+
+@utility heading-2xl {
+  font-size: var(--font-heading-2xl-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--font-heading-2xl-line-height);
+}
+
+@utility heading-3xl {
+  font-size: var(--font-heading-3xl-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--font-heading-3xl-line-height);
+}
+
+/* =============================================
+  Control height utilities
+============================================= */
+@utility h-control-xs {
+  height: var(--control-height-xs);
+}
+
+@utility h-control-sm {
+  height: var(--control-height-sm);
+}
+
+@utility h-control-md {
+  height: var(--control-height-md);
+}
+
+@utility h-control-lg {
+  height: var(--control-height-lg);
+}
+
+@utility h-control-xl {
+  height: var(--control-height-xl);
+}
+
+/* =============================================
+  Icon size utilities
+============================================= */
+@utility icon-xs {
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
+}
+
+@utility icon-sm {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+@utility icon-md {
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+}
+
+@utility icon-lg {
+  width: var(--icon-size-lg);
+  height: var(--icon-size-lg);
+}
+
+@utility icon-xl {
+  width: var(--icon-size-xl);
+  height: var(--icon-size-xl);
+}

@@ -358,7 +358,7 @@ export const useNotes = (): UseNotesReturn => {
     if (lastNote) {
       setNote(lastNote);
       // Imperatively update editor content if it's already mounted
-      // This handles HMR case where editor mounts before restoration completes
+      // This handles refresh cases where the editor mounts before restoration completes
       if (editorRef.current && lastNote.content !== undefined) {
         editorRef.current.setContent(lastNote.content);
       }

@@ -567,9 +567,9 @@ const setupTitleChangeListener = (instanceId: string): void => {
 };
 
 /**
- * Set up listener for pip refresh events (HMR).
- * When the control plane refreshes the pip content (e.g., after HMR notification),
- * we need to update the iframe's srcdoc with the new HTML.
+ * Set up listener for pip refresh events.
+ * When the control plane refreshes the pip content, update the iframe's srcdoc
+ * with the new HTML.
  */
 const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement): void => {
   window.electronAPI.controlPlane.onPipRefresh(async (data) => {
@@ -591,7 +591,7 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
       try {
         await bridgeInstance.cleanup();
       } catch {
-        // Cleanup errors are expected during HMR — Guest may be unloading
+        // Cleanup errors are expected during refresh — Guest may be unloading
       }
       bridgeInstance = null;
       console.debug("[Popout] Previous bridge cleaned up");

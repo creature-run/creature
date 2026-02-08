@@ -55,15 +55,6 @@ const WidgetStateChangedNotificationSchema = z.object({
 type WidgetStateChangedNotification = z.infer<typeof WidgetStateChangedNotificationSchema>;
 
 /**
- * Schema for hmr-reload notification.
- * Sent by HMR client in development mode to trigger pip content refresh.
- */
-const HmrReloadNotificationSchema = z.object({
-  method: z.literal("ui/notifications/hmr-reload"),
-  params: z.object({}).optional(),
-});
-
-/**
  * Schema for title-changed notification.
  * Sent by SDK when Guest UI calls setTitle().
  * Allows apps to update their pip title without making a tool call.
@@ -463,42 +454,6 @@ export const createCreatureAppBridge = async ({
     }
   );
 
-  // Register handler for HMR reload notifications.
-  // In development mode, the HMR client sends this when Vite detects file changes.
-  // This triggers a pip refresh to load the updated HTML content.
-  // 
-  // Debouncing: We wait 300ms after the last HMR notification before refreshing.
-  // This prevents race conditions when multiple files change rapidly - Vite may
-  // still be rebuilding when the first notification arrives, resulting in
-  // incomplete HTML being fetched (the "UI not found" flash).
-  let hmrDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const HMR_DEBOUNCE_MS = 300;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (bridge.setNotificationHandler as any)(
-    HmrReloadNotificationSchema,
-    async () => {
-      // Clear any pending refresh
-      if (hmrDebounceTimer) {
-        clearTimeout(hmrDebounceTimer);
-      }
-
-      // Schedule refresh after debounce period
-      hmrDebounceTimer = setTimeout(async () => {
-        console.log(`[AppBridge:${instanceId}] HMR reload — requesting pip refresh`);
-        
-        // Trigger pip refresh via control plane
-        // This clears the resource cache and re-fetches fresh HTML
-        try {
-          await window.electronAPI.controlPlane.refreshSinglePip({ instanceId });
-          console.debug(`[AppBridge:${instanceId}] HMR refresh request completed`);
-        } catch (error) {
-          console.error(`[AppBridge:${instanceId}] HMR refresh failed`, error);
-        }
-      }, HMR_DEBOUNCE_MS);
-    }
-  );
-
   /**
    * Register handler for title change notifications.
    * Sent by SDK when Guest UI calls setTitle().
@@ -536,7 +491,7 @@ export const createCreatureAppBridge = async ({
    * Maximum time to wait for the Guest to respond to teardownResource.
    *
    * Teardown is a courtesy notification — if the Guest doesn't respond
-   * promptly (e.g. iframe is unloading during HMR, MCP server restarted),
+   * promptly (e.g. iframe is unloading, MCP server restarted),
    * we close the bridge anyway. A short timeout prevents blocking pip
    * refresh cycles. Without this, the SDK's default request timeout
    * (often 30s+) blocks cleanup, which in the popout path is awaited
@@ -548,7 +503,7 @@ export const createCreatureAppBridge = async ({
    * Cleanup function - idempotent, safe to call multiple times.
    * Sends teardown request to Guest with a short timeout, then closes the bridge.
    * Silently handles "Not connected" and timeout errors which occur during
-   * normal HMR refresh and rapid close sequences.
+   * normal refresh and rapid close sequences.
    */
   const cleanup = async () => {
     if (cleanedUp) return;
@@ -558,12 +513,6 @@ export const createCreatureAppBridge = async ({
 
     // Remove debug message handler
     window.removeEventListener("message", debugMessageHandler);
-
-    // Clear any pending HMR refresh timer
-    if (hmrDebounceTimer) {
-      clearTimeout(hmrDebounceTimer);
-      hmrDebounceTimer = null;
-    }
 
     try {
       // Race teardown against a short timeout. Teardown is a courtesy

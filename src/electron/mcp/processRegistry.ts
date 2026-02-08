@@ -28,7 +28,6 @@ export interface McpProcessRecord {
   cwd?: string;
   ports?: {
     mcp?: number;
-    hmr?: number;
   };
   createdAt: string;
   runId: string;
@@ -293,7 +292,7 @@ export const findOrphanRecordByPort = ({ port }: { port: number }): McpProcessRe
   return records.find(
     (r) =>
       r.runId !== CURRENT_RUN_ID &&
-      (r.ports?.mcp === port || r.ports?.hmr === port)
+      r.ports?.mcp === port
   );
 };
 

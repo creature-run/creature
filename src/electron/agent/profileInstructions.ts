@@ -27,7 +27,7 @@ You are helping the user with general tasks - not software development.
 - **Meeting notes**: Capture key points, decisions, and action items concisely
 - **Research**: Browse the web, gather information, summarize findings
 - **Task management**: Track todos, check off completed items, keep the list clean
-- **Writing**: Draft emails, documents, or other content as requested
+- **Writing**: Draft emails, suments, or other content as requested
 
 ## Tools
 
@@ -242,6 +242,8 @@ function MainView() {
 
 Match the \`views\` config between server resource and UI \`VIEWS\` constant.
 
+**CRITICAL — \`useViews\` only updates on tool results.** If the view is open but no tool is called, the UI will not receive new data and can appear empty. If a view needs initial data, call its primary list tool on mount (or after relevant tool results via \`onToolResult\`) so the UI always gets fresh data to render.
+
 **Calling tools from UI:**
 
 \`\`\`tsx
@@ -324,7 +326,9 @@ useEffect(() => {
 - **Good:** \`data?.items ?? []\`, \`data?.item?.title ?? "Untitled"\`
 - **Bad:** \`data.items\`, \`data.item.title\` — throws TypeError on first render
 
-## Widget State
+## Widget State (CRITICAL — always use)
+
+Widget state is the primary way the AI knows what the user is seeing. Without it, the AI is blind to the UI and will make incorrect assumptions about what's rendered.
 
 Persist UI state across sessions and share context with the AI:
 
@@ -334,10 +338,10 @@ const [widgetState, setWidgetState] = exp_widgetState<MyState>();
 
 setWidgetState({
   modelContent: {
-    // Visible to AI — keep minimal
-    view: "/detail/:itemId",
-    itemId: "123",
-    itemTitle: "My Item",
+    // Visible to AI — keep minimal but informative with the most essential info on what the UI is showing/doing.
+    view: "/",
+    renderedItems: items.map(i => ({ id: i.id, name: i.name })),
+    error: null,
   },
   privateContent: {
     // Hidden from AI — UI restoration only
@@ -347,13 +351,17 @@ setWidgetState({
 });
 \`\`\`
 
-- **modelContent:** What the AI sees. Include current view, key identifiers, brief status.
+- **modelContent:** What the AI sees. Include current view, key identifiers, brief status, and what's actually rendered. Update this whenever the UI state changes meaningfully.
 - **privateContent:** UI-only state (scroll position, expanded panels, draft content).
 - **Transient events:** Use \`updateModelContext([{ type: "text", text: "..." }])\` for one-off notifications that don't need persistence.
+- **CRITICAL:** Tool results alone do NOT confirm the UI rendered correctly. Always use widgetState to report what the UI is actually showing. If data loaded but rendering failed, widgetState should reflect that (e.g., \`{ error: "render failed" }\` or \`{ renderedItems: [] }\`).
+- **Prevent render loops:** \`setWidgetState\` triggers a host message and a UI update. Never call it unconditionally or with unstable dependencies. Only update when meaningful values change, and avoid passing freshly created arrays/objects into the effect dependency list. Use stable primitives (counts, ids) or \`useMemo\` to prevent \`Maximum update depth exceeded\`.
 
 ## Styling (Tailwind)
 
 The SDK provides host-themed Tailwind via \`import "open-mcp-app/styles/tailwind.css"\` (already in app.tsx). Colors adapt automatically to the host theme (light/dark). Never hardcode colors — always use themed classes.
+
+**CRITICAL — MCP Apps CSS variables:** Use the MCP Apps standard CSS variables and the SDK Tailwind classes that map to them. The spec guarantees \`--color-background-primary\`, \`--color-background-secondary\`, \`--color-text-primary\`, \`--color-text-secondary\`, \`--color-border-primary\`, \`--color-border-secondary\`, \`--font-sans\`, \`--font-mono\`. Prefer \`bg-bg-primary\`, \`text-txt-primary\`, \`border-bdr-primary\`, \`font-sans\`, \`font-mono\`. If you must write custom CSS, use \`var(--color-*, fallback)\` and avoid hardcoded colors.
 
 **Backgrounds** (\`bg-bg-*\`): \`primary\`, \`secondary\`, \`tertiary\`, \`inverse\`, \`ghost\`, \`disabled\`, \`info\`, \`danger\`, \`success\`, \`warning\`
 **Text** (\`text-txt-*\`): \`primary\`, \`secondary\`, \`tertiary\`, \`inverse\`, \`ghost\`, \`disabled\`, \`info\`, \`danger\`, \`success\`, \`warning\`
@@ -407,6 +415,26 @@ const pairs = await exp.kvListWithValues("items:");  // [{key, value}] — more 
 if (exp.kvIsAvailable()) { /* persistent */ } else { /* in-memory fallback */ }
 \`\`\`
 
+**CRITICAL — KV is NOT available at server startup.** KV operations require an active MCP transport session, which only exists after the Host connects. Writes during module initialization (before \`app.start()\` resolves and the Host connects) silently fail. Seed data in a tool handler or in a lazy-init pattern on the first tool call, never at top level.
+
+\`\`\`typescript
+// BAD — runs before the Host connects, writes silently fail
+await exp.kvSet("config:default", JSON.stringify(defaults));
+app.start();
+
+// GOOD — runs on first tool call, after the Host has connected
+let initialized = false;
+async function ensureDefaults() {
+  if (initialized) return;
+  initialized = true;
+  const existing = await exp.kvList("items:");
+  if (!existing || existing.length === 0) {
+    await exp.kvSet("items:1", JSON.stringify(defaultItem));
+  }
+}
+// Call ensureDefaults() at the start of each tool handler
+\`\`\`
+
 **File I/O** — read/write files in the app's writable storage directory:
 
 \`\`\`typescript
@@ -443,8 +471,9 @@ The MCP App is already running and auto-connected. Do NOT run \`npm run dev\` or
 **Critical rules:**
 - NEVER use browser tools to view the MCP App — it has its own PIP tab, not a localhost URL
 - NEVER run \`npm run dev\` — the server is already started automatically
-- NEVER manually rebuild — HMR handles UI changes, \`tsx watch\` handles server changes
+- NEVER manually rebuild — \`tsx watch\` handles server changes, \`vite build --watch\` handles UI changes. Both auto-reload the PIP tab.
 - \`vite.config.ts\` is name-independent — do not modify it when renaming the app
+- NEVER assume the UI rendered correctly just because a tool call succeeded. Tool results confirm the SERVER processed the data — they say nothing about whether the UI rendered it. Always implement widgetState to report actual render state, and check it before claiming the user can see something.
 
 **Debugging:**
 - Use \`devkit_typecheck\` for TypeScript errors (\`tsx watch\` only transpiles, no type checking). Use this when tools return unexpected errors — it's often a parameter name mismatch.

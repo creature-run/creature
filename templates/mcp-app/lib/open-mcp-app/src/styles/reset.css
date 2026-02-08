@@ -1,0 +1,22 @@
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; }
+  html, body { height: 100%; }
+  html {
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: var(--font-text-md-size);
+    line-height: var(--font-text-md-line-height);
+    color: var(--color-text-primary);
+    background-color: var(--color-background-primary);
+  }
+  input, textarea, select { appearance: none; }
+  button, input, select, textarea { touch-action: manipulation; }
+  img, svg { flex-shrink: 0; display: block; max-width: 100%; }
+}
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+@custom-variant light (&:where([data-theme=light], [data-theme=light] *));

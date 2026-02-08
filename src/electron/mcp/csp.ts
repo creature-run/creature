@@ -14,20 +14,13 @@ export interface CspConfig {
 }
 
 /**
- * Check if HTML contains the Creature HMR client script.
- */
-export const hasHmrClient = (html: string): boolean => {
-  return html.includes("__CREATURE_HMR_CONNECTED__");
-};
-
-/**
  * Build Content Security Policy string from CSP config.
  *
  * Constructs a restrictive CSP with optional connect and resource domains.
  * resourceDomains are also included in script-src to support dev server scripts.
  * worker-src allows blob: for libraries like Monaco Editor that use web workers.
  */
-export const buildCSP = (csp?: CspConfig, options?: { allowHmr?: boolean }): string => {
+export const buildCSP = (csp?: CspConfig): string => {
   const filterAndJoin = (arr?: string[]): string => {
     if (!arr || !Array.isArray(arr)) return "";
     return arr
@@ -35,10 +28,7 @@ export const buildCSP = (csp?: CspConfig, options?: { allowHmr?: boolean }): str
       .join(" ");
   };
 
-  let connectDomains = filterAndJoin(csp?.connectDomains);
-  if (options?.allowHmr) {
-    connectDomains = `ws://localhost:* ${connectDomains}`.trim();
-  }
+  const connectDomains = filterAndJoin(csp?.connectDomains);
   const resourceDomains = filterAndJoin(csp?.resourceDomains);
 
   // Build each directive, trimming extra spaces
@@ -72,8 +62,7 @@ export const injectCSP = ({
   html: string;
   csp?: CspConfig;
 }): string => {
-  const allowHmr = hasHmrClient(html);
-  const cspValue = buildCSP(csp, { allowHmr });
+  const cspValue = buildCSP(csp);
   const metaTag = `<meta http-equiv="Content-Security-Policy" content="${cspValue}">`;
 
   if (html.includes("<head>")) {

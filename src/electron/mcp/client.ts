@@ -1677,6 +1677,32 @@ const createStreamableHttpTransport = (
  * Spawn an HTTP-based MCP server process and wait for it to be ready.
  * Used for development MCPs that use streamable-http transport but need local process management.
  */
+/**
+ * Wait for a dev MCP readiness signal with a timeout.
+ */
+const waitForReadySignal = async ({
+  serverName,
+  readySignalPromise,
+  timeoutMs,
+}: {
+  serverName: string;
+  readySignalPromise: Promise<void>;
+  timeoutMs: number;
+}): Promise<void> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<void>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`[MCP] ${serverName} did not emit readiness signal within ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  await Promise.race([readySignalPromise, timeoutPromise]);
+
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+};
+
 const spawnHttpServerProcess = async (
   config: MCPServerConfig,
   serverName: string
@@ -1757,8 +1783,7 @@ const spawnHttpServerProcess = async (
   proc.unref();
 
   // Determine process kind for the registry
-  const isDevMcpProcess =
-    env.NODE_ENV === "development" && typeof env.MCP_HMR_PORT === "string" && !!env.MCP_HMR_PORT;
+  const isDevMcpProcess = env.NODE_ENV === "development";
   const processKind: McpProcessKind = isDevMcpProcess ? "dev-mcp" : "local-http";
 
   // Register every spawned process in the registry, not just dev MCPs.
@@ -1773,11 +1798,24 @@ const spawnHttpServerProcess = async (
       cwd,
       ports: {
         mcp: env.MCP_PORT ? Number(env.MCP_PORT) : undefined,
-        hmr: env.MCP_HMR_PORT ? Number(env.MCP_HMR_PORT) : undefined,
       },
       kind: processKind,
     });
   }
+
+  /**
+   * Resolve the dev MCP readiness signal once.
+   */
+  let readySignalResolved = false;
+  let resolveReadySignal: (() => void) | null = null;
+  const readySignalPromise = new Promise<void>((resolve) => {
+    resolveReadySignal = resolve;
+  });
+  const resolveReadySignalOnce = (): void => {
+    if (readySignalResolved) return;
+    readySignalResolved = true;
+    resolveReadySignal?.();
+  };
 
   /**
    * Route HTTP MCP server output to the log aggregator.
@@ -1812,6 +1850,10 @@ const spawnHttpServerProcess = async (
         level,
         message: trimmed,
       });
+
+      if (trimmed.includes("MCP server ready")) {
+        resolveReadySignalOnce();
+      }
 
       // Check if this line matches a known server crash pattern.
       // If so, collect it for the pending error buffer so the agent
@@ -1863,6 +1905,18 @@ const spawnHttpServerProcess = async (
     try {
       const response = await fetch(healthUrl, { method: "GET" });
       if (response.ok) {
+        if (isDevMcpProcess) {
+          try {
+            await waitForReadySignal({
+              serverName,
+              readySignalPromise,
+              timeoutMs: 5000,
+            });
+          } catch (error) {
+            killProcessTree(proc);
+            throw error;
+          }
+        }
         return proc;
       }
     } catch {
@@ -1991,11 +2045,11 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   let portAllocated = false;
 
   // Find config - check in order: Development MCP, builtin, project MCPs
-  // Dev MCPs take precedence so developers can override built-in MCPs with HMR versions
+  // Dev MCPs take precedence so developers can override built-in MCPs
   let config: MCPServerConfig | undefined;
 
   // Check if this is a Development MCP first (takes precedence over built-in)
-  // This allows developers to work on MCP apps with HMR even if they share names with built-ins
+  // This allows developers to work on MCP apps even if they share names with built-ins
   const devRoot = findRootByMcpName(serverName);
   if (devRoot) {
     const mcpDef = getPublishablePackageInfo(devRoot.path);
@@ -2010,14 +2064,13 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       }
 
       const port = await portManager.allocate({ serverName });
-      const hmrPort = await portManager.allocate({ serverName: `${serverName}-hmr` });
       portAllocated = true;
       config = {
         name: mcpDef.name,
         command: "npm",
         args: ["run", "dev"],
         cwd: devRoot.path,
-        env: { MCP_PORT: String(port), MCP_HMR_PORT: String(hmrPort), NODE_ENV: "development" },
+        env: { MCP_PORT: String(port), NODE_ENV: "development" },
         transport: "streamable-http",
         url: `http://localhost:${port}/mcp`,
       };
@@ -2083,7 +2136,6 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
               };
               if (packageJson.scripts?.dev) {
                 const port = await portManager.allocate({ serverName });
-                const hmrPort = await portManager.allocate({ serverName: `${serverName}-hmr` });
                 portAllocated = true;
                 config = {
                   ...config,
@@ -2094,7 +2146,6 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
                   env: {
                     ...config.env,
                     MCP_PORT: String(port),
-                    MCP_HMR_PORT: String(hmrPort),
                     NODE_ENV: "development",
                   },
                 };
@@ -2143,7 +2194,6 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     // Release ports if we allocated them but couldn't find config
     if (portAllocated) {
       portManager.release({ serverName });
-      portManager.release({ serverName: `${serverName}-hmr` });
     }
     console.error(`[MCP] Server not found: ${serverName}. User configs:`, userMcpConfigs.map(c => c.name));
     throw new Error(`MCP server not found: ${serverName}`);
@@ -2465,52 +2515,22 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   // Cache tools using shared parsing logic
   let tools = new Map<string, CachedTool>();
   try {
-    const toolsResult = await client.listTools();
-    tools = parseToolsFromServer({ serverName, rawTools: toolsResult.tools });
-    for (const t of toolsResult.tools) {
-      // Extract UI metadata from _meta.ui if present
-      // Per MCP Apps spec, non-standard extensions are under `experimental`
-      const meta = t._meta as { 
-        ui?: { 
-          resourceUri?: string; 
-          displayModes?: string[];
-          experimental?: {
-            defaultDisplayMode?: string;
-            openInBackground?: boolean;
-          };
-        };
-        creature?: {
-          auth?: { managed?: boolean };
-        };
-      } | undefined;
-
-      // Ensure inputSchema has required type: "object" for Anthropic API compatibility
-      // Some MCPs may return tools with undefined or empty inputSchema
-      const inputSchema = (t.inputSchema as Record<string, unknown>) || { type: "object" };
-      if (!inputSchema.type) {
-        inputSchema.type = "object";
-      }
-
-      // Build description with display mode info for the agent
-      let description = t.description || "";
-      if (meta?.ui?.displayModes?.length) {
-        description += ` [Display modes: ${meta.ui.displayModes.join(", ")}]`;
-      }
-
-      tools.set(t.name, {
-        name: t.name,
-        serverName,
-        description,
-        inputSchema,
-        resourceUri: meta?.ui?.resourceUri,
-        displayModes: meta?.ui?.displayModes,
-        defaultDisplayMode: meta?.ui?.experimental?.defaultDisplayMode,
-        openInBackground: meta?.ui?.experimental?.openInBackground,
-        creatureAuth: meta?.creature?.auth,
-      });
-    }
+    const toolsResult = await listToolsWithRetry({
+      client,
+      serverName,
+      timeoutMs: findRootByMcpName(serverName) ? 15000 : 5000,
+    });
+    tools = buildToolsMapFromRawTools({
+      serverName,
+      rawTools: toolsResult.tools,
+    });
   } catch (error) {
     console.error(`[MCP] Failed to list tools from ${serverName}:`, error);
+    if (isToolsListNotReadyError(error)) {
+      console.warn(`[MCP] ${serverName} does not expose tools/list; continuing with zero tools.`);
+    } else {
+      scheduleToolsSyncRetry({ serverName, client, delayMs: 2000 });
+    }
   }
 
   // Cache resources
@@ -2604,69 +2624,124 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   connections.set(canonicalName, connection);
   setMcpStatus(canonicalName, "ok");
 
-  // Dev MCP stdout watchers.
-  // Two separate concerns are handled by watching the spawned process output:
+  // Dev MCP stdout watcher — two independent reload paths.
   //
-  // 1. Server restart detection ("listening on"):
-  //    tsx watch restarts the server process when source files change. The
-  //    parent npm process stays alive, so the spawned process doesn't exit —
-  //    only the HTTP server restarts on the same port with a new session.
-  //    We detect this via "listening on" in stdout and reconnect the MCP
-  //    client. A 5-second settling delay avoids catching the initial startup.
-  //    reconnectServer only reconciles pips structurally (closing stale ones)
-  //    but does NOT refresh HTML — that waits for the UI build to finish.
+  // The dev process runs `concurrently "tsx watch ..." "vite build --watch"`.
+  // Two distinct signals trigger two independent actions:
   //
-  // 2. UI build completion ("App UI reloaded"):
-  //    vite build --watch rebuilds the UI HTML when source files change.
-  //    The SDK's vite plugin logs "App UI reloaded" when the build finishes
-  //    and HMR clients are notified. This is the ONLY reliable signal that
-  //    the singlefile HTML is complete and safe to inject into pip iframes.
-  //    We debounce by 500ms to handle rapid rebuilds, then refresh all pips.
-  //    No settling delay — we want to catch initial builds and rebuilds.
+  //   "MCP server ready" → tsx watch restarted the inner server.
+  //     The process is still running. We soft-reconnect the MCP
+  //     transport (close old client, create new client to same port).
+  //     No process kill, no respawn, no timing issues.
+  //
+  //   "App UI reloaded" → vite build --watch rebuilt the HTML.
+  //     We refresh all pip iframes with fresh HTML.
+  //
+  // Both paths are debounced independently. When both signals arrive
+  // close together (which they usually do — a server file change
+  // triggers tsx restart AND vite rebuild), both actions run. The
+  // soft reconnect is fast (~500ms) and the pip refresh reads the
+  // freshly built HTML from disk.
+  //
+  // Because the process is never killed, the stdout watchers remain
+  // active for the lifetime of the dev process. No settling delays,
+  // no safety-net timers, no missed signals.
+  //
+  // A brief settling delay (500ms) after initial startup avoids
+  // reacting to the boot's "MCP server ready" (which has already
+  // fired by the time createConnection reaches this point).
   if (!app.isPackaged && spawnedProcess && actualTransportType === "streamable-http") {
     const storedName = canonicalName;
 
-    // UI build completion → pip HTML refresh (no settling delay)
-    let uiReloadTimer: ReturnType<typeof setTimeout> | null = null;
-    const UI_RELOAD_DEBOUNCE_MS = 500;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const DEBOUNCE_MS = 1000;
+    let lastServerReadyAt = 0;
+    let lastServerErrorAt = 0;
 
-    const onUiReloaded = (data: Buffer) => {
-      if (!data.toString().includes("App UI reloaded")) return;
-      console.log(`[MCP] UI build complete for ${storedName}`);
+    /**
+     * Detect dev server build errors from stdout/stderr output.
+     */
+    const isDevServerBuildError = ({ text }: { text: string }): boolean => {
+      const normalized = text.toLowerCase();
+      return (
+        normalized.includes("error [transformerror]") ||
+        normalized.includes("transform failed") ||
+        normalized.includes("syntaxerror") ||
+        normalized.includes("error ts")
+      );
+    };
 
-      if (uiReloadTimer) clearTimeout(uiReloadTimer);
-      uiReloadTimer = setTimeout(async () => {
+    /**
+     * Check if a recent server build error should block a pip refresh.
+     */
+    const shouldBlockPipRefresh = ({ now }: { now: number }): boolean => {
+      return lastServerErrorAt > lastServerReadyAt && lastServerErrorAt <= now;
+    };
+
+    /**
+     * Debounced soft-reconnect. Closes the stale MCP transport and
+     * creates a new one to the same port. The dev process stays alive.
+     */
+    const scheduleReconnect = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(async () => {
+        try {
+          await softReconnectDevServer({ serverName: storedName });
+        } catch (err) {
+          console.warn(`[MCP] Dev soft-reconnect failed for ${storedName}:`, err);
+        }
+      }, DEBOUNCE_MS);
+    };
+
+    /**
+     * Debounced pip refresh. Reloads all pip iframes with fresh HTML.
+     */
+    const schedulePipRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async () => {
+        if (shouldBlockPipRefresh({ now: Date.now() })) {
+          console.warn(`[MCP] Skipping pip refresh for ${storedName} due to server build error.`);
+          return;
+        }
+
         try {
           await refreshAllPipsForMcp({ mcpName: storedName });
         } catch (err) {
-          console.warn(`[MCP] UI reload refresh failed for ${storedName}:`, err);
+          console.warn(`[MCP] Dev pip refresh failed for ${storedName}:`, err);
         }
-      }, UI_RELOAD_DEBOUNCE_MS);
+      }, DEBOUNCE_MS);
     };
 
-    spawnedProcess.stdout?.on("data", onUiReloaded);
-    spawnedProcess.stderr?.on("data", onUiReloaded);
-
-    // Server restart detection → reconnect only (5-second settling delay)
+    // Start listening after a brief settling delay to skip the
+    // initial boot's "MCP server ready" (already fired before
+    // createConnection reached this point).
     setTimeout(() => {
       if (spawnedProcess.killed || !connections.has(storedName)) return;
 
-      const onRestartDetected = (data: Buffer) => {
-        if (!data.toString().includes("listening on")) return;
-        console.log(`[MCP] Detected dev server restart for ${storedName}`);
+      const onOutput = (data: Buffer) => {
+        const text = data.toString();
 
-        setTimeout(async () => {
-          try {
-            await reconnectServer(storedName);
-          } catch (err) {
-            console.warn(`[MCP] Proactive reconnect after restart failed for ${storedName}:`, err);
-          }
-        }, 1000);
+        if (isDevServerBuildError({ text })) {
+          lastServerErrorAt = Date.now();
+          console.warn(`[MCP] Dev server build error for ${storedName}.`);
+        }
+
+        if (text.includes("MCP server ready")) {
+          lastServerReadyAt = Date.now();
+          console.log(`[MCP] Dev server restarted: ${storedName}`);
+          scheduleReconnect();
+        }
+
+        if (text.includes("App UI reloaded")) {
+          console.log(`[MCP] UI build complete: ${storedName}`);
+          schedulePipRefresh();
+        }
       };
 
-      spawnedProcess.stdout?.on("data", onRestartDetected);
-      spawnedProcess.stderr?.on("data", onRestartDetected);
-    }, 5000);
+      spawnedProcess.stdout?.on("data", onOutput);
+      spawnedProcess.stderr?.on("data", onOutput);
+    }, 500);
   }
 
   return connection;
@@ -2676,7 +2751,6 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     // Clean up on failure: release port and kill spawned process
     if (portAllocated) {
       portManager.release({ serverName });
-      portManager.release({ serverName: `${serverName}-hmr` });
     }
     if (spawnedProcess && !spawnedProcess.killed) {
       killProcessTree(spawnedProcess);
@@ -2772,7 +2846,7 @@ export const initMcpsForProject = async ({
   }
 
   // Initialize Development MCPs first (they take precedence over built-in MCPs)
-  // Dev MCPs run with `npm run dev` for HMR support during development
+  // Dev MCPs run with `npm run dev` for file-watching during development
   for (const devMcpName of devMcpNames) {
     try {
       await getConnection(devMcpName);
@@ -2851,7 +2925,6 @@ const closeConnection = async ({ name }: { name: string }): Promise<void> => {
       }
       // Release ports so they can be reused
       portManager.release({ serverName: name });
-      portManager.release({ serverName: `${name}-hmr` });
     }
     connections.delete(name);
   }
@@ -3015,14 +3088,12 @@ export const closeAllConnections = async (): Promise<void> => {
         }
         // Release ports assigned to this MCP
         portManager.release({ serverName: name });
-        portManager.release({ serverName: `${name}-hmr` });
       }
 
       // Kill spawned process for HTTP-based local MCPs
       if (conn.spawnedProcess && !conn.spawnedProcess.killed) {
         killProcessTree(conn.spawnedProcess);
         portManager.release({ serverName: name });
-        portManager.release({ serverName: `${name}-hmr` });
       }
       if (conn.spawnedProcess?.pid) {
         unregisterMcpProcess({ pid: conn.spawnedProcess.pid, serverName: name });
@@ -3520,32 +3591,440 @@ const isSessionInvalidError = (error: unknown): boolean => {
 };
 
 /**
- * Reconnect to an MCP server after a session error.
+ * Detect whether a tools/list call failed because the server is not ready yet.
+ *
+ * This is a transient startup condition where the server responds with
+ * a JSON-RPC -32601 "Method not found" before handlers are fully registered.
+ */
+const isToolsListNotReadyError = (error: unknown): boolean => {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  return errorMessage.includes("Method not found") || errorMessage.includes("-32601");
+};
+
+/**
+ * List tools with a short retry window to avoid startup races.
+ *
+ * Retries only on the transient "Method not found" response that can occur
+ * before the server finishes registering handlers.
+ */
+const listToolsWithRetry = async ({
+  client,
+  serverName,
+  timeoutMs = 15000,
+  initialBackoffMs = 200,
+  maxBackoffMs = 2000,
+}: {
+  client: Client;
+  serverName: string;
+  timeoutMs?: number;
+  initialBackoffMs?: number;
+  maxBackoffMs?: number;
+}): Promise<Awaited<ReturnType<Client["listTools"]>>> => {
+  const startTime = Date.now();
+  let attempt = 0;
+  let lastError: Error | undefined;
+  let backoffMs = initialBackoffMs;
+
+  while (true) {
+    attempt += 1;
+    try {
+      return await client.listTools();
+    } catch (error) {
+      if (!isToolsListNotReadyError(error)) {
+        throw error;
+      }
+
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const elapsedMs = Date.now() - startTime;
+      if (elapsedMs >= timeoutMs) {
+        console.warn(
+          `[MCP] tools/list not ready after ${attempt} attempts (${elapsedMs}ms) for ${serverName}: ${lastError.message}`
+        );
+        throw lastError;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      backoffMs = Math.min(maxBackoffMs, backoffMs * 2);
+    }
+  }
+};
+
+/**
+ * Build a cached tool map from raw MCP tool definitions.
+ */
+const buildToolsMapFromRawTools = ({
+  serverName,
+  rawTools,
+}: {
+  serverName: string;
+  rawTools: Array<{
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    _meta?: unknown;
+  }>;
+}): Map<string, CachedTool> => {
+  const tools = parseToolsFromServer({ serverName, rawTools });
+
+  for (const t of rawTools) {
+    const meta = t._meta as {
+      ui?: {
+        resourceUri?: string;
+        displayModes?: string[];
+        experimental?: {
+          defaultDisplayMode?: string;
+          openInBackground?: boolean;
+        };
+      };
+      creature?: {
+        auth?: { managed?: boolean };
+      };
+    } | undefined;
+
+    const inputSchema = (t.inputSchema as Record<string, unknown>) || { type: "object" };
+    if (!inputSchema.type) {
+      inputSchema.type = "object";
+    }
+
+    let description = t.description || "";
+    if (meta?.ui?.displayModes?.length) {
+      description += ` [Display modes: ${meta.ui.displayModes.join(", ")}]`;
+    }
+
+    tools.set(t.name, {
+      name: t.name,
+      serverName,
+      description,
+      inputSchema,
+      resourceUri: meta?.ui?.resourceUri,
+      displayModes: meta?.ui?.displayModes,
+      defaultDisplayMode: meta?.ui?.experimental?.defaultDisplayMode,
+      openInBackground: meta?.ui?.experimental?.openInBackground,
+      creatureAuth: meta?.creature?.auth,
+    });
+  }
+
+  return tools;
+};
+
+/**
+ * Track background tool sync timers for servers that were not ready at connect time.
+ */
+const toolsSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Retry tools/list in the background until it succeeds.
+ */
+const scheduleToolsSyncRetry = ({
+  serverName,
+  client,
+  delayMs,
+}: {
+  serverName: string;
+  client: Client;
+  delayMs: number;
+}): void => {
+  if (toolsSyncTimers.has(serverName)) return;
+
+  const timer = setTimeout(async () => {
+    toolsSyncTimers.delete(serverName);
+    const conn = connections.get(serverName);
+    if (!conn || conn.client !== client) return;
+
+    try {
+      const toolsResult = await listToolsWithRetry({
+        client,
+        serverName,
+        timeoutMs: 30000,
+      });
+
+      conn.tools = buildToolsMapFromRawTools({
+        serverName,
+        rawTools: toolsResult.tools,
+      });
+
+      const toolNames = Array.from(conn.tools.keys()).join(", ");
+      console.log(`[MCP] Tools ready for ${serverName} (${conn.tools.size} tools: ${toolNames})`);
+    } catch {
+      scheduleToolsSyncRetry({
+        serverName,
+        client,
+        delayMs: Math.min(delayMs * 2, 10000),
+      });
+    }
+  }, delayMs);
+
+  toolsSyncTimers.set(serverName, timer);
+};
+
+/**
+ * Per-server reconnect lock.
+ * Prevents concurrent reconnects from racing and spawning duplicate processes.
+ * Multiple sources can trigger reconnection simultaneously (stdout watcher,
+ * session-invalid errors in readResource/callTool). Without this lock, each
+ * call would kill the process and spawn a new one, creating 2-3 duplicate
+ * processes that corrupt the connection state.
+ */
+const reconnectLocks = new Map<string, Promise<void>>();
+
+/**
+ * Soft-reconnect a dev MCP server's transport.
+ *
+ * Unlike reconnectServer (which kills the process and respawns it),
+ * this only closes the MCP client transport and creates a new one
+ * pointing at the same URL. The dev process (tsx watch + vite build
+ * --watch) stays alive, so stdout watchers remain active and there
+ * are no timing issues with vite rebuilds.
+ *
+ * Used when tsx watch restarts the inner server: the process is
+ * still running, but the old MCP session is dead. We just need a
+ * fresh transport to the same port.
+ *
+ * Serialized per server via reconnectLocks.
+ */
+const softReconnectDevServer = async ({ serverName }: { serverName: string }): Promise<void> => {
+  const existingLock = reconnectLocks.get(serverName);
+  if (existingLock) {
+    console.debug(`[PipLifecycle] softReconnect WAITING (already in progress) ${serverName}`);
+    await existingLock;
+    return;
+  }
+
+  let resolveLock: () => void = () => {};
+  const lock = new Promise<void>((resolve) => { resolveLock = resolve; });
+  reconnectLocks.set(serverName, lock);
+
+  try {
+    const conn = connections.get(serverName);
+    if (!conn) {
+      console.warn(`[MCP] softReconnect: no connection for ${serverName}`);
+      return;
+    }
+
+    console.debug(`[PipLifecycle] softReconnect START ${serverName}`);
+
+    // 1. Close old client transport (NOT the process)
+    try {
+      await Promise.race([
+        conn.client.close(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Client close timeout")), 2000)
+        ),
+      ]);
+    } catch (e) {
+      console.debug(`[MCP] softReconnect: old client close error (expected): ${e}`);
+    }
+
+    // 2. Derive URL from the port manager's assignment
+    const port = portManager.getAssigned({ serverName });
+    if (!port) {
+      console.error(`[MCP] softReconnect: no port found for ${serverName}`);
+      return;
+    }
+    const url = new URL(`http://localhost:${port}/mcp`);
+
+    // 3. Create new client with all handlers
+    const client = new Client(
+      { name: "creature", version: "1.0.0" },
+      { capabilities: { sampling: { tools: {}, context: {} } } }
+    );
+
+    // Logging handler
+    client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+      const { level, data } = notification.params;
+      let message: string;
+      if (typeof data === "string") {
+        message = data;
+      } else if (typeof data === "object" && data !== null && "message" in data) {
+        message = String((data as { message: unknown }).message);
+      } else {
+        message = JSON.stringify(data);
+      }
+      logAggregator.log({
+        source: "mcp",
+        sourceName: serverName,
+        level: level as LogLevel,
+        message,
+        data: typeof data === "object" ? data : undefined,
+      });
+    });
+
+    // Storage handlers
+    const createStorageHandler = (method: string) => {
+      return async (request: { method: string; params?: unknown }) => {
+        try {
+          return await dispatchStorageMethod(method, serverName, request.params);
+        } catch (error) {
+          console.error(`[MCP Storage] Error handling ${method}:`, error);
+          throw error;
+        }
+      };
+    };
+    client.setRequestHandler(StorageKvGetRequestSchema, createStorageHandler(STORAGE_METHODS.KV_GET));
+    client.setRequestHandler(StorageKvSetRequestSchema, createStorageHandler(STORAGE_METHODS.KV_SET));
+    client.setRequestHandler(StorageKvDeleteRequestSchema, createStorageHandler(STORAGE_METHODS.KV_DELETE));
+    client.setRequestHandler(StorageKvListRequestSchema, createStorageHandler(STORAGE_METHODS.KV_LIST));
+    client.setRequestHandler(StorageKvListWithValuesRequestSchema, createStorageHandler(STORAGE_METHODS.KV_LIST_WITH_VALUES));
+    client.setRequestHandler(StorageKvSearchRequestSchema, createStorageHandler(STORAGE_METHODS.KV_SEARCH));
+    client.setRequestHandler(StorageVectorUpsertRequestSchema, createStorageHandler(STORAGE_METHODS.VECTOR_UPSERT));
+    client.setRequestHandler(StorageVectorSearchRequestSchema, createStorageHandler(STORAGE_METHODS.VECTOR_SEARCH));
+    client.setRequestHandler(StorageVectorDeleteRequestSchema, createStorageHandler(STORAGE_METHODS.VECTOR_DELETE));
+    client.setRequestHandler(StorageBlobPutRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_PUT));
+    client.setRequestHandler(StorageBlobGetRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_GET));
+    client.setRequestHandler(StorageBlobDeleteRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_DELETE));
+    client.setRequestHandler(StorageBlobListRequestSchema, createStorageHandler(STORAGE_METHODS.BLOB_LIST));
+
+    // Sampling handler (simplified — dev MCPs rarely use sampling)
+    client.setRequestHandler(CreateMessageRequestSchema, async () => {
+      throw new McpError(ErrorCode.InvalidRequest, "Sampling not supported during soft reconnect");
+    });
+
+    // 4. Connect with retry
+    const maxRetries = 5;
+    const initialBackoffMs = 500;
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const transport = new StreamableHTTPClientTransport(url);
+        await client.connect(transport);
+        conn.transport = transport;
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt === maxRetries) {
+          console.error(`[MCP] softReconnect failed after ${maxRetries} attempts: ${lastError.message}`);
+          throw lastError;
+        }
+        const backoffMs = initialBackoffMs * Math.pow(2, attempt - 1);
+        console.log(`[MCP] softReconnect attempt ${attempt}/${maxRetries} for ${serverName} failed, retrying in ${backoffMs}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+
+    // 5. Refresh tools and resources
+    let tools = new Map<string, CachedTool>();
+    try {
+      const toolsResult = await listToolsWithRetry({
+        client,
+        serverName,
+        timeoutMs: findRootByMcpName(serverName) ? 15000 : 5000,
+      });
+      tools = buildToolsMapFromRawTools({
+        serverName,
+        rawTools: toolsResult.tools,
+      });
+    } catch (error) {
+      console.error(`[MCP] softReconnect: failed to list tools from ${serverName}:`, error);
+      if (isToolsListNotReadyError(error)) {
+        console.warn(`[MCP] ${serverName} does not expose tools/list; continuing with zero tools.`);
+      } else {
+        scheduleToolsSyncRetry({ serverName, client, delayMs: 2000 });
+      }
+    }
+
+    const resources = new Map<string, CachedResource>();
+    try {
+      const resourcesResult = await client.listResources();
+      for (const r of resourcesResult.resources) {
+        const meta = r._meta as {
+          ui?: {
+            icon?: ResourceIcon;
+            views?: Views;
+            instanceMode?: "single" | "multiple";
+          };
+        } | undefined;
+        resources.set(r.uri, {
+          uri: r.uri,
+          name: r.name,
+          mimeType: r.mimeType,
+          icon: meta?.ui?.icon,
+          views: meta?.ui?.views,
+          instanceMode: meta?.ui?.instanceMode,
+        });
+      }
+    } catch (error) {
+      console.error(`[MCP] softReconnect: failed to list resources from ${serverName}:`, error);
+    }
+
+    // 6. Update connection record in place (keep spawnedProcess, transportType)
+    conn.client = client;
+    conn.tools = tools;
+    conn.resources = resources;
+    conn.resourceCache = new Map();
+    conn.sessionId = (conn.transport as StreamableHTTPClientTransport).sessionId;
+    conn.instructions = client.getInstructions();
+
+    // 7. Structural reconciliation — close pips whose resources no longer exist
+    await reconcilePipsForMcp({ mcpName: serverName });
+
+    // 8. Notify renderer so sidebar refreshes resource list
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("mcp:restarted", { name: serverName });
+    }
+
+    const toolNames = Array.from(tools.keys()).join(", ");
+    console.log(`[MCP] Soft-reconnected to ${serverName} (${tools.size} tools: ${toolNames})`);
+  } finally {
+    resolveLock();
+    if (reconnectLocks.get(serverName) === lock) {
+      reconnectLocks.delete(serverName);
+    }
+  }
+};
+
+/**
+ * Reconnect to an MCP server after a session error or dev server restart.
+ *
+ * Serialized per server: if a reconnect is already in progress, subsequent
+ * callers wait for it to complete rather than starting their own. This
+ * prevents the duplicate-process-spawning bug.
  *
  * Closes the existing connection and creates a fresh one. If the server
  * declares a different canonical name after reconnection (e.g., the developer
  * renamed it), createConnection handles the re-keying and UI cleanup.
+ *
+ * Performs structural reconciliation (closing pips whose resources no longer
+ * exist) but does NOT reload pip HTML — the caller handles that via
+ * refreshAllPipsForMcp after reconnection completes.
  */
 const reconnectServer = async (serverName: string): Promise<void> => {
-  console.debug(`[PipLifecycle] reconnectServer START ${serverName}`);
-  await closeConnection({ name: serverName });
-
-  // Create new connection — createConnection handles name reconciliation
-  await getConnection(serverName);
-
-  // Structural reconciliation — close pips whose resources no longer exist.
-  // Does NOT refresh HTML content. The existing pip keeps its current
-  // (working) HTML until the UI build completes and the "App UI reloaded"
-  // stdout watcher triggers refreshAllPipsForMcp.
-  await reconcilePipsForMcp({ mcpName: serverName });
-
-  // Notify renderer so sidebar refreshes resource list
-  const mainWindow = getMainWindow();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("mcp:restarted", { name: serverName });
+  // If a reconnect is already in progress, wait for it instead of starting another
+  const existingLock = reconnectLocks.get(serverName);
+  if (existingLock) {
+    console.debug(`[PipLifecycle] reconnectServer WAITING (already in progress) ${serverName}`);
+    await existingLock;
+    return;
   }
 
-  console.log(`[MCP] Reconnected to ${serverName}`);
+  let resolveLock: () => void = () => {};
+  const lock = new Promise<void>((resolve) => { resolveLock = resolve; });
+  reconnectLocks.set(serverName, lock);
+
+  try {
+    console.debug(`[PipLifecycle] reconnectServer START ${serverName}`);
+    await closeConnection({ name: serverName });
+
+    // Create new connection — createConnection handles name reconciliation
+    await getConnection(serverName);
+
+    // Structural reconciliation — close pips whose resources no longer exist
+    await reconcilePipsForMcp({ mcpName: serverName });
+
+    // Notify renderer so sidebar refreshes resource list
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("mcp:restarted", { name: serverName });
+    }
+
+    console.log(`[MCP] Reconnected to ${serverName}`);
+  } finally {
+    resolveLock();
+    if (reconnectLocks.get(serverName) === lock) {
+      reconnectLocks.delete(serverName);
+    }
+  }
 };
 
 

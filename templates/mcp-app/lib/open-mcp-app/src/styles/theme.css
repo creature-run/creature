@@ -1,0 +1,119 @@
+@theme {
+  /* Reset Tailwind defaults */
+  --color-*: initial;
+  --shadow-*: initial;
+  --radius-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+
+  /* =============================================
+    Background colors (bg-bg-*)
+  ============================================= */
+  --color-bg-primary: var(--color-background-primary);
+  --color-bg-secondary: var(--color-background-secondary);
+  --color-bg-tertiary: var(--color-background-tertiary);
+  --color-bg-inverse: var(--color-background-inverse);
+  --color-bg-ghost: var(--color-background-ghost);
+  --color-bg-info: var(--color-background-info);
+  --color-bg-danger: var(--color-background-danger);
+  --color-bg-success: var(--color-background-success);
+  --color-bg-warning: var(--color-background-warning);
+  --color-bg-disabled: var(--color-background-disabled);
+
+  /* =============================================
+    Text colors (text-txt-*)
+  ============================================= */
+  --color-txt-primary: var(--color-text-primary);
+  --color-txt-secondary: var(--color-text-secondary);
+  --color-txt-tertiary: var(--color-text-tertiary);
+  --color-txt-inverse: var(--color-text-inverse);
+  --color-txt-ghost: var(--color-text-ghost);
+  --color-txt-info: var(--color-text-info);
+  --color-txt-danger: var(--color-text-danger);
+  --color-txt-success: var(--color-text-success);
+  --color-txt-warning: var(--color-text-warning);
+  --color-txt-disabled: var(--color-text-disabled);
+
+  /* =============================================
+    Border colors (border-bdr-*)
+  ============================================= */
+  --color-bdr-primary: var(--color-border-primary);
+  --color-bdr-secondary: var(--color-border-secondary);
+  --color-bdr-tertiary: var(--color-border-tertiary);
+  --color-bdr-inverse: var(--color-border-inverse);
+  --color-bdr-ghost: var(--color-border-ghost);
+  --color-bdr-info: var(--color-border-info);
+  --color-bdr-danger: var(--color-border-danger);
+  --color-bdr-success: var(--color-border-success);
+  --color-bdr-warning: var(--color-border-warning);
+  --color-bdr-disabled: var(--color-border-disabled);
+
+  /* =============================================
+    Ring colors (ring-ring-*)
+  ============================================= */
+  --color-ring-primary: var(--color-ring-primary);
+  --color-ring-secondary: var(--color-ring-secondary);
+  --color-ring-inverse: var(--color-ring-inverse);
+  --color-ring-info: var(--color-ring-info);
+  --color-ring-danger: var(--color-ring-danger);
+  --color-ring-success: var(--color-ring-success);
+  --color-ring-warning: var(--color-ring-warning);
+
+  /* =============================================
+    Typography
+  ============================================= */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-weight-normal: var(--font-weight-normal);
+  --font-weight-medium: var(--font-weight-medium);
+  --font-weight-semibold: var(--font-weight-semibold);
+  --font-weight-bold: var(--font-weight-bold);
+
+  /* =============================================
+    Text sizes (MCP Apps spec)
+  ============================================= */
+  --text-xs: var(--font-text-xs-size);
+  --text-xs--line-height: var(--font-text-xs-line-height);
+  --text-sm: var(--font-text-sm-size);
+  --text-sm--line-height: var(--font-text-sm-line-height);
+  --text-base: var(--font-text-md-size);
+  --text-base--line-height: var(--font-text-md-line-height);
+  --text-lg: var(--font-text-lg-size);
+  --text-lg--line-height: var(--font-text-lg-line-height);
+
+  /* =============================================
+    Heading sizes (MCP Apps spec)
+  ============================================= */
+  --text-heading-xs: var(--font-heading-xs-size);
+  --text-heading-xs--line-height: var(--font-heading-xs-line-height);
+  --text-heading-sm: var(--font-heading-sm-size);
+  --text-heading-sm--line-height: var(--font-heading-sm-line-height);
+  --text-heading-md: var(--font-heading-md-size);
+  --text-heading-md--line-height: var(--font-heading-md-line-height);
+  --text-heading-lg: var(--font-heading-lg-size);
+  --text-heading-lg--line-height: var(--font-heading-lg-line-height);
+  --text-heading-xl: var(--font-heading-xl-size);
+  --text-heading-xl--line-height: var(--font-heading-xl-line-height);
+  --text-heading-2xl: var(--font-heading-2xl-size);
+  --text-heading-2xl--line-height: var(--font-heading-2xl-line-height);
+  --text-heading-3xl: var(--font-heading-3xl-size);
+  --text-heading-3xl--line-height: var(--font-heading-3xl-line-height);
+
+  /* =============================================
+    Border radius
+  ============================================= */
+  --radius-xs: var(--border-radius-xs);
+  --radius-sm: var(--border-radius-sm);
+  --radius-md: var(--border-radius-md);
+  --radius-lg: var(--border-radius-lg);
+  --radius-xl: var(--border-radius-xl);
+  --radius-full: var(--border-radius-full);
+
+  /* =============================================
+    Shadows
+  ============================================= */
+  --shadow-hairline: var(--shadow-hairline);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+}
