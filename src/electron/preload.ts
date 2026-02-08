@@ -393,6 +393,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
       sessions?: ChatSessionSummary[];
       error?: string;
     }> => ipcRenderer.invoke("chatSession:setPinned", params),
+    exportMarkdown: (params: {
+      projectId: string;
+      sessionId: string;
+    }): Promise<{
+      success: boolean;
+      filePath?: string;
+      canceled?: boolean;
+      error?: string;
+    }> => ipcRenderer.invoke("chatSession:exportMarkdown", params),
   },
 
   // Image upload for chat messages
@@ -1069,6 +1078,15 @@ declare global {
           success: boolean;
           session?: ChatSessionSummary;
           sessions?: ChatSessionSummary[];
+          error?: string;
+        }>;
+        exportMarkdown: (params: {
+          projectId: string;
+          sessionId: string;
+        }) => Promise<{
+          success: boolean;
+          filePath?: string;
+          canceled?: boolean;
           error?: string;
         }>;
       };

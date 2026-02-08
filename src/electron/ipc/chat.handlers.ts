@@ -8,7 +8,8 @@
  * Also stores the current conversation history for Dev Console access.
  */
 
-import { ipcMain } from "electron";
+import { dialog, ipcMain } from "electron";
+import fs from "node:fs";
 import { startChatServer, isChatServerRunning } from "../server/chatServer";
 import {
   listSessions,
@@ -18,6 +19,7 @@ import {
   saveSessionState,
   renameSession,
   setSessionPinned,
+  buildSessionMarkdownExport,
   type ChatSessionState,
 } from "../storage/chatSessionStore";
 
@@ -27,6 +29,18 @@ import {
  * Used by the Dev Console to display conversation state.
  */
 let currentConversation: unknown[] = [];
+
+const SESSION_EXPORT_FILENAME_FALLBACK = "chat-session";
+
+const toSessionExportFilename = (title: string): string => {
+  const normalized = title
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  const safeTitle = normalized.length > 0 ? normalized : SESSION_EXPORT_FILENAME_FALLBACK;
+  return `${safeTitle.slice(0, 80).replace(/\s+/g, "-")}.md`;
+};
 
 /**
  * Get the current conversation history.
@@ -253,6 +267,43 @@ export const registerChatHandlers = () => {
         return {
           success: false,
           error: error instanceof Error ? error.message : "Failed to update session pin state",
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "chatSession:exportMarkdown",
+    async (_, { projectId, sessionId }: { projectId: string; sessionId: string }) => {
+      try {
+        if (!projectId) {
+          return { success: false, error: "projectId is required" };
+        }
+        if (!sessionId) {
+          return { success: false, error: "sessionId is required" };
+        }
+
+        const { summary, markdown } = buildSessionMarkdownExport(projectId, sessionId);
+        const result = await dialog.showSaveDialog({
+          title: "Export Chat as Markdown",
+          defaultPath: toSessionExportFilename(summary.title),
+          filters: [{ name: "Markdown", extensions: ["md"] }],
+        });
+
+        if (result.canceled || !result.filePath) {
+          return { success: false, canceled: true };
+        }
+
+        fs.writeFileSync(result.filePath, markdown, "utf8");
+        return {
+          success: true,
+          filePath: result.filePath,
+        };
+      } catch (error) {
+        console.error("[ChatSession] Failed to export session as markdown:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to export session as markdown",
         };
       }
     }

@@ -877,3 +877,130 @@ export const setSessionPinned = (
     sessions: listSessions(projectId),
   };
 };
+
+const sanitizeMarkdownImageAlt = (value: string): string => {
+  return value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+};
+
+const toExportRoleLabel = (role: unknown): "User" | "Assistant" | null => {
+  if (role === "user") return "User";
+  if (role === "assistant") return "Assistant";
+  return null;
+};
+
+const extractMarkdownFromMessage = (
+  message: unknown
+): { roleLabel: "User" | "Assistant"; content: string } | null => {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const candidate = message as {
+    role?: unknown;
+    parts?: unknown;
+    content?: unknown;
+  };
+  const roleLabel = toExportRoleLabel(candidate.role);
+  if (!roleLabel) {
+    return null;
+  }
+
+  const blocks: string[] = [];
+  if (Array.isArray(candidate.parts)) {
+    for (const part of candidate.parts) {
+      if (!part || typeof part !== "object") {
+        continue;
+      }
+
+      const p = part as {
+        type?: unknown;
+        text?: unknown;
+        mediaType?: unknown;
+        url?: unknown;
+        filename?: unknown;
+      };
+
+      if (p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0) {
+        blocks.push(p.text.trim());
+        continue;
+      }
+
+      if (
+        p.type === "file" &&
+        typeof p.mediaType === "string" &&
+        p.mediaType.startsWith("image/") &&
+        typeof p.url === "string" &&
+        p.url.length > 0
+      ) {
+        const alt =
+          typeof p.filename === "string" && p.filename.trim().length > 0
+            ? p.filename.trim()
+            : "Attached image";
+        blocks.push(`![${sanitizeMarkdownImageAlt(alt)}](${p.url})`);
+      }
+    }
+  }
+
+  if (blocks.length === 0 && typeof candidate.content === "string" && candidate.content.trim().length > 0) {
+    blocks.push(candidate.content.trim());
+  }
+
+  if (blocks.length === 0) {
+    return null;
+  }
+
+  return {
+    roleLabel,
+    content: blocks.join("\n\n"),
+  };
+};
+
+export const buildSessionMarkdownExport = (
+  projectId: string,
+  sessionId: string
+): { summary: ChatSessionSummary; markdown: string } => {
+  const db = getDb(projectId);
+  ensureInitialSession(db);
+
+  const session = getSessionWithStateById(db, sessionId);
+  if (!session) {
+    throw new Error("Chat session not found");
+  }
+
+  const streamedMessages = Array.isArray(session.state.streamedMessages)
+    ? session.state.streamedMessages
+    : [];
+  const exportMessages = streamedMessages
+    .map(extractMarkdownFromMessage)
+    .filter((message): message is { roleLabel: "User" | "Assistant"; content: string } => !!message);
+
+  const lines: string[] = [
+    `# ${session.summary.title}`,
+    "",
+    `- Session ID: \`${session.summary.id}\``,
+    `- Created At: ${session.summary.created_at}`,
+    `- Updated At: ${session.summary.updated_at}`,
+    `- Exported At: ${new Date().toISOString()}`,
+    "",
+    "---",
+    "",
+  ];
+
+  if (exportMessages.length === 0) {
+    lines.push("_No messages in this session._");
+  } else {
+    for (let index = 0; index < exportMessages.length; index += 1) {
+      const message = exportMessages[index];
+      lines.push(`## ${index + 1}. ${message.roleLabel}`);
+      lines.push("");
+      lines.push(message.content);
+      lines.push("");
+    }
+  }
+
+  const markdown = `${lines.join("\n").trimEnd()}\n`;
+  return {
+    summary: session.summary,
+    markdown,
+  };
+};

@@ -9,6 +9,7 @@ import {
   CaretRight,
   CaretDown,
   Plus,
+  FileArrowDown,
   Warning,
   XCircle,
   PushPin,
@@ -22,12 +23,19 @@ import { Button } from "./Button";
 import { Alert, AlertTitle, AlertDescription } from "./Alert";
 import { InlineWidget } from "./InlineWidget";
 import { Spinner } from "./Spinner";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./DropdownMenu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./DropdownMenu";
 import { Input } from "./Input";
 import { cn, startUpgrade } from "../lib/utils";
 import { useTheme } from "../contexts/ThemeContext";
 import { useApp } from "../contexts/AppContext";
 import { widgetStateStore, makePipWidgetId, parseWidgetId } from "../lib/widgetStateStore";
+import { toast } from "sonner";
 import type {
   ChatSessionState,
   ChatSessionSummary,
@@ -240,6 +248,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const [isSessionLoading, setIsSessionLoading] = useState(false);
   const [isSwitchingSession, setIsSwitchingSession] = useState(false);
   const [isSessionMetaUpdating, setIsSessionMetaUpdating] = useState(false);
+  const [isExportingSession, setIsExportingSession] = useState(false);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [isSessionMenuOpen, setIsSessionMenuOpen] = useState(false);
@@ -750,6 +759,36 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
     [applySessionUpdate, isSessionMetaUpdating, session.project?.id]
   );
 
+  const handleExportSessionMarkdown = useCallback(async () => {
+    if (!session.project?.id || !session.sessionId || isExportingSession) return;
+
+    setIsExportingSession(true);
+    try {
+      await flushPendingSave();
+      const result = await window.electronAPI.chatSession.exportMarkdown({
+        projectId: session.project.id,
+        sessionId: session.sessionId,
+      });
+
+      if (result.success && result.filePath) {
+        toast.success("Session exported as markdown");
+        setIsSessionMenuOpen(false);
+        return;
+      }
+
+      if (result.canceled) {
+        return;
+      }
+
+      toast.error(result.error || "Failed to export session as markdown");
+    } catch (exportError) {
+      console.error("[ViewChat] Failed to export session:", exportError);
+      toast.error("Failed to export session as markdown");
+    } finally {
+      setIsExportingSession(false);
+    }
+  }, [flushPendingSave, isExportingSession, session.project?.id, session.sessionId]);
+
   const handleSwitchSession = useCallback(
     async (targetSessionId: string) => {
       if (!session.project?.id || !targetSessionId || targetSessionId === session.sessionId) {
@@ -1060,7 +1099,8 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
 
   const isStreaming = status === "streaming" || status === "submitted";
   const activeSession = sessionOptions.find((sessionOption) => sessionOption.id === session.sessionId);
-  const isSessionBusy = isSessionLoading || isSwitchingSession || isSessionMetaUpdating;
+  const isSessionBusy =
+    isSessionLoading || isSwitchingSession || isSessionMetaUpdating || isExportingSession;
   const activeSessionTitle = activeSession?.title ?? "Session";
 
   /**
@@ -1598,6 +1638,21 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                     )}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={isSessionBusy}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleExportSessionMarkdown();
+                  }}
+                  className="text-xs"
+                >
+                  <FileArrowDown size={12} />
+                  <span>Export as Markdown</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={isSessionBusy}
                   onSelect={(event) => {
