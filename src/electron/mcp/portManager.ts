@@ -16,7 +16,7 @@
  */
 
 import * as net from "net";
-import { findRecordByPort } from "./processRegistry";
+import { findOrphanRecordByPort } from "./processRegistry";
 import { spawnSync } from "node:child_process";
 
 /**
@@ -145,8 +145,9 @@ class PortManager {
    * Safety: never kills processes that aren't in the Creature registry.
    */
   private async tryReclaimPort({ port }: { port: number }): Promise<boolean> {
-    // Check the registry first — this is the authoritative source for Creature processes
-    const registryRecord = findRecordByPort({ port });
+    // Check the registry for orphans only (prior runs, not current run).
+    // Current-run processes are actively managed and should never be killed here.
+    const registryRecord = findOrphanRecordByPort({ port });
 
     if (registryRecord) {
       console.log(`[PortManager] Port ${port} held by Creature orphan: PID ${registryRecord.pid} (${registryRecord.serverName})`);

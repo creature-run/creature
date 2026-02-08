@@ -91,7 +91,7 @@ const DEVKIT_MCP_NAME = "devkit";
  *
  * Tools:
  * - devkit_get_logs: Read from LogAggregator
- * - devkit_refresh_mcp_app: Restart an MCP App via restartMcp()
+ * - devkit_reload_mcp_app: Restart an MCP App via restartMcp()
  * - devkit_get_mcp_app_sdk_docs: Read SDK reference from disk
  */
 const handleDevkitToolCall = async ({
@@ -138,7 +138,7 @@ const handleDevkitToolCall = async ({
     };
   }
 
-  if (action === "refresh_mcp_app") {
+  if (action === "reload_mcp_app") {
     const mcpName = args.mcpName as string;
     if (!mcpName) {
       return {

@@ -252,6 +252,10 @@ export const registerMcpProcess = (input: Omit<McpProcessRecord, "createdAt" | "
 /**
  * Remove a process from the registry when it exits normally.
  * Accepts either PID or serverName to handle both precise and broad cleanup.
+ *
+ * Idempotent: silently no-ops if the PID/serverName is already gone,
+ * which happens because both closeConnection and proc.on("exit")
+ * call this for the same process.
  */
 export const unregisterMcpProcess = ({
   pid,
@@ -260,24 +264,36 @@ export const unregisterMcpProcess = ({
   pid?: number;
   serverName?: string;
 }): void => {
-  const records = readRegistry().filter((record) => {
+  const existing = readRegistry();
+  const filtered = existing.filter((record) => {
     if (pid && record.pid === pid) return false;
     if (serverName && record.serverName === serverName) return false;
     return true;
   });
-  writeRegistry(records);
+
+  const removedCount = existing.length - filtered.length;
+  if (removedCount === 0) return;
+
+  writeRegistry(filtered);
   if (pid) console.debug(`[ProcessRegistry] Unregistered PID ${pid}`);
 };
 
 /**
- * Find a registry record that owns a specific port.
+ * Find an orphan registry record that owns a specific port.
+ *
  * Used by portManager to determine if a busy port belongs to a Creature orphan
  * (safe to kill) vs an unrelated user process (must skip).
+ *
+ * Only returns records from prior runs (different runId). Current-run records
+ * are excluded because those processes are actively managed by the connection
+ * map and should never be killed by the port reclaim logic.
  */
-export const findRecordByPort = ({ port }: { port: number }): McpProcessRecord | undefined => {
+export const findOrphanRecordByPort = ({ port }: { port: number }): McpProcessRecord | undefined => {
   const records = readRegistry();
   return records.find(
-    (r) => r.ports?.mcp === port || r.ports?.hmr === port
+    (r) =>
+      r.runId !== CURRENT_RUN_ID &&
+      (r.ports?.mcp === port || r.ports?.hmr === port)
   );
 };
 

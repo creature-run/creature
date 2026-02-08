@@ -33,7 +33,7 @@ const app = createApp({
 
 Tools:
 - devkit_get_logs { filter?, mcpName? }: Fetch recent logs from Creature's aggregated log system. Filter by "all" (last 50), "current_mcp_app" (logs for a specific MCP App by name), or "errors" (error-level entries only).
-- devkit_refresh_mcp_app { mcpName }: Restart an MCP App server and refresh all its pip instances. Use this when the user has made code changes to their MCP App.
+- devkit_reload_mcp_app { mcpName }: Restart an MCP App server and reload all its pip instances. Use this when the user has made code changes to their MCP App.
 - devkit_get_mcp_app_sdk_docs: Fetch the MCP App SDK reference documentation. Use this to learn how to build MCP Apps with the open-mcp-app SDK.
 - devkit_get_conversation: (App-only) Fetch the current conversation history for inspection.
 - devkit_get_system_prompt: (App-only) Fetch the current system prompt for inspection.
@@ -53,7 +53,7 @@ Response style: When showing logs, summarize key findings (errors, patterns) rat
  * All tools route to the root view since this is a single-instance pip.
  */
 app.resource({
-  name: "Developer Kit",
+  name: "Devkit",
   uri: DEVKIT_UI_URI,
   description: "Log viewer, conversation inspector, and developer tools",
   displayModes: ["pip"],
@@ -62,7 +62,7 @@ app.resource({
   views: {
     "/": [
       "devkit_get_logs",
-      "devkit_refresh_mcp_app",
+      "devkit_reload_mcp_app",
       "devkit_get_mcp_app_sdk_docs",
       "devkit_get_conversation",
       "devkit_get_system_prompt",
@@ -90,6 +90,9 @@ app.tool(
     }),
     ui: DEVKIT_UI_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async () => ({
     data: { placeholder: true },
@@ -104,14 +107,17 @@ app.tool(
  * This handler is a no-op placeholder.
  */
 app.tool(
-  "devkit_refresh_mcp_app",
+  "devkit_reload_mcp_app",
   {
-    description: "Restart an MCP App server and refresh all its pip instances. Use this after code changes to see updates.",
+    description: "Restart an MCP App server and reload all its pip instances. Use this after code changes to see updates.",
     input: z.object({
       mcpName: z.string().describe("The MCP App server name to restart"),
     }),
     ui: DEVKIT_UI_URI,
     visibility: ["model", "app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async () => ({
     data: { placeholder: true },
@@ -151,6 +157,9 @@ app.tool(
     input: z.object({}),
     ui: DEVKIT_UI_URI,
     visibility: ["app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async () => ({
     data: { placeholder: true },
@@ -171,6 +180,9 @@ app.tool(
     input: z.object({}),
     ui: DEVKIT_UI_URI,
     visibility: ["app"],
+    experimental: {
+      openInBackground: true,
+    },
   },
   async () => ({
     data: { placeholder: true },

@@ -125,28 +125,34 @@ const TabBar = ({
 
 /**
  * Toolbar with a refresh button and optional children on the left side.
+ * Accepts an `actions` prop for buttons rendered to the left of the refresh button.
  * Shared across all tab views for consistent layout.
  */
 const Toolbar = ({
   onRefresh,
   isLoading,
   children,
+  actions,
 }: {
   onRefresh: () => void;
   isLoading: boolean;
   children?: React.ReactNode;
+  actions?: React.ReactNode;
 }) => (
   <div className="flex items-center justify-between px-3 py-1.5 border-b border-bdr-secondary shrink-0">
     <div className="flex items-center gap-2 text-xs text-txt-secondary">
       {children}
     </div>
-    <button
-      onClick={onRefresh}
-      disabled={isLoading}
-      className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors cursor-pointer disabled:opacity-40"
-    >
-      {isLoading ? "Loading..." : "Refresh"}
-    </button>
+    <div className="flex items-center gap-2">
+      {actions}
+      <button
+        onClick={onRefresh}
+        disabled={isLoading}
+        className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors cursor-pointer disabled:opacity-40"
+      >
+        {isLoading ? "Loading..." : "Refresh"}
+      </button>
+    </div>
   </div>
 );
 
@@ -480,9 +486,26 @@ const ConversationView = ({
     });
   }, []);
 
+  const handleCopy = useCallback(() => {
+    if (messages.length > 0) {
+      navigator.clipboard.writeText(JSON.stringify(messages, null, 2));
+    }
+  }, [messages]);
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <Toolbar onRefresh={onRefresh} isLoading={isLoading} />
+      <Toolbar
+        onRefresh={onRefresh}
+        isLoading={isLoading}
+        actions={messages.length > 0 ? (
+          <button
+            onClick={handleCopy}
+            className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors cursor-pointer"
+          >
+            Copy
+          </button>
+        ) : undefined}
+      />
       <div ref={parentRef} className="flex-1 overflow-y-auto min-h-0">
         {messages.length === 0 ? (
           <EmptyState message="No conversation history" />
@@ -553,16 +576,18 @@ const PromptView = ({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <Toolbar onRefresh={onRefresh} isLoading={isLoading}>
-        {hasPrompt && (
+      <Toolbar
+        onRefresh={onRefresh}
+        isLoading={isLoading}
+        actions={hasPrompt ? (
           <button
             onClick={handleCopy}
             className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors cursor-pointer"
           >
             Copy
           </button>
-        )}
-      </Toolbar>
+        ) : undefined}
+      />
       <div className="flex-1 overflow-y-auto min-h-0">
         {!hasPrompt ? (
           <EmptyState message="No system prompt available" />
