@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import type { WidgetState } from "../../shared/types";
 
 const CHAT_DB_FILENAME = "chat.sqlite";
 const DEFAULT_SESSION_TITLE = "New Session";
@@ -16,12 +17,31 @@ export interface TokenUsageState {
   totalTokens: number;
 }
 
+export interface PersistedPipSnapshot {
+  instanceId: string;
+  serverName: string;
+  resourceUri: string;
+  toolName: string;
+  title: string;
+  createdAt: number;
+  triggeredByTool?: boolean;
+  openInBackground?: boolean;
+  widgetState?: WidgetState;
+}
+
+export interface PersistedPipState {
+  pips: PersistedPipSnapshot[];
+  pipOrder: string[];
+  activePipId: string | null;
+}
+
 export interface ChatSessionState {
   streamedMessages: unknown[];
   injectedMessages: unknown[];
   messageOrder: Record<string, number>;
   nextOrder: number;
   tokenUsage: TokenUsageState;
+  pipState: PersistedPipState;
 }
 
 export interface ChatSessionSummary {
@@ -40,6 +60,14 @@ export interface ChatSessionWithState {
   state: ChatSessionState;
 }
 
+const createDefaultPipState = (): PersistedPipState => ({
+  pips: [],
+  pipOrder: [],
+  activePipId: null,
+});
+
+const DEFAULT_PIP_STATE_JSON = JSON.stringify(createDefaultPipState());
+
 const DEFAULT_STATE: ChatSessionState = {
   streamedMessages: [],
   injectedMessages: [],
@@ -50,6 +78,7 @@ const DEFAULT_STATE: ChatSessionState = {
     outputTokens: 0,
     totalTokens: 0,
   },
+  pipState: createDefaultPipState(),
 };
 
 const nowMs = (): number => Date.now();
@@ -113,6 +142,145 @@ const normalizeMessageOrder = (value: unknown): Record<string, number> => {
   return normalized;
 };
 
+const normalizeWidgetState = (value: unknown): WidgetState | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const next: WidgetState = {};
+
+  if (
+    raw.modelContent === null ||
+    typeof raw.modelContent === "string" ||
+    (typeof raw.modelContent === "object" && !Array.isArray(raw.modelContent))
+  ) {
+    next.modelContent = raw.modelContent as WidgetState["modelContent"];
+  }
+
+  if (
+    raw.privateContent === null ||
+    (typeof raw.privateContent === "object" && !Array.isArray(raw.privateContent))
+  ) {
+    next.privateContent = raw.privateContent as WidgetState["privateContent"];
+  }
+
+  if (Array.isArray(raw.imageIds)) {
+    next.imageIds = raw.imageIds.filter((id): id is string => typeof id === "string");
+  }
+
+  if (
+    next.modelContent === undefined &&
+    next.privateContent === undefined &&
+    next.imageIds === undefined
+  ) {
+    return undefined;
+  }
+
+  return next;
+};
+
+const normalizePipSnapshot = (value: unknown): PersistedPipSnapshot | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.instanceId !== "string" ||
+    typeof raw.serverName !== "string" ||
+    typeof raw.resourceUri !== "string" ||
+    typeof raw.toolName !== "string" ||
+    typeof raw.title !== "string"
+  ) {
+    return null;
+  }
+
+  if (
+    raw.instanceId.length === 0 ||
+    raw.serverName.length === 0 ||
+    raw.resourceUri.length === 0
+  ) {
+    return null;
+  }
+
+  const snapshot: PersistedPipSnapshot = {
+    instanceId: raw.instanceId,
+    serverName: raw.serverName,
+    resourceUri: raw.resourceUri,
+    toolName: raw.toolName,
+    title: raw.title,
+    createdAt:
+      typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt)
+        ? Number(raw.createdAt)
+        : nowMs(),
+  };
+
+  if (typeof raw.triggeredByTool === "boolean") {
+    snapshot.triggeredByTool = raw.triggeredByTool;
+  }
+
+  if (typeof raw.openInBackground === "boolean") {
+    snapshot.openInBackground = raw.openInBackground;
+  }
+
+  const widgetState = normalizeWidgetState(raw.widgetState);
+  if (widgetState) {
+    snapshot.widgetState = widgetState;
+  }
+
+  return snapshot;
+};
+
+const normalizePipState = (value: unknown): PersistedPipState => {
+  if (!value || typeof value !== "object") {
+    return createDefaultPipState();
+  }
+
+  const raw = value as {
+    pips?: unknown;
+    pipOrder?: unknown;
+    activePipId?: unknown;
+  };
+
+  const pips = Array.isArray(raw.pips)
+    ? raw.pips
+        .map(normalizePipSnapshot)
+        .filter((pip): pip is PersistedPipSnapshot => !!pip)
+    : [];
+
+  const pipIds = new Set(pips.map((pip) => pip.instanceId));
+  const pipOrder: string[] = [];
+  const pushPipOrder = (id: string) => {
+    if (!pipIds.has(id)) return;
+    if (pipOrder.includes(id)) return;
+    pipOrder.push(id);
+  };
+
+  if (Array.isArray(raw.pipOrder)) {
+    for (const value of raw.pipOrder) {
+      if (typeof value === "string") {
+        pushPipOrder(value);
+      }
+    }
+  }
+
+  for (const pip of pips) {
+    pushPipOrder(pip.instanceId);
+  }
+
+  const activePipId =
+    typeof raw.activePipId === "string" && pipIds.has(raw.activePipId)
+      ? raw.activePipId
+      : null;
+
+  return {
+    pips,
+    pipOrder,
+    activePipId,
+  };
+};
+
 const normalizeState = (state: ChatSessionState): ChatSessionState => {
   return {
     streamedMessages: Array.isArray(state.streamedMessages) ? state.streamedMessages : [],
@@ -120,6 +288,7 @@ const normalizeState = (state: ChatSessionState): ChatSessionState => {
     messageOrder: normalizeMessageOrder(state.messageOrder),
     nextOrder: Number.isFinite(state.nextOrder) ? Number(state.nextOrder) : 0,
     tokenUsage: normalizeTokenUsage(state.tokenUsage),
+    pipState: normalizePipState(state.pipState),
   };
 };
 
@@ -199,6 +368,7 @@ const getDb = (projectId: string): DatabaseSync => {
       message_order_json TEXT NOT NULL,
       next_order INTEGER NOT NULL DEFAULT 0,
       token_usage_json TEXT NOT NULL,
+      pip_state_json TEXT NOT NULL DEFAULT '${DEFAULT_PIP_STATE_JSON.replace(/'/g, "''")}',
       updated_at INTEGER NOT NULL
     )
   `);
@@ -226,6 +396,16 @@ const getDb = (projectId: string): DatabaseSync => {
     ON chat_sessions(is_active)
     WHERE is_active = 1
   `);
+
+  const sessionStateColumns = db.prepare("PRAGMA table_info(chat_session_state)").all() as Array<{
+    name: string;
+  }>;
+  const hasPipStateColumn = sessionStateColumns.some((column) => column.name === "pip_state_json");
+  if (!hasPipStateColumn) {
+    db.exec(
+      `ALTER TABLE chat_session_state ADD COLUMN pip_state_json TEXT NOT NULL DEFAULT '${DEFAULT_PIP_STATE_JSON.replace(/'/g, "''")}'`
+    );
+  }
 
   dbCache.set(projectId, db);
   return db;
@@ -255,8 +435,9 @@ const insertSession = (db: DatabaseSync, sessionId: string, active: boolean): vo
       message_order_json,
       next_order,
       token_usage_json,
+      pip_state_json,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   insertState.run(
     sessionId,
@@ -265,6 +446,7 @@ const insertSession = (db: DatabaseSync, sessionId: string, active: boolean): vo
     JSON.stringify(DEFAULT_STATE.messageOrder),
     DEFAULT_STATE.nextOrder,
     JSON.stringify(DEFAULT_STATE.tokenUsage),
+    JSON.stringify(DEFAULT_STATE.pipState),
     ts
   );
 };
@@ -287,8 +469,9 @@ const ensureStateRow = (db: DatabaseSync, sessionId: string): void => {
       message_order_json,
       next_order,
       token_usage_json,
+      pip_state_json,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   insertState.run(
     sessionId,
@@ -297,6 +480,7 @@ const ensureStateRow = (db: DatabaseSync, sessionId: string): void => {
     JSON.stringify(DEFAULT_STATE.messageOrder),
     DEFAULT_STATE.nextOrder,
     JSON.stringify(DEFAULT_STATE.tokenUsage),
+    JSON.stringify(DEFAULT_STATE.pipState),
     ts
   );
 };
@@ -368,7 +552,8 @@ const getSessionWithStateById = (
       st.injected_messages,
       st.message_order_json,
       st.next_order,
-      st.token_usage_json
+      st.token_usage_json,
+      st.pip_state_json
     FROM chat_sessions s
     LEFT JOIN chat_session_state st ON st.session_id = s.id
     WHERE s.id = ?
@@ -390,6 +575,7 @@ const getSessionWithStateById = (
         message_order_json: string | null;
         next_order: number | null;
         token_usage_json: string | null;
+        pip_state_json: string | null;
       }
     | undefined;
 
@@ -409,6 +595,9 @@ const getSessionWithStateById = (
     tokenUsage: row.token_usage_json
       ? parseJson<TokenUsageState>(row.token_usage_json, DEFAULT_STATE.tokenUsage)
       : DEFAULT_STATE.tokenUsage,
+    pipState: row.pip_state_json
+      ? parseJson<PersistedPipState>(row.pip_state_json, createDefaultPipState())
+      : createDefaultPipState(),
   });
 
   return {
@@ -563,8 +752,9 @@ export const saveSessionState = (
         message_order_json,
         next_order,
         token_usage_json,
+        pip_state_json,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     upsertState.run(
       sessionId,
@@ -573,6 +763,7 @@ export const saveSessionState = (
       JSON.stringify(normalized.messageOrder),
       normalized.nextOrder,
       JSON.stringify(normalized.tokenUsage),
+      JSON.stringify(normalized.pipState),
       ts
     );
 

@@ -3,6 +3,8 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CaretRight,
   CaretDown,
@@ -25,7 +27,14 @@ import { Input } from "./Input";
 import { cn, startUpgrade } from "../lib/utils";
 import { useTheme } from "../contexts/ThemeContext";
 import { useApp } from "../contexts/AppContext";
-import type { ChatSessionState, ChatSessionSummary, ChatSessionWithState } from "../electron/preload";
+import { widgetStateStore, makePipWidgetId, parseWidgetId } from "../lib/widgetStateStore";
+import type {
+  ChatSessionState,
+  ChatSessionSummary,
+  ChatSessionWithState,
+  PersistedPipState,
+  PersistedPipSnapshot,
+} from "../electron/preload";
 
 /**
  * Maps file extensions to IANA media types for images.
@@ -111,6 +120,91 @@ const sortSessionSummaries = (sessions: ChatSessionSummary[]): ChatSessionSummar
   });
 };
 
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+const MARKDOWN_ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+const normalizePersistedPipState = (value: unknown): PersistedPipState => {
+  if (!value || typeof value !== "object") {
+    return {
+      pips: [],
+      pipOrder: [],
+      activePipId: null,
+    };
+  }
+
+  const raw = value as {
+    pips?: unknown;
+    pipOrder?: unknown;
+    activePipId?: unknown;
+  };
+
+  const pips = Array.isArray(raw.pips)
+    ? raw.pips
+        .map((pip): PersistedPipSnapshot | null => {
+          if (!pip || typeof pip !== "object") return null;
+          const snapshot = pip as Partial<PersistedPipSnapshot>;
+          if (
+            typeof snapshot.instanceId !== "string" ||
+            typeof snapshot.serverName !== "string" ||
+            typeof snapshot.resourceUri !== "string" ||
+            typeof snapshot.toolName !== "string" ||
+            typeof snapshot.title !== "string"
+          ) {
+            return null;
+          }
+          return {
+            instanceId: snapshot.instanceId,
+            serverName: snapshot.serverName,
+            resourceUri: snapshot.resourceUri,
+            toolName: snapshot.toolName,
+            title: snapshot.title,
+            createdAt:
+              typeof snapshot.createdAt === "number" && Number.isFinite(snapshot.createdAt)
+                ? Number(snapshot.createdAt)
+                : Date.now(),
+            ...(typeof snapshot.triggeredByTool === "boolean"
+              ? { triggeredByTool: snapshot.triggeredByTool }
+              : {}),
+            ...(typeof snapshot.openInBackground === "boolean"
+              ? { openInBackground: snapshot.openInBackground }
+              : {}),
+            ...(snapshot.widgetState ? { widgetState: snapshot.widgetState } : {}),
+          };
+        })
+        .filter((pip): pip is PersistedPipSnapshot => !!pip)
+    : [];
+
+  const instanceIds = new Set(pips.map((pip) => pip.instanceId));
+  const pipOrder: string[] = [];
+  const pushOrder = (instanceId: string) => {
+    if (!instanceIds.has(instanceId) || pipOrder.includes(instanceId)) return;
+    pipOrder.push(instanceId);
+  };
+
+  if (Array.isArray(raw.pipOrder)) {
+    for (const value of raw.pipOrder) {
+      if (typeof value === "string") {
+        pushOrder(value);
+      }
+    }
+  }
+
+  for (const pip of pips) {
+    pushOrder(pip.instanceId);
+  }
+
+  const activePipId =
+    typeof raw.activePipId === "string" && instanceIds.has(raw.activePipId)
+      ? raw.activePipId
+      : null;
+
+  return {
+    pips,
+    pipOrder,
+    activePipId,
+  };
+};
+
 // ============================================================================
 // ChatSession Component (Internal)
 // ============================================================================
@@ -132,7 +226,7 @@ interface ChatSessionProps {
  */
 function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: ChatSessionProps) {
   const { isDarkMode } = useTheme();
-  const { session, setProject, setSessionId, closeAllPips } = useApp();
+  const { session, setProject, setSessionId, closeAllPips, pips, setActivePipId } = useApp();
   const [input, setInput] = useState("");
 
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
@@ -150,8 +244,10 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [isSessionMenuOpen, setIsSessionMenuOpen] = useState(false);
+  const [widgetStateRevision, setWidgetStateRevision] = useState(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratingSessionRef = useRef(true);
+  const restoreGenerationRef = useRef(0);
 
   /**
    * Separate state for UI-injected messages (pip events, UI tool calls).
@@ -339,10 +435,132 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
     });
   }, []);
 
+  const buildPersistedPipState = useCallback((): PersistedPipState => {
+    const pipSnapshots: PersistedPipSnapshot[] = pips.pips
+      .filter((pip) => pip.pipType === "mcp" && pip.mcpServer && pip.resourceUri)
+      .map((pip) => {
+        const widgetState = widgetStateStore.get(
+          makePipWidgetId({ conversationId: session.sessionId, instanceId: pip.instanceId })
+        );
+
+        const snapshot: PersistedPipSnapshot = {
+          instanceId: pip.instanceId,
+          serverName: pip.mcpServer!,
+          resourceUri: pip.resourceUri!,
+          toolName: pip.toolName || "",
+          title: pip.title || "",
+          createdAt: Number.isFinite(pip.createdAt) ? pip.createdAt : Date.now(),
+        };
+
+        if (typeof pip.triggeredByTool === "boolean") {
+          snapshot.triggeredByTool = pip.triggeredByTool;
+        }
+
+        if (typeof pip.openInBackground === "boolean") {
+          snapshot.openInBackground = pip.openInBackground;
+        }
+
+        if (widgetState) {
+          snapshot.widgetState = widgetState;
+        }
+
+        return snapshot;
+      });
+
+    const snapshotIds = new Set(pipSnapshots.map((snapshot) => snapshot.instanceId));
+    const pipOrder: string[] = [];
+    const pushOrder = (instanceId: string) => {
+      if (!snapshotIds.has(instanceId) || pipOrder.includes(instanceId)) return;
+      pipOrder.push(instanceId);
+    };
+
+    for (const instanceId of pips.pipOrder) {
+      pushOrder(instanceId);
+    }
+    for (const snapshot of pipSnapshots) {
+      pushOrder(snapshot.instanceId);
+    }
+
+    const activePipId =
+      pips.activePipId && snapshotIds.has(pips.activePipId) ? pips.activePipId : null;
+
+    return {
+      pips: pipSnapshots,
+      pipOrder,
+      activePipId,
+    };
+  }, [pips.activePipId, pips.pipOrder, pips.pips, session.sessionId, widgetStateRevision]);
+
+  const restoreWidgetStateStoreForSession = useCallback(
+    (conversationId: string, pipState: PersistedPipState) => {
+      for (const key of widgetStateStore.keys()) {
+        const parsed = parseWidgetId(key);
+        if (parsed?.conversationId === conversationId && parsed.type === "pip") {
+          widgetStateStore.delete(key);
+        }
+      }
+
+      for (const snapshot of pipState.pips) {
+        if (!snapshot.widgetState) continue;
+
+        const widgetId = makePipWidgetId({
+          conversationId,
+          instanceId: snapshot.instanceId,
+        });
+        widgetStateStore.set(widgetId, snapshot.widgetState, {
+          mcpServerName: snapshot.serverName,
+          resourceUri: snapshot.resourceUri,
+          instanceId: snapshot.instanceId,
+          conversationId,
+        });
+      }
+    },
+    []
+  );
+
+  const restorePipsForSession = useCallback(
+    async ({
+      pipState,
+      generation,
+    }: {
+      pipState: PersistedPipState;
+      generation: number;
+    }) => {
+      if (!session.project?.id || pipState.pips.length === 0) {
+        return;
+      }
+
+      try {
+        const result = await window.electronAPI.controlPlane.restorePips({ pipState });
+        if (restoreGenerationRef.current !== generation) {
+          return;
+        }
+
+        const activePipId =
+          result.activePipId ||
+          pipState.activePipId ||
+          result.restoredInstanceIds[0] ||
+          null;
+
+        if (activePipId) {
+          requestAnimationFrame(() => {
+            if (restoreGenerationRef.current === generation) {
+              setActivePipId(activePipId);
+            }
+          });
+        }
+      } catch (error) {
+        console.error("[ViewChat] Failed to restore pips:", error);
+      }
+    },
+    [session.project?.id, setActivePipId]
+  );
+
   const hydrateFromSession = useCallback(
     (payload: ChatSessionWithState, allSessions: ChatSessionSummary[]) => {
       const nextStreamed = toUiMessages(payload.state.streamedMessages);
       const nextInjected = toInjectedUiMessages(payload.state.injectedMessages);
+      const nextPipState = normalizePersistedPipState(payload.state.pipState);
       const nextOrderEntries = Object.entries(payload.state.messageOrder ?? {});
       const nextOrderMap = new Map<string, number>();
       for (const [id, value] of nextOrderEntries) {
@@ -374,12 +592,26 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       setRenameDraft("");
       setIsSessionMenuOpen(false);
       setSessionId(payload.summary.id);
+      restoreGenerationRef.current += 1;
+      const restoreGeneration = restoreGenerationRef.current;
+
+      restoreWidgetStateStoreForSession(payload.summary.id, nextPipState);
+      void restorePipsForSession({
+        pipState: nextPipState,
+        generation: restoreGeneration,
+      });
 
       setTimeout(() => {
         hydratingSessionRef.current = false;
       }, 0);
     },
-    [setSessionId, toInjectedUiMessages, toUiMessages]
+    [
+      restorePipsForSession,
+      restoreWidgetStateStoreForSession,
+      setSessionId,
+      toInjectedUiMessages,
+      toUiMessages,
+    ]
   );
 
   const buildPersistedState = useCallback((): ChatSessionState => {
@@ -394,8 +626,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       messageOrder,
       nextOrder: messageOrderCounterRef.current,
       tokenUsage,
+      pipState: buildPersistedPipState(),
     };
-  }, [streamedMessages, injectedMessages, tokenUsage]);
+  }, [buildPersistedPipState, streamedMessages, injectedMessages, tokenUsage]);
 
   const persistState = useCallback(
     async (state: ChatSessionState) => {
@@ -427,6 +660,17 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   useEffect(() => {
     flushPendingSaveRef.current = flushPendingSave;
   }, [flushPendingSave]);
+
+  useEffect(() => {
+    const unsubscribe = widgetStateStore.onChange((event) => {
+      if (event.conversationId && event.conversationId !== session.sessionId) {
+        return;
+      }
+      setWidgetStateRevision((value) => value + 1);
+    });
+
+    return unsubscribe;
+  }, [session.sessionId]);
 
   const applySessionUpdate = useCallback(
     (result: { session?: ChatSessionSummary; sessions?: ChatSessionSummary[] }) => {
@@ -587,6 +831,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   useEffect(() => {
     const projectId = session.project?.id;
     hydratingSessionRef.current = true;
+    restoreGenerationRef.current += 1;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -972,6 +1217,224 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
     return unsubscribe;
   }, [getNextOrder]);
 
+  const handleMarkdownLinkClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>, href?: string) => {
+      event.preventDefault();
+
+      if (!href) return;
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(href);
+      } catch {
+        return;
+      }
+
+      if (!MARKDOWN_ALLOWED_PROTOCOLS.has(parsedUrl.protocol)) {
+        return;
+      }
+
+      void window.electronAPI.shell.openExternal(parsedUrl.toString()).catch((openError) => {
+        console.error("[ViewChat] Failed to open markdown link:", openError);
+      });
+    },
+    []
+  );
+
+  const markdownComponents = useMemo<Components>(
+    () => ({
+      a: ({ href, children, ...props }) => (
+        <a
+          {...props}
+          href={href}
+          rel="noopener noreferrer"
+          onClick={(event) => handleMarkdownLinkClick(event, href)}
+        >
+          {children}
+        </a>
+      ),
+    }),
+    [handleMarkdownLinkClick]
+  );
+
+  const renderMarkdownBlock = useCallback(
+    (text: string, key: string) => (
+      <ReactMarkdown key={key} remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
+    ),
+    [markdownComponents]
+  );
+
+  const renderMessageParts = useCallback(
+    (msg: UIMessage, role: "assistant" | "user") => {
+      const rendered: React.ReactNode[] = [];
+      const parts = msg.parts || [];
+      const isCurrentStreamingMessage =
+        role === "assistant" && isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
+
+      let textBuffer = "";
+      let textStartIndex: number | null = null;
+
+      const flushTextBuffer = () => {
+        if (textStartIndex === null || textBuffer.length === 0) return;
+        rendered.push(renderMarkdownBlock(textBuffer, `${msg.id}-md-${textStartIndex}`));
+        textBuffer = "";
+        textStartIndex = null;
+      };
+
+      for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+        const part = parts[partIndex];
+
+        if (part.type === "text") {
+          if (textStartIndex === null) {
+            textStartIndex = partIndex;
+          }
+          textBuffer += part.text;
+          continue;
+        }
+
+        flushTextBuffer();
+
+        if (part.type === "step-start") {
+          continue;
+        }
+
+        if (role === "user") {
+          continue;
+        }
+
+        if (part.type.startsWith("tool-")) {
+          const toolPart = part as {
+            type: string;
+            toolName?: string;
+            state: string;
+            input?: unknown;
+            output?: unknown;
+          };
+          const toolName = part.type.substring(5);
+
+          const stuckAtInputAvailable =
+            toolPart.state === "input-available" && !isCurrentStreamingMessage;
+
+          const isRunning =
+            (toolPart.state === "input-streaming" || toolPart.state === "input-available") &&
+            !stuckAtInputAvailable;
+          const isComplete = toolPart.state === "output-available" || stuckAtInputAvailable;
+          const isError = toolPart.state === "output-error";
+
+          const output = toolPart.output as {
+            _inlineDisplay?: {
+              resourceUri: string;
+              serverName: string;
+              toolName: string;
+              displayModes: string[];
+            };
+            hasUi?: boolean;
+            terminalUrl?: string;
+            _mcpResource?: { text?: string };
+            sessionId?: string;
+          } | undefined;
+
+          const hasMcpUi = !!(
+            output?.hasUi ||
+            output?.terminalUrl ||
+            output?._mcpResource?.text
+          );
+          const inlineDisplay = output?._inlineDisplay;
+          const toolId = `${msg.id}-${partIndex}`;
+          const isExpanded = expandedTools.has(toolId);
+
+          if (isComplete && inlineDisplay?.resourceUri) {
+            rendered.push(
+              <InlineWidget
+                key={toolId}
+                resourceUri={inlineDisplay.resourceUri}
+                toolInput={(toolPart.input as Record<string, unknown>) || {}}
+                toolResult={toolPart.output}
+                toolName={inlineDisplay.toolName}
+                serverName={inlineDisplay.serverName}
+                displayModes={inlineDisplay.displayModes}
+                messageId={msg.id}
+                onExpandToPip={() => {
+                  // For multi-session MCPs (like terminal), the tool result
+                  // contains a sessionId. We should restore the session
+                  // rather than re-run the command, preserving output history.
+                  const structuredContent = (toolPart.output as { structuredContent?: { sessionId?: string } })?.structuredContent;
+                  const sessionId = structuredContent?.sessionId;
+
+                  if (sessionId && inlineDisplay.toolName === "terminal_run") {
+                    // Use terminal_get to restore session without clearing buffer
+                    window.electronAPI.controlPlane.callTool({
+                      serverName: inlineDisplay.serverName,
+                      toolName: "terminal_get",
+                      args: { sessionId, displayMode: "pip" },
+                    });
+                  } else {
+                    // Default: re-run the tool with pip mode
+                    window.electronAPI.controlPlane.callTool({
+                      serverName: inlineDisplay.serverName,
+                      toolName: inlineDisplay.toolName,
+                      args: {
+                        ...((toolPart.input as Record<string, unknown>) || {}),
+                        displayMode: "pip",
+                      },
+                    });
+                  }
+                }}
+              />
+            );
+            continue;
+          }
+
+          const hasOutput =
+            isComplete && toolPart.output && !hasMcpUi && !inlineDisplay;
+
+          rendered.push(
+            <div
+              key={toolId}
+              className={cn(
+                "bg-background-secondary border border-border-primary rounded-md px-3.5 py-2.5 my-2 text-sm overflow-hidden",
+                isError && "border-l-2 border-l-red-400"
+              )}
+            >
+              <div
+                className={cn(
+                  "flex items-center gap-2",
+                  hasOutput && "cursor-pointer"
+                )}
+                onClick={() => hasOutput && toggleToolExpanded(toolId)}
+              >
+                {isRunning && (
+                  <Spinner size={12} />
+                )}
+                {isError && (
+                  <span className="text-red-400 text-xs font-bold">✕</span>
+                )}
+                <span className="text-text-primary/70 font-medium">{toolName}</span>
+                {hasOutput && (
+                  <span className="text-text-secondary ml-auto">
+                    {isExpanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                  </span>
+                )}
+              </div>
+              {hasOutput && isExpanded && (
+                <span className="block mt-2 text-text-secondary whitespace-pre-wrap break-all text-[11px] font-mono">
+                  {JSON.stringify(toolPart.output, null, 2)}
+                </span>
+              )}
+            </div>
+          );
+        }
+      }
+
+      flushTextBuffer();
+
+      return rendered;
+    },
+    [expandedTools, isStreaming, renderMarkdownBlock, streamedMessages, toggleToolExpanded]
+  );
+
   return (
     <div
       className={cn("flex-col h-full relative", isActive ? "flex" : "hidden")}
@@ -1190,14 +1653,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                         })}
                       </div>
                     )}
-                    <span className="text-text-primary text-base leading-relaxed">
-                      {msg.parts?.map((part, i) => {
-                        if (part.type === "text") {
-                          return <span key={i}>{part.text}</span>;
-                        }
-                        return null;
-                      })}
-                    </span>
+                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-secondary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-border-primary [&_blockquote]:pl-3 [&_blockquote]:text-text-secondary [&_table]:my-2 [&_table]:w-full [&_table]:text-sm [&_table]:border-collapse [&_th]:border [&_th]:border-border-primary [&_th]:px-2 [&_th]:py-1 [&_th]:font-medium [&_th]:text-left [&_td]:border [&_td]:border-border-primary [&_td]:px-2 [&_td]:py-1 [&_hr]:my-3 [&_hr]:border-border-primary [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline [&_input[type='checkbox']]:mr-1.5">
+                      {renderMessageParts(msg, "user")}
+                    </div>
                   </div>
                 ) : (
                   <div className="bg-background-secondary rounded-md p-4 mb-4 overflow-hidden">

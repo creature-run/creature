@@ -13,10 +13,11 @@ import {
   markTeardownComplete,
   refreshSinglePip,
   handleToolCall,
-  getPipInstance,
   updatePipTitle,
   updatePipWidgetState,
+  restorePips,
   type WidgetState,
+  type PersistedPipState,
 } from "../mcp/controlPlane";
 import { readResource, clearResourceCache } from "../mcp/client";
 
@@ -169,6 +170,17 @@ export const registerPipHandlers = () => {
         widgetState: params.widgetState,
       });
       return { success };
+    }
+  );
+
+  /**
+   * Restore pips from persisted chat session state.
+   * Restores tabs as docked and returns the active tab fallback.
+   */
+  ipcMain.handle(
+    "pip:restore",
+    async (_, params: { pipState: PersistedPipState }) => {
+      return await restorePips({ pipState: params.pipState });
     }
   );
 

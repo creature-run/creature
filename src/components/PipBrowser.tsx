@@ -245,9 +245,8 @@ export function PipBrowser({ pip, colors }: PipBrowserProps) {
             },
             widgetState: restoredWidgetState || undefined,
             openContext: {
-              // Use "restore" when we have widgetState to restore from (pop back in, refresh)
-              // Otherwise use original trigger type
-              triggeredBy: restoredWidgetState
+              // Use "restore" for restored tabs, pop-back-in flows, and refreshes with state.
+              triggeredBy: pip.restored || restoredWidgetState
                 ? "restore"
                 : pip.triggeredByTool !== false
                   ? "tool"
@@ -691,4 +690,3 @@ export function PipBrowser({ pip, colors }: PipBrowserProps) {
     </div>
   );
 }
-
