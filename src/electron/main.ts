@@ -17,6 +17,7 @@ import { installHostConsoleCapture } from "./logging";
 import { initAutoUpdater, isUpdatePending } from "./updater";
 import * as telemetry from "./telemetry";
 import { getRuntimeAppName, isProdRuntime } from "./utils/appIdentity";
+import { killAllRegisteredProcesses } from "./mcp/processRegistry";
 
 // Track app start time for startup_ms metric
 const appStartTime = Date.now();
@@ -145,9 +146,15 @@ app.on("before-quit", async (event) => {
       console.log("[App] Chat server closed");
     }
 
-    // Close MCP connections
+    // Close MCP connections (uses killProcessTree for each connection)
     await closeMcpConnections();
-    console.log("[App] Cleanup complete, quitting...");
+    console.log("[App] MCP connections closed");
+
+    // Safety-net sweep: kill anything the connection teardown missed.
+    // This catches processes that were registered but whose connection
+    // was lost, or edge cases where killProcessTree didn't fully succeed.
+    await killAllRegisteredProcesses();
+    console.log("[App] Process registry sweep complete, quitting...");
   } catch (e) {
     console.error("[App] Cleanup error:", e);
   }
@@ -157,7 +164,7 @@ app.on("before-quit", async (event) => {
 });
 
 // Log when app is about to quit (after all before-quit handlers)
-app.on("will-quit", (event) => {
+app.on("will-quit", () => {
   console.log("[App] will-quit fired - app is about to exit");
 });
 
@@ -167,6 +174,26 @@ app.on("activate", () => {
     createMainWindow();
   }
 });
+
+/**
+ * Handle SIGTERM and SIGINT for crash-safe cleanup.
+ * These fire when the process is killed externally (e.g., kill command,
+ * system shutdown, or Cmd+C in a terminal). The before-quit handler may
+ * not fire in these cases, so we kill all registered processes directly
+ * and exit immediately.
+ */
+const handleProcessSignal = (signal: string) => {
+  console.log(`[App] Received ${signal}, killing all registered processes`);
+  // killAllRegisteredProcesses is async but we fire-and-forget here
+  // because the process is about to exit. The SIGTERM/SIGKILL escalation
+  // in the registry handles the actual cleanup.
+  killAllRegisteredProcesses().finally(() => {
+    process.exit(0);
+  });
+};
+
+process.on("SIGTERM", () => handleProcessSignal("SIGTERM"));
+process.on("SIGINT", () => handleProcessSignal("SIGINT"));
 
 // Track uncaught exceptions for error telemetry
 process.on("uncaughtException", (error) => {

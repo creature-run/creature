@@ -32,7 +32,7 @@ import { buildSpawnEnv, getExtendedPath, resolveBundledCommand } from "../utils/
 import { closeAllPips, getPipInstances, reconcilePipsForMcp, refreshAllPipsForMcp } from "./controlPlane";
 import { logAggregator, type LogLevel } from "../logging";
 import { portManager } from "./portManager";
-import { cleanupOrphanedMcpProcesses, registerMcpProcess, unregisterMcpProcess } from "./processRegistry";
+import { cleanupOrphanedMcpProcesses, registerMcpProcess, unregisterMcpProcess, type McpProcessKind } from "./processRegistry";
 import { findWorkspaceRoot } from "../utils/workspace";
 import { getMcpStorageDir } from "../storage/mcpStorageDir";
 import { getMcpRepoDir } from "../storage/mcpRepoDir";
@@ -157,24 +157,48 @@ const StorageBlobListRequestSchema = createStorageRequestSchema(
 );
 
 /**
- * Kill a process and all its children.
- * On Windows, uses taskkill to kill the entire process tree since child processes
- * don't automatically terminate when the parent is killed.
- * On Unix, uses regular kill() which works with process groups.
+ * Kill a process and all its children (the entire process group).
+ *
+ * On Windows, uses `taskkill /T` to kill the process tree.
+ * On Unix, spawned processes use `detached: true` which places them in their
+ * own process group. Sending a signal to the negative PID kills the entire
+ * group — including grandchildren like vite, tsx, and esbuild that would
+ * otherwise survive and become orphans.
+ *
+ * Sends SIGTERM first for graceful shutdown, then escalates to SIGKILL
+ * after a short grace period to guarantee cleanup.
  */
 const killProcessTree = (proc: ChildProcess): void => {
   if (!proc.pid) return;
-  
+  const pid = proc.pid;
+
   if (process.platform === "win32") {
-    // /T = tree kill (all child processes), /F = force
-    exec(`taskkill /pid ${proc.pid} /T /F`, (err) => {
+    exec(`taskkill /pid ${pid} /T /F`, (err) => {
       if (err) {
         console.log(`[MCP] taskkill failed (process may have already exited):`, err.message);
       }
     });
-  } else {
-    proc.kill();
+    return;
   }
+
+  // Kill the entire process group via negative PID
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch (err: any) {
+    if (err.code !== "ESRCH") {
+      console.log(`[MCP] Process group SIGTERM failed for pgid ${pid}:`, err.message);
+    }
+    return;
+  }
+
+  // Escalate to SIGKILL after a grace period to guarantee cleanup
+  setTimeout(() => {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // ESRCH means the group is already gone — expected
+    }
+  }, 500);
 };
 
 export type { ResourceIcon };
@@ -1724,12 +1748,23 @@ const spawnHttpServerProcess = async (
     // Use shell to resolve commands like npm/npx. On Windows, use PowerShell instead of cmd.exe
     // because cmd.exe doesn't handle single quotes properly (common in npm scripts).
     shell: process.platform === "win32" ? "powershell.exe" : true,
+    // Create a new process group so killProcessTree can kill the entire tree
+    // (including grandchildren like vite, tsx, esbuild) via negative PID signal.
+    detached: true,
   });
 
+  // Prevent the detached process group from keeping Electron alive on exit
+  proc.unref();
+
+  // Determine process kind for the registry
   const isDevMcpProcess =
     env.NODE_ENV === "development" && typeof env.MCP_HMR_PORT === "string" && !!env.MCP_HMR_PORT;
+  const processKind: McpProcessKind = isDevMcpProcess ? "dev-mcp" : "local-http";
 
-  if (proc.pid && isDevMcpProcess) {
+  // Register every spawned process in the registry, not just dev MCPs.
+  // The registry is the safety net for orphan cleanup if the app crashes
+  // before closeAllConnections can run.
+  if (proc.pid) {
     registerMcpProcess({
       pid: proc.pid,
       serverName,
@@ -1740,7 +1775,7 @@ const spawnHttpServerProcess = async (
         mcp: env.MCP_PORT ? Number(env.MCP_PORT) : undefined,
         hmr: env.MCP_HMR_PORT ? Number(env.MCP_HMR_PORT) : undefined,
       },
-      kind: "dev-mcp",
+      kind: processKind,
     });
   }
 

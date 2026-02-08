@@ -1181,14 +1181,19 @@ export function ChatInput({
           </HoverCard>
         </div>
 
-        {/* Right side - Model and token stats */}
+        {/* Right side - Token stats and model selector */}
         <div className="flex items-center gap-2 text-text-secondary text-xs">
+          {tokenUsage && tokenUsage.totalTokens > 0 && (
+            <span title={`Input tokens: ${tokenUsage.inputTokens}, Output tokens: ${tokenUsage.outputTokens}`}>
+              {formatCompactNumber(tokenUsage.inputTokens)} / {formatCompactNumber(tokenUsage.outputTokens)}
+            </span>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
                 disabled={auth.providerType !== "anthropic" || isUpdatingChatModel}
-                className="h-6 min-w-[120px] rounded-md px-2.5 text-xs text-text-secondary inline-flex items-center justify-between gap-2 transition-colors hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                className="h-6 min-w-[120px] rounded-md border border-border-secondary bg-transparent px-2.5 text-xs text-text-secondary inline-flex items-center justify-between gap-2 transition-colors hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{modelLabel}</span>
                 <CaretDown size={10} weight="bold" className="text-text-secondary" />
@@ -1205,13 +1210,6 @@ export function ChatInput({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {tokenUsage && tokenUsage.totalTokens > 0 && (
-            <>
-              <span title={`Input tokens: ${tokenUsage.inputTokens}, Output tokens: ${tokenUsage.outputTokens}`}>
-                {formatCompactNumber(tokenUsage.inputTokens)} / {formatCompactNumber(tokenUsage.outputTokens)}
-              </span>
-            </>
-          )}
         </div>
       </div>
       </div>

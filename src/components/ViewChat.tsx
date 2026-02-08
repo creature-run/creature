@@ -1225,9 +1225,10 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                           // from the input args instead of the generic "mcp_tool" label
                           const rawToolName = part.type.substring(5);
                           const toolInput = toolPart.input as { serverName?: string; toolName?: string } | undefined;
-                          const isMcpProxy = rawToolName === "mcp_tool" && !!toolInput?.serverName && !!toolInput?.toolName;
-                          const toolServerName = isMcpProxy ? toolInput!.serverName : null;
-                          const toolDisplayName = isMcpProxy ? toolInput!.toolName : rawToolName;
+                          const isMcpProxy = rawToolName === "mcp_tool";
+                          const hasProxyNames = isMcpProxy && !!toolInput?.serverName && !!toolInput?.toolName;
+                          const toolServerName = hasProxyNames ? toolInput!.serverName : null;
+                          const toolDisplayName = hasProxyNames ? toolInput!.toolName : (isMcpProxy ? null : rawToolName);
 
                           const isCurrentStreamingMessage =
                             isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
@@ -1337,7 +1338,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                                     <CaretRight size={10} weight="bold" className="text-text-secondary/50" />
                                   </>
                                 )}
-                                <span className="text-text-primary/70 font-medium">{toolDisplayName}</span>
+                                {toolDisplayName && (
+                                  <span className="text-text-primary/70 font-medium">{toolDisplayName}</span>
+                                )}
                                 {isRunning && (
                                   <span className="ml-auto">
                                     <Spinner size={12} />

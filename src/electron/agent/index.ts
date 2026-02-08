@@ -446,6 +446,12 @@ export const createAgent = async ({
     instructions: systemPrompt,
     tools: { ...pipTools, mcp_tool: mcpProxyTool },
     /**
+     * Disable the default step limit (stepCountIs(20)) so the agent
+     * can work for as long as it needs without being silently cut off.
+     * The agent stops naturally when the model returns a non-tool-call response.
+     */
+    stopWhen: () => false,
+    /**
      * Runs before every model step in the tool loop.
      * Rebuilds the MCP tools listing from live CachedTool[] data
      * so the model always sees current tools — even mid-turn.
