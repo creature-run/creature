@@ -3,7 +3,6 @@ import { useHost } from "open-mcp-app/react";
 import { NavigationBar } from "./components/NavigationBar";
 // Tailwind 4 integration - imports SDK theme mapping for host-provided variables
 import "open-mcp-app/styles/tailwind.css";
-import "./fonts.css";
 import "./App.css";
 
 // =============================================================================
@@ -208,14 +207,14 @@ const App = () => {
 
   if (!isReady) {
     return (
-      <div className="app loading">
-        <div className="loading-text">Connecting...</div>
+      <div className="flex items-center justify-center h-10 w-full bg-bg-primary text-txt-primary">
+        <span className="text-xs text-txt-secondary">Connecting...</span>
       </div>
     );
   }
 
   return (
-    <div className="app">
+    <div className="flex flex-col w-full">
       <NavigationBar
         currentUrl={browserState?.url === "about:blank" ? "" : (browserState?.url || "")}
         isLoading={browserState?.isLoading || false}
@@ -225,7 +224,9 @@ const App = () => {
         onForward={handleForward}
       />
       {!isConnected && (
-        <div className="status-message">Waiting for browser...</div>
+        <div className="py-2 text-center text-xs text-txt-secondary bg-bg-primary">
+          Waiting for browser...
+        </div>
       )}
     </div>
   );

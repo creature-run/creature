@@ -15,24 +15,24 @@ import { buildSpawnEnv, resolveBundledCommand } from "../utils/env";
 import * as telemetry from "../telemetry";
 
 /**
- * Find the path to the MCP app template directory.
- * Uses the "example" template from desktop/artifacts/example.
+ * Find the path to the MCP app skeleton template directory.
+ * Uses the minimal template from desktop/templates/mcp-app.
  * Searches in various locations to support both development and production modes.
  */
 const findTemplatePath = (): string | null => {
   // In packaged builds, template is bundled in Resources directory
   if (app.isPackaged) {
-    const resourcePath = path.join(process.resourcesPath, "mcp-example");
+    const resourcePath = path.join(process.resourcesPath, "mcp-app-template");
     if (fs.existsSync(path.join(resourcePath, "package.json"))) {
-      console.log(`[MCP] Found bundled example template at ${resourcePath}`);
+      console.log(`[MCP] Found bundled template at ${resourcePath}`);
       return resourcePath;
     }
-    console.warn(`[MCP] Example template not found in bundled resources`);
+    console.warn(`[MCP] Template not found in bundled resources`);
     return null;
   }
 
-  // Development: check artifacts/example location
-  const devPath = path.resolve(findWorkspaceRoot() || "", "desktop/artifacts/example");
+  // Development: check templates/mcp-app location
+  const devPath = path.resolve(findWorkspaceRoot() || "", "desktop/templates/mcp-app");
   if (fs.existsSync(path.join(devPath, "package.json"))) {
     return devPath;
   }
@@ -102,6 +102,39 @@ const copyDirectory = ({
 };
 
 /**
+ * Recursively replace a placeholder string in all text files within a directory.
+ * Only processes files with extensions commonly used in MCP app templates
+ * (.ts, .tsx, .json, .html, .css, .js) to avoid corrupting binary files.
+ */
+const replaceInAllFiles = ({
+  dir,
+  placeholder,
+  value,
+}: {
+  dir: string;
+  placeholder: string;
+  value: string;
+}): void => {
+  const textExtensions = new Set([".ts", ".tsx", ".json", ".html", ".css", ".js"]);
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      if (!["node_modules", "dist", ".creature"].includes(entry.name)) {
+        replaceInAllFiles({ dir: fullPath, placeholder, value });
+      }
+    } else if (textExtensions.has(path.extname(entry.name))) {
+      const content = fs.readFileSync(fullPath, "utf-8");
+      if (content.includes(placeholder)) {
+        fs.writeFileSync(fullPath, content.replaceAll(placeholder, value));
+      }
+    }
+  }
+};
+
+/**
  * Run a shell command and return a promise.
  * Uses bundled npm/npx when available (in packaged app).
  */
@@ -162,31 +195,31 @@ const runCommand = ({
 };
 
 /**
- * Create a new MCP from the example template.
+ * Create a new MCP from the skeleton template.
  *
- * Steps:
- * 1. Copy template to target directory
- * 2. Update package.json with new name
- * 3. Run npm install
- * 4. Run npm run build
- * 5. Add to user MCP configs
+ * Copies the minimal template from desktop/templates/mcp-app, replaces
+ * __APP_NAME__ placeholders with the canonical app name, then installs
+ * dependencies and builds.
  *
- * @param targetPath - Directory to create the MCP in
- * @param name - Name for the new MCP
+ * @param params.targetPath - Parent directory to create the MCP folder in
+ * @param params.name - Folder name for the new MCP on disk
+ * @param params.appName - Canonical MCP App name (used in package.json, createApp, URIs)
  */
 export const createFromTemplate = async ({
   targetPath,
   name,
+  appName,
 }: {
   targetPath: string;
   name: string;
+  appName: string;
 }): Promise<{ success: boolean; error?: string }> => {
-  console.log(`[MCP] Creating new MCP from example template: ${name} at ${targetPath}`);
+  console.log(`[MCP] Creating new MCP from template: ${name} (app: ${appName}) at ${targetPath}`);
 
   // Find template directory
   const templatePath = findTemplatePath();
   if (!templatePath) {
-    return { success: false, error: "Could not find example template directory" };
+      return { success: false, error: "Could not find MCP app template directory" };
   }
 
   // Create target directory path
@@ -202,65 +235,35 @@ export const createFromTemplate = async ({
     console.log(`[MCP] Copying template from ${templatePath} to ${mcpDir}`);
     copyDirectory({ src: templatePath, dest: mcpDir, excludeDirs: ["node_modules", "dist", ".creature"] });
 
+    // Step 1a: Copy vendored SDK lib directory WITHOUT exclusions.
+    // The main copy above strips all node_modules/ and dist/ dirs recursively,
+    // but the vendored SDK at lib/open-mcp-app/ needs both its dist/ (actual code)
+    // and node_modules/ (SDK's own deps like @modelcontextprotocol/ext-apps).
+    const libSrc = path.join(templatePath, "lib");
+    if (fs.existsSync(libSrc)) {
+      const libDest = path.join(mcpDir, "lib");
+      copyDirectory({ src: libSrc, dest: libDest, excludeDirs: [] });
+    }
+
     // Step 1b: Remove package-lock.json if copied (it may have stale file: references)
     const lockFilePath = path.join(mcpDir, "package-lock.json");
     if (fs.existsSync(lockFilePath)) {
       fs.unlinkSync(lockFilePath);
     }
 
-    // Step 2: Update package.json with new name, bin field, and creature.name
+    // Step 2: Replace __APP_NAME__ placeholder in all source files.
+    // The skeleton template uses __APP_NAME__ as a universal placeholder
+    // in package.json, server index, and UI entry — one simple find-replace.
+    replaceInAllFiles({ dir: mcpDir, placeholder: "__APP_NAME__", value: appName });
+
+    // Step 2b: Handle workspace SDK linking and package.json overrides
     const packageJsonPath = path.join(mcpDir, "package.json");
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-    packageJson.name = name;
-    // Update bin field to use the new name (required for npx to work)
-    if (packageJson.bin) {
-      packageJson.bin = { [name]: "dist/server.js" };
-    }
-    // Update creature.name for registry publishing
-    if (packageJson.creature) {
-      packageJson.creature.name = name;
-    }
-    
+
     if (isWithinWorkspace(mcpDir) && packageJson.dependencies?.["open-mcp-app"]) {
       packageJson.dependencies["open-mcp-app"] = "*";
       console.log(`[MCP] Within workspace: using * for SDK`);
-    }
-    
-    fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-
-    // Update template identity in source files
-    // The example template uses "items" as the default name
-    
-    // Server entry: src/server/index.ts - contains app name and URI
-    const serverIndexPath = path.join(mcpDir, "src", "server", "index.ts");
-    if (fs.existsSync(serverIndexPath)) {
-      let serverContent = fs.readFileSync(serverIndexPath, "utf-8");
-      // Replace app name in createApp()
-      serverContent = serverContent.replace(/name: "items"/g, `name: "${name}"`);
-      // Replace ui:// URIs
-      serverContent = serverContent.replace(/ui:\/\/items\//g, `ui://${name}/`);
-      fs.writeFileSync(serverIndexPath, serverContent);
-    }
-
-    // Tools file: src/server/tools/items.ts - contains UI resource URI constant
-    const toolsPath = path.join(mcpDir, "src", "server", "tools", "items.ts");
-    if (fs.existsSync(toolsPath)) {
-      let toolsContent = fs.readFileSync(toolsPath, "utf-8");
-      // Replace ui:// URIs in the ITEMS_UI constant
-      toolsContent = toolsContent.replace(/ui:\/\/items\//g, `ui://${name}/`);
-      fs.writeFileSync(toolsPath, toolsContent);
-    }
-
-    // UI entry: src/ui/app.tsx - contains HostProvider name
-    const appTsxPath = path.join(mcpDir, "src", "ui", "app.tsx");
-    if (fs.existsSync(appTsxPath)) {
-      let appContent = fs.readFileSync(appTsxPath, "utf-8");
-      // Replace HostProvider name prop
-      appContent = appContent.replace(
-        /<HostProvider name="items"/g,
-        `<HostProvider name="${name}"`
-      );
-      fs.writeFileSync(appTsxPath, appContent);
+      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
     }
 
     // Step 3: Run npm install first, then link local SDK in dev mode
@@ -313,8 +316,8 @@ export const registerMcpHandlers = () => {
   /**
    * Create a new MCP from the example template.
    */
-  ipcMain.handle("mcp:createFromTemplate", async (_, { targetPath, name }) => {
-    const result = await createFromTemplate({ targetPath, name });
+  ipcMain.handle("mcp:createFromTemplate", async (_, { targetPath, name, appName }) => {
+    const result = await createFromTemplate({ targetPath, name, appName: appName || name });
 
     // Track MCP creation (no paths)
     telemetry.track("mcp_create_from_template", {

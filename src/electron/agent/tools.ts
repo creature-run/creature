@@ -4,7 +4,7 @@
  * Provides tools that the AI agent can use:
  * - Pip management (close pips and clean up resources)
  *
- * Note: File/code operations are handled by the mcp-ide MCP App.
+ * Note: File/code operations are handled by the ide MCP App.
  */
 
 import { tool } from "ai";

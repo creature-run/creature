@@ -228,6 +228,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const { isDarkMode } = useTheme();
   const { session, setProject, setSessionId, closeAllPips, pips, setActivePipId } = useApp();
   const [input, setInput] = useState("");
+
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({ ...DEFAULT_TOKEN_USAGE });
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -347,6 +348,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
             const bOrder = msgB._order ?? orderMap.get(msgB.id) ?? Infinity;
             return aOrder - bOrder;
           });
+          
           return {
             ...options,
             body: {
@@ -1032,22 +1034,29 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   }, []);
 
   /**
-   * Broadcast conversation updates to the main process for Dev Console.
+   * Broadcast conversation updates to the main process for Devkit inspection.
    * Sends the full merged conversation (streamed + injected) that the agent sees.
    * Strips structuredContent (UI-only per MCP Apps spec).
+   *
+   * Debounced at 500ms and deferred via setTimeout to avoid blocking the
+   * React render cycle. The JSON.parse(JSON.stringify(...)) deep clone is
+   * expensive for large conversations and must not run synchronously during render.
    */
   useEffect(() => {
-    try {
-      const serializable = JSON.parse(
-        JSON.stringify(messagesForAgent, (key, value) => {
-          if (key === "structuredContent") return undefined;
-          return value;
-        })
-      );
-      window.electronAPI.devConsole.updateConversation(serializable);
-    } catch (e) {
-      console.error("[ViewChat] Failed to serialize conversation for Dev Console:", e);
-    }
+    const timeoutId = setTimeout(() => {
+      try {
+        const serializable = JSON.parse(
+          JSON.stringify(messagesForAgent, (key, value) => {
+            if (key === "structuredContent") return undefined;
+            return value;
+          })
+        );
+        window.electronAPI.devConsole.updateConversation(serializable);
+      } catch (e) {
+        console.error("[ViewChat] Failed to serialize conversation for Dev Console:", e);
+      }
+    }, 500);
+    return () => clearTimeout(timeoutId);
   }, [messagesForAgent]);
 
   /**
@@ -1059,6 +1068,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   };
 
   const isStreaming = status === "streaming" || status === "submitted";
+  const hasStreamError = status === "error";
   const activeSession = sessionOptions.find((sessionOption) => sessionOption.id === session.sessionId);
   const isSessionBusy = isSessionLoading || isSwitchingSession || isSessionMetaUpdating;
   const activeSessionTitle = activeSession?.title ?? "Session";
@@ -1649,8 +1659,168 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
                   </div>
                 ) : (
                   <div className="bg-background-secondary rounded-md p-4 mb-4 overflow-hidden">
-                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-tertiary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-tertiary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-border-primary [&_blockquote]:pl-3 [&_blockquote]:text-text-secondary [&_table]:my-2 [&_table]:w-full [&_table]:text-sm [&_table]:border-collapse [&_th]:border [&_th]:border-border-primary [&_th]:px-2 [&_th]:py-1 [&_th]:font-medium [&_th]:text-left [&_td]:border [&_td]:border-border-primary [&_td]:px-2 [&_td]:py-1 [&_hr]:my-3 [&_hr]:border-border-primary [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline [&_input[type='checkbox']]:mr-1.5">
-                      {renderMessageParts(msg, "assistant")}
+                    <div className="text-text-primary text-base leading-relaxed break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-tertiary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:break-all [&_pre]:bg-background-tertiary [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_a]:text-ring-primary [&_a]:no-underline [&_a:hover]:underline">
+                      {msg.parts?.map((part, i) => {
+                        if (part.type === "text") {
+                          return <ReactMarkdown key={i}>{part.text}</ReactMarkdown>;
+                        }
+
+                        // Skip step-start parts (internal markers)
+                        if (part.type === "step-start") {
+                          return null;
+                        }
+
+                        // AI SDK v6 format: tool-{toolName}
+                        if (part.type.startsWith("tool-")) {
+                          const toolPart = part as {
+                            type: string;
+                            toolName?: string;
+                            state: string;
+                            input?: unknown;
+                            output?: unknown;
+                          };
+                          // For the mcp_tool proxy, show the actual serverName/toolName
+                          // from the input args instead of the generic "mcp_tool" label
+                          const rawToolName = part.type.substring(5);
+                          const toolInput = toolPart.input as { serverName?: string; toolName?: string } | undefined;
+                          const isMcpProxy = rawToolName === "mcp_tool";
+                          const hasProxyNames = isMcpProxy && !!toolInput?.serverName && !!toolInput?.toolName;
+                          const toolServerName = hasProxyNames ? toolInput!.serverName : null;
+                          const toolDisplayName = hasProxyNames ? toolInput!.toolName : (isMcpProxy ? null : rawToolName);
+
+                          const isCurrentStreamingMessage =
+                            isStreaming && msg.id === streamedMessages[streamedMessages.length - 1]?.id;
+                          const stuckAtInputAvailable =
+                            toolPart.state === "input-available" && !isCurrentStreamingMessage;
+
+                          // When the stream dies with an error, tool parts stuck in
+                          // input-available are abandoned (no result will ever arrive).
+                          // Show them as errors so the UI doesn't appear frozen.
+                          const isAbandoned = stuckAtInputAvailable && hasStreamError;
+
+                          const isRunning =
+                            (toolPart.state === "input-streaming" ||
+                              toolPart.state === "input-available") &&
+                            !stuckAtInputAvailable;
+                          const isComplete =
+                            toolPart.state === "output-available" || (stuckAtInputAvailable && !isAbandoned);
+                          const isError = toolPart.state === "output-error" || isAbandoned;
+
+                          const output = toolPart.output as {
+                            _inlineDisplay?: {
+                              resourceUri: string;
+                              serverName: string;
+                              toolName: string;
+                              displayModes: string[];
+                            };
+                            hasUi?: boolean;
+                            terminalUrl?: string;
+                            _mcpResource?: { text?: string };
+                            sessionId?: string;
+                          } | undefined;
+
+                          const hasMcpUi = !!(
+                            output?.hasUi ||
+                            output?.terminalUrl ||
+                            output?._mcpResource?.text
+                          );
+                          const inlineDisplay = output?._inlineDisplay;
+                          const toolId = `${msg.id}-${i}`;
+                          const isExpanded = expandedTools.has(toolId);
+
+                          if (isComplete && inlineDisplay?.resourceUri) {
+                            return (
+                              <InlineWidget
+                                key={toolId}
+                                resourceUri={inlineDisplay.resourceUri}
+                                toolInput={(toolPart.input as Record<string, unknown>) || {}}
+                                toolResult={toolPart.output}
+                                toolName={inlineDisplay.toolName}
+                                serverName={inlineDisplay.serverName}
+                                displayModes={inlineDisplay.displayModes}
+                                messageId={msg.id}
+                                onExpandToPip={() => {
+                                  // For multi-session MCPs (like terminal), the tool result
+                                  // contains a sessionId. We should restore the session
+                                  // rather than re-run the command, preserving output history.
+                                  const structuredContent = (toolPart.output as { structuredContent?: { sessionId?: string } })?.structuredContent;
+                                  const sessionId = structuredContent?.sessionId;
+
+                                  if (sessionId && inlineDisplay.toolName === "terminal_run") {
+                                    // Use terminal_get to restore session without clearing buffer
+                                    window.electronAPI.controlPlane.callTool({
+                                      serverName: inlineDisplay.serverName,
+                                      toolName: "terminal_get",
+                                      args: { sessionId, displayMode: "pip" },
+                                    });
+                                  } else {
+                                    // Default: re-run the tool with pip mode
+                                    window.electronAPI.controlPlane.callTool({
+                                      serverName: inlineDisplay.serverName,
+                                      toolName: inlineDisplay.toolName,
+                                      args: {
+                                        ...((toolPart.input as Record<string, unknown>) || {}),
+                                        displayMode: "pip",
+                                      },
+                                    });
+                                  }
+                                }}
+                              />
+                            );
+                          }
+
+                          const hasOutput =
+                            isComplete && toolPart.output && !hasMcpUi && !inlineDisplay;
+
+                          return (
+                            <div
+                              key={i}
+                              className={cn(
+                                "bg-background-secondary border border-border-primary rounded-md px-3.5 py-2.5 my-2 text-sm overflow-hidden",
+                                isError && "border-l-2 border-l-red-400"
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "flex items-center gap-1.5",
+                                  hasOutput && "cursor-pointer"
+                                )}
+                                onClick={() => hasOutput && toggleToolExpanded(toolId)}
+                              >
+                                {isError && (
+                                  <span className="text-red-400 text-xs font-bold">✕</span>
+                                )}
+                                {toolServerName && (
+                                  <>
+                                    <span className="text-text-primary/70 font-medium">{toolServerName}</span>
+                                    <CaretRight size={10} weight="bold" className="text-text-secondary/50" />
+                                  </>
+                                )}
+                                {toolDisplayName && (
+                                  <span className="text-text-primary/70 font-medium">{toolDisplayName}</span>
+                                )}
+                                {isRunning && (
+                                  <span className="ml-auto">
+                                    <Spinner size={12} />
+                                  </span>
+                                )}
+                                {hasOutput && !isRunning && (
+                                  <span className="text-text-secondary ml-auto">
+                                    {isExpanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                                  </span>
+                                )}
+                              </div>
+                              {hasOutput && isExpanded && (
+                                <span className="block mt-2 text-text-secondary whitespace-pre-wrap break-all text-[11px] font-mono">
+                                  {JSON.stringify(toolPart.output, null, 2)}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        return null;
+                      })}
                     </div>
                   </div>
                 )}

@@ -325,6 +325,18 @@ export function ChatInput({
     autoResize();
   }, [isSampling, samplingSeed, autoResize]);
 
+  /**
+   * Recalculate textarea height whenever input changes programmatically.
+   * This handles cases where setInput is called directly (e.g. on submit)
+   * without going through handleInputChange, which is the only other
+   * place autoResize is called. Without this, the textarea's DOM height
+   * (set via direct style manipulation in autoResize) would persist
+   * even after the content is cleared.
+   */
+  useEffect(() => {
+    autoResize();
+  }, [input, autoResize]);
+
   // Detect @ mentions in input
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -465,11 +477,6 @@ export function ChatInput({
         setImageAttachments([]);
         setMentionQuery(null);
         setMentionResults([]);
-
-        // Reset textarea height immediately
-        if (inputRef.current) {
-          inputRef.current.style.height = "auto";
-        }
       }
     },
     [selectMention, pendingFileRefs, imageAttachments, onSubmit, setInput, inputRef]
@@ -1174,14 +1181,19 @@ export function ChatInput({
           </HoverCard>
         </div>
 
-        {/* Right side - Model and token stats */}
+        {/* Right side - Token stats and model selector */}
         <div className="flex items-center gap-2 text-text-secondary text-xs">
+          {tokenUsage && tokenUsage.totalTokens > 0 && (
+            <span title={`Input tokens: ${tokenUsage.inputTokens}, Output tokens: ${tokenUsage.outputTokens}`}>
+              {formatCompactNumber(tokenUsage.inputTokens)} / {formatCompactNumber(tokenUsage.outputTokens)}
+            </span>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
                 disabled={auth.providerType !== "anthropic" || isUpdatingChatModel}
-                className="h-6 min-w-[120px] rounded-md border border-border-secondary bg-background-secondary px-2.5 text-xs text-text-primary inline-flex items-center justify-between gap-2 transition-colors hover:bg-background-tertiary disabled:opacity-50 disabled:cursor-not-allowed"
+                className="h-6 min-w-[120px] rounded-md border border-border-secondary bg-transparent px-2.5 text-xs text-text-secondary inline-flex items-center justify-between gap-2 transition-colors hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{modelLabel}</span>
                 <CaretDown size={10} weight="bold" className="text-text-secondary" />
@@ -1198,13 +1210,6 @@ export function ChatInput({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {tokenUsage && tokenUsage.totalTokens > 0 && (
-            <>
-              <span title={`Input tokens: ${tokenUsage.inputTokens}, Output tokens: ${tokenUsage.outputTokens}`}>
-                {formatCompactNumber(tokenUsage.inputTokens)} / {formatCompactNumber(tokenUsage.outputTokens)}
-              </span>
-            </>
-          )}
         </div>
       </div>
       </div>

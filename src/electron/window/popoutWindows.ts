@@ -72,11 +72,15 @@ export const createPopoutWindow = (params: PopoutParams): { success: boolean } =
     webviewTag: true,
   };
 
+  // Use theme-aware background color so the Electron chrome matches the user's
+  // theme from the very first frame, preventing a black flash in light mode.
+  const themeBgColor = themeParam === "light" ? "#EFEEEC" : "#0D0D0B";
+
   const popoutWindow = new BrowserWindow({
     width: 800,
     height: 600,
     title: title || "Pip",
-    backgroundColor: "#0D0D0B",
+    backgroundColor: themeBgColor,
     webPreferences,
   });
 

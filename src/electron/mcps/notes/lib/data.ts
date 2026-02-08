@@ -8,15 +8,7 @@
  * Data is scoped by localId for isolation.
  */
 
-import {
-  experimental_kvIsAvailable,
-  experimental_kvGet,
-  experimental_kvSet,
-  experimental_kvDelete,
-  experimental_kvList,
-  experimental_kvListWithValues,
-  experimental_kvSearch,
-} from "open-mcp-app/server";
+import { exp } from "open-mcp-app/server";
 
 // =============================================================================
 // DataStore Interface
@@ -82,7 +74,7 @@ class KvStore<T> implements DataStore<T> {
   }
 
   async get(id: string): Promise<T | null> {
-    const value = await experimental_kvGet(this.scopedKey(id));
+    const value = await exp.kvGet(this.scopedKey(id));
     if (!value) return null;
     try {
       return JSON.parse(value) as T;
@@ -92,11 +84,11 @@ class KvStore<T> implements DataStore<T> {
   }
 
   async set(id: string, value: T): Promise<void> {
-    await experimental_kvSet(this.scopedKey(id), JSON.stringify(value));
+    await exp.kvSet(this.scopedKey(id), JSON.stringify(value));
   }
 
   async delete(id: string): Promise<boolean> {
-    return experimental_kvDelete(this.scopedKey(id));
+    return exp.kvDelete(this.scopedKey(id));
   }
 
   async list(): Promise<T[]> {
@@ -104,7 +96,7 @@ class KvStore<T> implements DataStore<T> {
 
     // Use listWithValues to fetch all data in a single RPC call
     // This avoids N+1 queries when listing many items
-    const entries = await experimental_kvListWithValues(prefix);
+    const entries = await exp.kvListWithValues(prefix);
     if (!entries) return [];
 
     const results: T[] = [];
@@ -120,12 +112,12 @@ class KvStore<T> implements DataStore<T> {
 
   async search(query: string, limit?: number): Promise<SearchResult<T>[]> {
     const prefix = this.scopePrefix();
-    const searchResults = await experimental_kvSearch(query, { prefix, limit });
+    const searchResults = await exp.kvSearch(query, { prefix, limit });
     if (!searchResults) return [];
 
     const results: SearchResult<T>[] = [];
     for (const result of searchResults) {
-      const value = await experimental_kvGet(result.key);
+      const value = await exp.kvGet(result.key);
       if (value) {
         try {
           results.push({
@@ -275,7 +267,7 @@ export const createDataStore = <T>({
   localId: string;
 }): DataStore<T> => {
   // Check if KV storage is available (Creature host)
-  if (experimental_kvIsAvailable()) {
+  if (exp.kvIsAvailable()) {
     if (!storageLoggedOnce) {
       console.log("[Data] Using persistent KV storage");
       storageLoggedOnce = true;

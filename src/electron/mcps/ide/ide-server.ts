@@ -31,7 +31,7 @@ const rgPath = ripgrep.rgPath;
 // =============================================================================
 
 const PORT = parseInt(process.env.MCP_PORT || process.env.PORT || "3010", 10);
-const IDE_UI_RESOURCE_URI = "ui://mcp-ide/editor";
+const IDE_UI_RESOURCE_URI = "ui://ide/editor";
 
 /**
  * Workspace root from MCP_WORKING_DIRS environment variable.
@@ -237,7 +237,7 @@ const getLanguage = (filePath: string): string => {
 // =============================================================================
 
 const app = createApp({
-  name: "mcp-ide",
+  name: "ide",
   version: "0.0.3",
   port: PORT,
 });

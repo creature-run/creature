@@ -1,18 +1,23 @@
 /**
  * Dev Console IPC Handlers
  *
- * Handles IPC events for the Dev Console:
+ * Handles IPC events for the Dev Console and logging:
  * - Opening the Dev Console window
- * - Providing log entries (delegated to logs module)
- * - Providing conversation history
- * - Providing the current system prompt
+ * - Providing and clearing log entries
+ * - Receiving UI Resource logs from the renderer
+ * - Storing conversation history (consumed by Devkit MCP)
+ *
+ * Conversation and System Prompt inspection is handled by the Devkit MCP.
+ * The updateConversation handler remains because ViewChat.tsx pushes
+ * conversation state here, and the Devkit reads it via controlPlane.
  */
 
 import { ipcMain } from "electron";
 import { logAggregator, type LogLevel } from "../logging";
 import { openDevConsoleWindow } from "../window/devConsoleWindow";
-import { getCurrentConversation } from "./chat.handlers";
-import { getCurrentSystemPrompt } from "../agent";
+import { setCurrentConversation } from "./chat.handlers";
+import { bufferUiError } from "../mcp/client";
+import { markPipUiError } from "../mcp/controlPlane";
 
 /**
  * Register IPC handlers for the Dev Console.
@@ -36,6 +41,19 @@ export const registerDevConsoleHandlers = () => {
       level: data.level as LogLevel,
       message: data.message,
     });
+
+    // Buffer error-level UI logs so the agent's prepareStep can inject
+    // them as system messages. This surfaces UI runtime errors (TypeError,
+    // unhandled rejections, etc.) directly to the model for self-correction.
+    // Also mark pips for this MCP as having UI errors so the next pip
+    // refresh forces a re-render even if the HTML content is unchanged.
+    if (data.level === "error") {
+      bufferUiError({
+        serverName: data.mcpServer,
+        message: data.message,
+      });
+      markPipUiError({ serverName: data.mcpServer });
+    }
   });
 
   /**
@@ -63,31 +81,11 @@ export const registerDevConsoleHandlers = () => {
   });
 
   /**
-   * Get the current conversation history.
-   * Returns the messages array from the current chat session.
-   */
-  ipcMain.handle("devconsole:getConversation", async () => {
-    return getCurrentConversation();
-  });
-
-  /**
-   * Get the current system prompt.
-   * Returns the full system prompt including dynamic content.
-   */
-  ipcMain.handle("devconsole:getSystemPrompt", async () => {
-    return getCurrentSystemPrompt();
-  });
-
-  /**
    * Update the stored conversation history.
    * Called by the renderer when conversation changes.
+   * Data is consumed by the Devkit MCP's devkit_get_conversation tool.
    */
   ipcMain.on("devconsole:updateConversation", (_event, messages: unknown[]) => {
-    // Store in chat.handlers for retrieval
     setCurrentConversation(messages);
   });
 };
-
-// Re-export for use in chat.handlers
-import { setCurrentConversation } from "./chat.handlers";
-

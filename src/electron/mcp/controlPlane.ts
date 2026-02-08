@@ -39,13 +39,18 @@
  * Per MCP Apps spec, Host must send ui/notifications/tool-input after initialization completes.
  */
 
-import { BrowserWindow } from "electron";
-import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, type ResourceIcon, type Views } from "./client";
+import { BrowserWindow, app } from "electron";
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, restartMcp, getAllDevMcpInfo, type ResourceIcon, type Views } from "./client";
 import { getPopoutWindow } from "../window/popoutWindows";
 import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
 import type { WidgetState } from "../../shared/types";
 import { resolveInstanceIdForTool, type RoutingResult } from "./routing";
+import { getCurrentConversation } from "../ipc/chat.handlers";
+import { getCurrentSystemPrompt } from "../agent";
 
 export type { WidgetState };
 
@@ -88,6 +93,255 @@ export interface PersistedPipState {
 const BROWSER_MCP_NAME = "browser";
 
 /**
+ * DEVKIT MCP SPECIAL HANDLING
+ *
+ * The devkit MCP server declares tools but their handlers are no-ops.
+ * The Host intercepts all devkit tool calls and executes them directly
+ * because they require access to Electron APIs (LogAggregator, restartMcp,
+ * filesystem) that are unavailable to MCP server child processes.
+ */
+const DEVKIT_MCP_NAME = "devkit";
+
+/**
+ * Parsed TypeScript error from tsc output.
+ */
+interface TscError {
+  file: string;
+  line: number;
+  col: number;
+  code: string;
+  message: string;
+}
+
+/**
+ * Run `npx tsc --noEmit` in a directory and parse the output into structured errors.
+ *
+ * Uses `--pretty false` for machine-readable output format:
+ *   src/server/tools/items.ts(16,3): error TS2353: Object literal may only specify known properties...
+ *
+ * Returns an empty errors array when type checking passes.
+ * Rejects only on spawn/execution failures, not on type errors (those are returned as data).
+ */
+const runTypecheck = ({ cwd }: { cwd: string }): Promise<{ errors: TscError[] }> => {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "npx",
+      ["tsc", "--noEmit", "--pretty", "false"],
+      { cwd, timeout: 30_000, shell: true, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        // tsc exits with code 2 when there are type errors — that's not a failure
+        const output = (stdout || "") + (stderr || "");
+
+        if (err && err.killed) {
+          reject(new Error("Typecheck timed out after 30 seconds"));
+          return;
+        }
+
+        // Parse tsc output lines into structured errors
+        // Format: file(line,col): error TSxxxx: message
+        const errorPattern = /^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/;
+        const errors: TscError[] = [];
+
+        for (const line of output.split("\n")) {
+          const match = line.trim().match(errorPattern);
+          if (match) {
+            errors.push({
+              file: match[1],
+              line: parseInt(match[2], 10),
+              col: parseInt(match[3], 10),
+              code: match[4],
+              message: match[5],
+            });
+          }
+        }
+
+        resolve({ errors });
+      }
+    );
+  });
+};
+
+/**
+ * Handle devkit tool calls.
+ *
+ * All devkit tools are executed by the Host, not the MCP server.
+ * The MCP server just declares the tools for the protocol.
+ *
+ * Tools:
+ * - devkit_get_logs: Read from LogAggregator
+ * - devkit_reload_mcp_app: Restart an MCP App via restartMcp()
+ * - devkit_typecheck: Run tsc --noEmit on a dev MCP App
+ * - devkit_get_mcp_app_sdk_docs: Read SDK reference from disk
+ */
+const handleDevkitToolCall = async ({
+  toolName,
+  args,
+}: {
+  toolName: string;
+  args: Record<string, unknown>;
+}): Promise<unknown> => {
+  const action = toolName.replace("devkit_", "");
+
+  if (action === "get_logs") {
+    const filter = (args.filter as string) || "all";
+    const mcpName = args.mcpName as string | undefined;
+    const recentCount = 50;
+
+    let logs = logAggregator.getRecent(recentCount);
+
+    // Filter out devkit's own tool call/result logs to prevent infinite loop noise
+    logs = logs.filter(
+      (entry) => !entry.message.startsWith(`[Tool Call] ${DEVKIT_MCP_NAME}/`) &&
+                 !entry.message.startsWith(`[Tool Result] ${DEVKIT_MCP_NAME}/`)
+    );
+
+    if (filter === "current_mcp_app" && mcpName) {
+      logs = logs.filter((entry) => entry.sourceName === mcpName);
+    } else if (filter === "errors") {
+      const errorLevels = new Set(["error", "critical", "alert", "emergency"]);
+      logs = logs.filter((entry) => errorLevels.has(entry.level));
+    }
+
+    const errorCount = logs.filter((entry) => entry.level === "error" || entry.level === "critical").length;
+    const summary = `Fetched ${logs.length} log entries (${errorCount} errors)`;
+
+    return {
+      content: [{ type: "text", text: summary }],
+      structuredContent: {
+        type: "logs",
+        logs,
+        filter,
+        mcpName,
+        total: logs.length,
+      },
+    };
+  }
+
+  if (action === "reload_mcp_app") {
+    const mcpName = args.mcpName as string;
+    if (!mcpName) {
+      return {
+        content: [{ type: "text", text: "Error: mcpName is required" }],
+        structuredContent: { type: "refresh", success: false, mcpName: "", error: "mcpName is required" },
+        isError: true,
+      };
+    }
+
+    try {
+      await restartMcp({ name: mcpName });
+      return {
+        content: [{ type: "text", text: `MCP App "${mcpName}" restarted successfully` }],
+        structuredContent: { type: "refresh", success: true, mcpName },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        content: [{ type: "text", text: `Failed to restart MCP App "${mcpName}": ${errorMessage}` }],
+        structuredContent: { type: "refresh", success: false, mcpName, error: errorMessage },
+        isError: true,
+      };
+    }
+  }
+
+  if (action === "typecheck") {
+    const mcpName = args.mcpName as string;
+    if (!mcpName) {
+      return {
+        content: [{ type: "text", text: "Error: mcpName is required" }],
+        structuredContent: { type: "typecheck", success: false, mcpName: "", error: "mcpName is required" },
+        isError: true,
+      };
+    }
+
+    // Find the dev MCP's project directory
+    const devMcps = getAllDevMcpInfo();
+    const target = devMcps.find((d) => d.name === mcpName);
+    if (!target) {
+      return {
+        content: [{ type: "text", text: `Error: "${mcpName}" is not a development MCP App (available: ${devMcps.map((d) => d.name).join(", ") || "none"})` }],
+        structuredContent: { type: "typecheck", success: false, mcpName, error: "Not a dev MCP" },
+        isError: true,
+      };
+    }
+
+    try {
+      const result = await runTypecheck({ cwd: target.path });
+      if (result.errors.length === 0) {
+        return {
+          content: [{ type: "text", text: `TypeScript type check passed — no errors in "${mcpName}"` }],
+          structuredContent: { type: "typecheck", success: true, mcpName, errors: [] },
+        };
+      }
+
+      const summary = result.errors
+        .map((e) => `${e.file}(${e.line},${e.col}): ${e.code} — ${e.message}`)
+        .join("\n");
+
+      return {
+        content: [{ type: "text", text: `TypeScript found ${result.errors.length} error(s) in "${mcpName}":\n\n${summary}` }],
+        structuredContent: { type: "typecheck", success: false, mcpName, errors: result.errors },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        content: [{ type: "text", text: `Failed to run typecheck on "${mcpName}": ${errorMessage}` }],
+        structuredContent: { type: "typecheck", success: false, mcpName, error: errorMessage },
+        isError: true,
+      };
+    }
+  }
+
+  if (action === "get_mcp_app_sdk_docs") {
+    // Resolve the SDK reference docs path relative to the app root
+    const docsPath = app.isPackaged
+      ? path.join(process.resourcesPath, "docs", "sdk-reference.md")
+      : path.join(__dirname, "..", "..", "..", "docs", "sdk-reference.md");
+
+    try {
+      const content = fs.readFileSync(docsPath, "utf-8");
+      return {
+        content: [{ type: "text", text: content }],
+        structuredContent: { type: "sdk_docs" },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        content: [{ type: "text", text: `Failed to read SDK docs: ${errorMessage}` }],
+        structuredContent: { type: "sdk_docs", error: errorMessage },
+        isError: true,
+      };
+    }
+  }
+
+  if (action === "get_conversation") {
+    const conversation = getCurrentConversation();
+    return {
+      content: [{ type: "text", text: `Conversation has ${conversation.length} messages` }],
+      structuredContent: {
+        type: "conversation",
+        messages: conversation,
+      },
+    };
+  }
+
+  if (action === "get_system_prompt") {
+    const prompt = getCurrentSystemPrompt();
+    return {
+      content: [{ type: "text", text: prompt }],
+      structuredContent: {
+        type: "system_prompt",
+        prompt,
+      },
+    };
+  }
+
+  return {
+    content: [{ type: "text", text: `Unknown devkit tool: ${toolName}` }],
+    isError: true,
+  };
+};
+
+/**
  * Pip Instance represents a rendered UI Resource in pip (picture-in-picture) mode.
  * instanceId is the single identifier for the pip.
  */
@@ -119,10 +373,28 @@ export interface PipInstance {
     toolName: string;
     arguments: Record<string, unknown>;
   };
+  /**
+   * Whether the pip's UI has reported a runtime error.
+   * Tracked so the agent can see error state; cleared on reload.
+   */
+  hasUiError?: boolean;
 }
 
 // Pip Instance registry
 const pipInstances = new Map<string, PipInstance>();
+
+/**
+ * Tracks in-flight pip creation for single-instance resources.
+ * Prevents duplicate pips when concurrent tool calls target the same resource.
+ *
+ * Key: "serverName:resourceUri"
+ * Value: The instanceId being created by the first call
+ *
+ * Set before the tool call executes, cleared after createPipInstance completes.
+ * Concurrent calls find the reservation and reuse the instanceId instead of
+ * generating a new one, so only one pip is ever created per resource.
+ */
+const pendingSingleModePips = new Map<string, string>();
 
 /**
  * Event emitted when a new Pip Instance is created.
@@ -348,6 +620,7 @@ export const createPipInstance = async ({
   serverName,
   toolName,
   instanceId,
+  title,
   creatureAuth,
   triggeredByTool = true,
   openInBackground = false,
@@ -360,6 +633,7 @@ export const createPipInstance = async ({
   serverName: string;
   toolName: string;
   instanceId: string;
+  title?: string;
   creatureAuth?: { managed?: boolean };
   triggeredByTool?: boolean;
   openInBackground?: boolean;
@@ -385,7 +659,7 @@ export const createPipInstance = async ({
     resourceUri,
     serverName,
     toolName,
-    title: initialTitle,
+    title: title || deriveResourceTitle(resourceUri),
     htmlContent,
     icon,
     createdAt: typeof createdAt === "number" && Number.isFinite(createdAt) ? Number(createdAt) : Date.now(),
@@ -417,12 +691,14 @@ export const createPipInstance = async ({
 };
 
 /**
- * Refresh all pips belonging to a specific MCP server.
- * Closes pips whose resourceUri no longer exists (MCP app was rewritten).
- * Re-fetches HTML content and icon for valid pips.
- * Called when an MCP server is restarted.
+ * Reconcile pips for an MCP server after reconnection.
+ *
+ * Structural cleanup only — closes pips whose resourceUri no longer exists
+ * (e.g., the MCP app was rewritten with different resources). Does NOT
+ * fetch new HTML or touch pip readiness. The caller handles pip reloads
+ * separately via refreshAllPipsForMcp after the build completes.
  */
-export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
+export const reconcilePipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
   const pipsForMcp = Array.from(pipInstances.values()).filter(
     (p) => p.serverName === mcpName
   );
@@ -431,56 +707,49 @@ export const refreshPipsForMcp = async ({ mcpName }: { mcpName: string }): Promi
     return;
   }
 
-  // Get valid resource URIs from the MCP server
   const validUris = getResourceUrisForMcp(mcpName);
+  console.debug(`[PipLifecycle] reconcile ${mcpName}: ${pipsForMcp.length} pip(s), ${validUris.size} valid URI(s)`);
 
   for (const pip of pipsForMcp) {
-    // Close pips with stale resourceUri (MCP app was rewritten with different resources)
     if (!validUris.has(pip.resourceUri)) {
       console.log(`[Control Plane] Closing stale pip (resource no longer exists)`, {
         instanceId: pip.instanceId,
         resourceUri: pip.resourceUri
       });
       pipInstances.delete(pip.instanceId);
-      sendToRenderer("pip:closed", { instanceId: pip.instanceId });
-      continue;
-    }
-
-    // Refresh valid pips with fresh content
-    try {
-      const { html: htmlContent, icon } = await readResource({
-        serverName: pip.serverName,
-        uri: pip.resourceUri,
-      });
-
-      pip.htmlContent = htmlContent;
-      pip.icon = icon;
-      pip.ready = false;
-
-      let resolveReady: () => void = () => {};
-      const readyPromise = new Promise<void>((resolve) => {
-        resolveReady = resolve;
-      });
-      pip.readyPromise = readyPromise;
-      pip.resolveReady = resolveReady;
-
-      sendToRenderer("pip:refresh", {
-        instanceId: pip.instanceId,
-        htmlContent: pip.htmlContent,
-        icon: pip.icon,
-      });
-
-      console.log(`[Control Plane] Refreshed pip`, { instanceId: pip.instanceId });
-    } catch (error) {
-      console.error(`[Control Plane] Failed to refresh pip`, { instanceId: pip.instanceId, error });
+      sendToRenderer("pip:closed", pip.instanceId);
+    } else {
+      console.debug(`[PipLifecycle] reconcile kept pip ${pip.instanceId} (ready=${pip.ready})`);
     }
   }
 };
 
 /**
- * Refresh a single pip's HTML content and icon.
- * Clears the resource cache and re-fetches fresh content.
- * Does NOT restart the MCP server - just refreshes the UI content.
+ * Force-reload all pips belonging to a specific MCP server.
+ *
+ * Unconditionally clears caches and reloads every pip iframe.
+ * Called after a dev MCP rebuild completes (detected via "App UI reloaded"
+ * in stdout) and after successful MCP reconnection.
+ */
+export const refreshAllPipsForMcp = async ({ mcpName }: { mcpName: string }): Promise<void> => {
+  const pipsForMcp = Array.from(pipInstances.values()).filter(
+    (p) => p.serverName === mcpName
+  );
+
+  console.debug(`[PipLifecycle] reloadAll ${mcpName}: ${pipsForMcp.length} pip(s)`);
+
+  for (const pip of pipsForMcp) {
+    await refreshSinglePip({ instanceId: pip.instanceId });
+  }
+};
+
+/**
+ * Force-reload a single pip's HTML content and icon.
+ *
+ * Clears the resource cache, re-fetches fresh HTML from the MCP server,
+ * and unconditionally sends it to the renderer. No diffing, no size
+ * guards — every call produces a clean iframe reload. This eliminates
+ * stale-state bugs caused by conditional refresh logic.
  */
 export const refreshSinglePip = async ({
   instanceId,
@@ -493,24 +762,21 @@ export const refreshSinglePip = async ({
   }
 
   try {
-    // Clear the resource cache so we get fresh content
     clearResourceCache({
       serverName: pip.serverName,
       uri: pip.resourceUri,
     });
 
-    // Fetch fresh HTML content and icon
     const { html: htmlContent, icon } = await readResource({
       serverName: pip.serverName,
       uri: pip.resourceUri,
     });
 
-    // Update pip instance
     pip.htmlContent = htmlContent;
     pip.icon = icon;
     pip.ready = false;
+    pip.hasUiError = false;
 
-    // Create new ready promise
     let resolveReady: () => void = () => {};
     const readyPromise = new Promise<void>((resolve) => {
       resolveReady = resolve;
@@ -524,10 +790,11 @@ export const refreshSinglePip = async ({
       icon: pip.icon,
     });
 
-    console.debug(`[Control Plane] Pip refreshed`, { instanceId: pip.instanceId, htmlLength: pip.htmlContent?.length });
+    console.debug(`[PipLifecycle] Pip reloaded`, { instanceId: pip.instanceId, htmlLength: pip.htmlContent?.length });
     return { success: true };
   } catch (error) {
-    console.error(`[Control Plane] Pip refresh failed`, { instanceId, error });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[PipLifecycle] Pip reload failed`, { instanceId, error: errorMessage });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -545,9 +812,12 @@ export const refreshSinglePip = async ({
  */
 export const markPipReady = (instanceId: string): boolean => {
   const pip = pipInstances.get(instanceId);
-  if (!pip) return false;
+  if (!pip) {
+    console.debug(`[PipLifecycle] markReady IGNORED — pip ${instanceId} not found`);
+    return false;
+  }
 
-  const wasReady = pip.ready;
+  console.debug(`[PipLifecycle] markReady ${instanceId} (wasReady=${pip.ready})`);
 
   if (!pip.ready) {
     pip.ready = true;
@@ -579,34 +849,63 @@ export const markPipReady = (instanceId: string): boolean => {
 
 /**
  * Wait for a Pip Instance to be ready.
- * Times out after 10 seconds.
+ *
+ * If the pip doesn't exist yet in the registry, polls briefly for it to
+ * appear. This handles the race where a concurrent tool call is still
+ * creating the pip (see pendingSingleModePips). Once the pip exists,
+ * waits for its readyPromise to resolve (renderer sends pip:ready).
+ *
+ * Non-fatal: returns false on timeout instead of throwing, so callers
+ * don't produce unhandled rejections that crash the agent stream.
+ * The pip may still become ready later (e.g. after a server restart
+ * delivers correct HTML).
  */
-const waitForPipReady = async (instanceId: string): Promise<void> => {
-  const pip = pipInstances.get(instanceId);
+const waitForPipReady = async (instanceId: string): Promise<boolean> => {
+  let pip = pipInstances.get(instanceId);
+
+  // Pip may not exist yet if a concurrent call is still creating it.
+  // Poll briefly for it to appear.
   if (!pip) {
-    throw new Error(`Pip not found: ${instanceId}`);
+    const MAX_APPEAR_WAIT = 15000;
+    const POLL_MS = 50;
+    const start = Date.now();
+    while (!pip && Date.now() - start < MAX_APPEAR_WAIT) {
+      await new Promise(r => setTimeout(r, POLL_MS));
+      pip = pipInstances.get(instanceId);
+    }
+    if (!pip) {
+      console.warn(`[PipLifecycle] waitForReady ${instanceId} — pip never appeared`);
+      return false;
+    }
   }
 
   if (pip.ready) {
-    return;
+    console.debug(`[PipLifecycle] waitForReady ${instanceId} — already ready`);
+    return true;
   }
 
-  const TIMEOUT = 10000;
+  console.debug(`[PipLifecycle] waitForReady ${instanceId} — waiting (htmlLength=${pip.htmlContent?.length})`);
+
+  const TIMEOUT = 15000;
   let timeoutId: ReturnType<typeof setTimeout>;
-  let resolved = false;
-  
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      if (!resolved) {
-        console.error(`[Control Plane] Pip ready timeout`, { instanceId, timeoutMs: TIMEOUT });
-        reject(new Error(`Pip ready timeout: ${instanceId}`));
-      }
-    }, TIMEOUT);
+
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timeoutId = setTimeout(() => resolve("timeout"), TIMEOUT);
   });
 
   try {
-    await Promise.race([pip.readyPromise, timeoutPromise]);
-    resolved = true;
+    const result = await Promise.race([
+      pip.readyPromise.then(() => "ready" as const),
+      timeoutPromise,
+    ]);
+
+    if (result === "timeout") {
+      console.warn(`[PipLifecycle] waitForReady ${instanceId} — timed out (${TIMEOUT}ms), pip may recover later`);
+      return false;
+    }
+
+    console.debug(`[PipLifecycle] waitForReady ${instanceId} — resolved`);
+    return true;
   } finally {
     clearTimeout(timeoutId!);
   }
@@ -734,6 +1033,19 @@ export const getPipInstance = (instanceId: string): PipInstance | undefined => {
 };
 
 /**
+ * Mark all pips for a given MCP server as having a UI error.
+ * Called when the renderer reports a runtime error from the iframe.
+ * Tracked for visibility; the next reload clears the flag.
+ */
+export const markPipUiError = ({ serverName }: { serverName: string }): void => {
+  for (const pip of pipInstances.values()) {
+    if (pip.serverName === serverName) {
+      pip.hasUiError = true;
+    }
+  }
+};
+
+/**
  * Update a pip's title.
  * Used by browser pips to sync the webpage title to the pip tab.
  */
@@ -842,9 +1154,7 @@ export const launchResourcePip = async ({
   const instanceId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   try {
-    // Extract resource name from URI for the title (e.g., "ui://server/dashboard" -> "dashboard")
     const resourceName = resourceUri.split("/").pop() || "App";
-    const title = resourceName.replace(/-/g, " ").replace(/_/g, " ");
 
     const pip = await createPipInstance({
       resourceUri,
@@ -1081,6 +1391,19 @@ const extractInstanceId = (result: unknown): string | undefined => {
 };
 
 /**
+ * Derive a human-readable title from a resource URI.
+ * Extracts the last segment, replaces dashes/underscores with spaces,
+ * and capitalizes the first letter.
+ *
+ * e.g. "ui://devkit/devkit" -> "Devkit", "ui://browser/main" -> "Main"
+ */
+const deriveResourceTitle = (resourceUri: string): string => {
+  const segment = resourceUri.split("/").pop() || "App";
+  const formatted = segment.replace(/[-_]/g, " ");
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+};
+
+/**
  * Extract title from an MCP tool result's structuredContent.
  * Per MCP Apps spec, structuredContent contains structured data for UI rendering.
  *
@@ -1302,12 +1625,19 @@ export const handleToolCall = async ({
   /** Source of the tool call - 'agent' for AI-initiated, 'ui' for user pip interaction */
   source?: "agent" | "ui";
 }) => {
+  // Skip logging for devkit tools to prevent infinite loops.
+  // Devkit reads from the same log aggregator it would write to,
+  // so logging its own calls would create recursive noise.
+  const isDevkitTool = serverName === DEVKIT_MCP_NAME;
+
   // Log tool call input to Dev Console
-  logAggregator.log({
-    source: "host",
-    level: "info",
-    message: `[Tool Call] ${serverName}/${toolName} (${source}) Input: ${JSON.stringify(args)}`,
-  });
+  if (!isDevkitTool) {
+    logAggregator.log({
+      source: "host",
+      level: "info",
+      message: `[Tool Call] ${serverName}/${toolName} (${source}) Input: ${JSON.stringify(args)}`,
+    });
+  }
 
   // Get tool metadata to check for UI Resource
   const toolDef = getTool(serverName, toolName);
@@ -1359,8 +1689,34 @@ export const handleToolCall = async ({
     }
   }
 
+  // Guard against duplicate pips for single-instance resources.
+  // When parallel tool calls all resolve to "create new pip", only the first
+  // one should actually create it. Subsequent calls reuse the in-flight instanceId.
+  let ownsPendingReservation = false;
+
+  if (isNewPip && shouldManagePip && resourceUri && targetInstanceId) {
+    const resourceMeta = getResourceMetadata({ serverName, uri: resourceUri });
+    const instanceMode = resourceMeta?.instanceMode ?? "single";
+
+    if (instanceMode === "single") {
+      const key = `${serverName}:${resourceUri}`;
+      const pendingId = pendingSingleModePips.get(key);
+
+      if (pendingId) {
+        // Another call is already creating a pip for this resource — piggyback
+        targetInstanceId = pendingId;
+        isNewPip = false;
+        isReusingReadyPip = false;
+      } else {
+        // First concurrent call — claim the reservation
+        pendingSingleModePips.set(key, targetInstanceId);
+        ownsPendingReservation = true;
+      }
+    }
+  }
+
   // Execute tool on MCP server with instanceId in args
-  // SPECIAL HANDLING: Browser MCP tools are executed by the Host
+  // SPECIAL HANDLING: Browser and Devkit MCP tools are executed by the Host
   let result: unknown;
 
   if (serverName === BROWSER_MCP_NAME && toolName.startsWith("browser_")) {
@@ -1369,6 +1725,8 @@ export const handleToolCall = async ({
       args,
       instanceId: targetInstanceId,
     });
+  } else if (serverName === DEVKIT_MCP_NAME && toolName.startsWith("devkit_")) {
+    result = await handleDevkitToolCall({ toolName, args });
   } else {
     // Inject _source and _instanceId into args
     // The SDK uses _instanceId for state management and WebSocket routing
@@ -1384,23 +1742,34 @@ export const handleToolCall = async ({
     result = await callTool({ serverName, toolName, args: argsWithContext });
   }
 
-  // Log tool call result to Dev Console
-  logAggregator.log({
-    source: "host",
-    level: "info",
-    message: `[Tool Result] ${serverName}/${toolName} Output: ${JSON.stringify(result)}`,
-  });
+  // Log tool call result to Dev Console (skip devkit to prevent infinite loops)
+  if (!isDevkitTool) {
+    logAggregator.log({
+      source: "host",
+      level: "info",
+      message: `[Tool Result] ${serverName}/${toolName} Output: ${JSON.stringify(result)}`,
+    });
+  }
 
   // Create pip if needed (for new instanceIds)
-  if (shouldManagePip && resourceUri && targetInstanceId && isNewPip) {
-    await createPipInstance({
-      resourceUri,
-      serverName,
-      toolName,
-      instanceId: targetInstanceId,
-      creatureAuth: toolDef?.creatureAuth,
-      openInBackground: toolDef?.openInBackground,
-    });
+  try {
+    if (shouldManagePip && resourceUri && targetInstanceId && isNewPip) {
+      await createPipInstance({
+        resourceUri,
+        serverName,
+        toolName,
+        instanceId: targetInstanceId,
+        creatureAuth: toolDef?.creatureAuth,
+        openInBackground: toolDef?.openInBackground,
+      });
+    }
+  } finally {
+    // Release the single-mode reservation so future calls find the real pip
+    // in pipInstances. Must run even if createPipInstance throws, otherwise
+    // the stale reservation would block all future calls for this resource.
+    if (ownsPendingReservation && resourceUri) {
+      pendingSingleModePips.delete(`${serverName}:${resourceUri}`);
+    }
   }
 
   // Per MCP Apps spec, Host MUST send ui/notifications/tool-input after Guest's
@@ -1425,8 +1794,14 @@ export const handleToolCall = async ({
     if (isReusingReadyPip) {
       sendToPipWindow(instanceId, "pip:tool-input", toolInputPayload);
     } else {
-      waitForPipReady(instanceId).then(() => {
-        sendToPipWindow(instanceId, "pip:tool-input", toolInputPayload);
+      waitForPipReady(instanceId).then((ready) => {
+        if (ready) {
+          sendToPipWindow(instanceId, "pip:tool-input", toolInputPayload);
+        } else {
+          console.warn(`[Control Plane] Skipping tool-input for ${instanceId} — pip not ready`);
+        }
+      }).catch((err) => {
+        console.error(`[Control Plane] waitForPipReady failed for tool-input`, { instanceId, error: String(err) });
       });
     }
   }
@@ -1491,8 +1866,14 @@ export const handleToolCall = async ({
     if (isReusingReadyPip) {
       sendToPipWindow(instanceId, "pip:tool-result", toolResultPayload);
     } else {
-      waitForPipReady(instanceId).then(() => {
-        sendToPipWindow(instanceId, "pip:tool-result", toolResultPayload);
+      waitForPipReady(instanceId).then((ready) => {
+        if (ready) {
+          sendToPipWindow(instanceId, "pip:tool-result", toolResultPayload);
+        } else {
+          console.warn(`[Control Plane] Skipping tool-result for ${instanceId} — pip not ready`);
+        }
+      }).catch((err) => {
+        console.error(`[Control Plane] waitForPipReady failed for tool-result`, { instanceId, error: String(err) });
       });
     }
   }

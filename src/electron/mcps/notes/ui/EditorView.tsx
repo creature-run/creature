@@ -66,11 +66,10 @@ export function EditorView() {
   }, [note, updateDraft, debouncedSave]);
 
   /**
-   * Handle note deletion with confirmation.
+   * Handle note deletion.
    */
   const handleDelete = useCallback(async () => {
     if (!note) return;
-    if (!confirm("Delete this note? This cannot be undone.")) return;
 
     try {
       const noteTitle = note.title || "Untitled";
@@ -81,10 +80,11 @@ export function EditorView() {
           text: `User deleted note: "${noteTitle}"`,
         },
       ]);
+      await goToList();
     } catch (err) {
       console.error("Failed to delete note:", err);
     }
-  }, [note, deleteNote, updateModelContext]);
+  }, [note, deleteNote, updateModelContext, goToList]);
 
   /**
    * Handle back navigation - saves pending changes first.

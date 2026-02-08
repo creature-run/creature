@@ -2,8 +2,8 @@
  * TEMPORARY WORKAROUND: Suppress noisy console.error from @modelcontextprotocol/ext-apps
  * 
  * The PostMessageTransport in the published npm package logs "Ignoring message from unknown source"
- * for every postMessage event that doesn't come from the expected iframe source. In Electron with
- * Vite HMR, this fires constantly due to HMR updates, DevTools messages, etc.
+ * for every postMessage event that doesn't come from the expected iframe source. In Electron,
+ * this fires constantly due to dev reloads, DevTools messages, etc.
  * 
  * Our local spec (spec/src/message-transport.ts) already silently drops these messages, but the
  * published @modelcontextprotocol/ext-apps package still has the console.error call.

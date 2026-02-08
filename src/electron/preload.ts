@@ -589,6 +589,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       mcpFolderPath?: string; // Path to existing MCP folder
       targetPath?: string; // Parent path for new MCP
       name?: string; // Subfolder name for new MCP
+      appName?: string; // Canonical MCP App name (used in package.json, createApp, URIs)
       projectName: string;
       projectRootMode?: "parent" | "app"; // Where to create .creature (default: "parent")
     }): Promise<{
@@ -913,20 +914,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("devconsole:openWindow"),
 
     /**
-     * Get the current conversation history.
-     */
-    getConversation: (): Promise<unknown[]> =>
-      ipcRenderer.invoke("devconsole:getConversation"),
-
-    /**
-     * Get the current system prompt.
-     */
-    getSystemPrompt: (): Promise<string> =>
-      ipcRenderer.invoke("devconsole:getSystemPrompt"),
-
-    /**
      * Update the stored conversation history.
      * Called by the renderer when conversation changes.
+     * Data is consumed by the Devkit MCP's devkit_get_conversation tool.
      */
     updateConversation: (messages: unknown[]): void => {
       ipcRenderer.send("devconsole:updateConversation", messages);
@@ -1279,8 +1269,6 @@ declare global {
       };
       devConsole: {
         openWindow: () => Promise<{ success: boolean }>;
-        getConversation: () => Promise<unknown[]>;
-        getSystemPrompt: () => Promise<string>;
         updateConversation: (messages: unknown[]) => void;
       };
       logs: {

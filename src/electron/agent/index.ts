@@ -2,24 +2,30 @@
  * Agent Module
  *
  * Creates and manages the AI agent with full tool access.
- * Tools include pip management and all MCP server tools.
- * File operations are provided by the mcp-ide MCP server.
+ *
+ * Uses a proxy architecture: a single stable `mcp_tool` forwards calls to
+ * any connected MCP server, while `prepareStep` injects a fresh tool listing
+ * before every model step. This decouples the AI SDK's tool registration
+ * from actual MCP tools, so mid-turn server restarts (that rename/add/remove
+ * tools) never crash the stream.
  */
 
 import {
+  tool,
   ToolLoopAgent,
-  wrapLanguageModel,
   validateUIMessages,
   convertToModelMessages,
   pruneMessages,
   UIMessage,
   SystemModelMessage,
+  NoSuchToolError,
 } from "ai";
-import { devToolsMiddleware } from "@ai-sdk/devtools";
+import type { ToolCallRepairFunction, ToolSet } from "ai";
+import { z } from "zod";
 import { app } from "electron";
 import { createPipTools } from "./tools";
 import { createProvider } from "./provider";
-import { getMcpToolsForAgent, getDevMcpInfo, getCurrentProjectProfile } from "../mcp/client";
+import { getAllTools, getDevMcpInfo, getCurrentProjectProfile, drainPendingAgentErrors } from "../mcp/client";
 import { getProfileInstructions } from "./profileInstructions";
 import {
   getActivePipsForPrompt,
@@ -147,7 +153,7 @@ export const buildSystemPrompt = ({
     : `\n\nNo working directory is set for this project.`;
 
   // Add active PIPs info
-  contextSection += `\n\nCurrent active PIP tabs:\n${activePips}`;
+  contextSection += `\n\nCurrent active tabs:\n${activePips}`;
 
   // Add Development MCP info if present
   if (devMcpInfo) {
@@ -155,10 +161,7 @@ export const buildSystemPrompt = ({
 
 Development MCP:
 - Name: ${devMcpInfo.name}
-- Local port: ${devMcpInfo.port}
-- URL: http://localhost:${devMcpInfo.port}/mcp
-
-Use this port when creating a tunnel for the Development MCP.`;
+- Local port: ${devMcpInfo.port}`;
   }
 
   // Determine IDE tools availability based on whether folder is set
@@ -175,30 +178,30 @@ Use this port when creating a tunnel for the Development MCP.`;
 Creature is a desktop application with an AI agent (you) that specializes in using and coding MCP Apps. It differentiates itself by its support for MCP Apps - rich, interactive UIs displayed alongside the conversation to help users understand and interact with your work.
 
 ## MCP Servers & Tools
-MCP Servers are external processes that provide Tools and optionally UI Resources. Some are built-in; users can connect others via registry or manually.
+MCP Servers are external processes that provide Tools and optionally UI Resources. Some are built-in (Terminal, IDE, Browser); users can connect others via registry or manually. All MCP tools are called through the \`mcp_tool\` proxy — see the "Connected MCP Apps" section for available tools and their server names.
 
 ## MCP Apps
-MCP Apps are MCP Servers with UI resources. They allow users to visualize actions/data and interact with MCPs directly. UI Resources are identified by URIs starting with "ui://".
+MCP Apps are MCP Servers that also provide interactive UI. They have two halves: a server (tools, data) and a UI (rendered in the host's sandboxed iframe). Tools are the bridge between them — the UI has no direct access to the server. UI Resources are identified by URIs starting with "ui://".
 
 ## Display Modes
-- **Tabs**: UI displayed in the sidebar alongside the conversation. Tabs persist across tool calls. Refer to them as "tabs" not "pips".
+- **Tabs**: UI displayed in the sidebar alongside the conversation. Tabs persist across tool calls.
 - **Inline Widgets**: UI displayed directly in the conversation, not persistent.
 
 # Built-in MCPs
 
 ## Terminal
-Use terminal_run for shell commands. Terminal tabs persist - pass instanceId for follow-up commands in the same session.
+Shell commands. Terminal tabs persist — pass instanceId for follow-up commands in the same session.
 
 ## IDE
-${ideToolsAvailable ? "Use IDE tools (readFile, writeFile, editFile, listFiles, etc.) for code operations. Always read files before editing. Prefer editFile over writeFile for targeted changes." : "IDE tools are not available without a working directory."}
+${ideToolsAvailable ? "File and code operations. Always read files before editing. Prefer editFile over writeFile for targeted changes." : "IDE tools are not available without a working directory."}
 
 ## Browser
-Use browser tools (browser_create, browser_navigate, browser_click, browser_type, etc.) to interact with web pages.
+Web page interaction — navigation, clicking, typing, screenshots.
 
 # Guidelines
 
-## Tab destroyed
-If you see "[PIP destroyed: instanceId]" in the conversation, that tab no longer exists. Its instanceId is invalid.
+## Tab closed
+If you see a message like "[User closed PIP tab with Instance ID ... for MCP App ...]" in the conversation, that tab no longer exists and its instanceId is invalid. Do not attempt to use it.
 
 ## Widget State
 Some tabs expose their current state in "Current Widget State" (e.g., selected items, form values). Use this to understand what the user is looking at and provide relevant responses.
@@ -274,12 +277,142 @@ export const getCurrentSystemPrompt = (): string => {
 };
 
 /**
- * Creates the main chat agent with full tool access.
- * Tools include pip management and all MCP server tools.
- * File operations are provided by the mcp-ide MCP server.
+ * Build the dynamic MCP tools system message from live CachedTool[] data.
  *
- * Note: The system prompt includes current pip state and is built fresh
- * for each chat request to reflect the latest pip information.
+ * This is called by `prepareStep` before every model step, so the model
+ * always sees the current tool set — even mid-turn after a server restart
+ * that renames, adds, or removes tools. The message tells the model what
+ * tools exist and how to call them via the `mcp_tool` proxy.
+ */
+const buildMcpToolsSystemMessage = (): string => {
+  const allTools = getAllTools();
+
+  // Group tools by server name
+  const byServer = new Map<string, typeof allTools>();
+  for (const t of allTools) {
+    const list = byServer.get(t.serverName) ?? [];
+    list.push(t);
+    byServer.set(t.serverName, list);
+  }
+
+  if (byServer.size === 0) {
+    return "# Connected MCP Apps\n\nNo MCP servers are connected.";
+  }
+
+  let message = "# Connected MCP Apps\n\nCall these tools using the `mcp_tool` tool with the serverName, toolName, and args.\n";
+
+  for (const [serverName, tools] of byServer) {
+    message += `\n### ${serverName}\n`;
+    for (const t of tools) {
+      // Build parameter signature from inputSchema properties
+      const props = (t.inputSchema?.properties ?? {}) as Record<string, { type?: string; description?: string }>;
+      const required = (t.inputSchema?.required ?? []) as string[];
+      const params = Object.entries(props)
+        .map(([name, schema]) => {
+          const opt = required.includes(name) ? "" : "?";
+          const type = schema.type ?? "any";
+          return `${name}${opt}: ${type}`;
+        })
+        .join(", ");
+
+      message += `- ${t.name}(${params}): ${t.description ?? ""}\n`;
+    }
+  }
+
+  return message;
+};
+
+/**
+ * Create the single mcp_tool proxy that forwards calls to any MCP server.
+ *
+ * The model calls this with serverName + toolName + args. The proxy routes
+ * through the existing handleToolCall in controlPlane, which handles pip
+ * routing, instance resolution, and all downstream MCP communication.
+ *
+ * Because this is a single stable tool, the AI SDK's tool map never changes,
+ * so mid-turn server restarts never cause AI_NoSuchToolError.
+ */
+const createMcpProxyTool = () => {
+  return tool({
+    description:
+      "Call a tool on a connected MCP server. Use the serverName and toolName from the Connected MCP Apps listing.",
+    inputSchema: z.object({
+      serverName: z.string().describe("The MCP server name"),
+      toolName: z.string().describe("The tool name on that server"),
+      args: z
+        .record(z.unknown())
+        .optional()
+        .default({})
+        .describe("Tool arguments as key-value pairs"),
+    }),
+    execute: async ({ serverName, toolName, args }) => {
+      try {
+        const result = await handleToolCall({
+          serverName,
+          toolName,
+          args: args as Record<string, unknown>,
+          source: "agent",
+        });
+        return result;
+      } catch (error) {
+        console.error(`[Agent Proxy] ${serverName}/${toolName} failed:`, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  });
+};
+
+/**
+ * Repair function for tool calls that fail AI SDK validation.
+ *
+ * The most common failure: the model calls a tool by its raw MCP name
+ * (e.g. "bookmarks_create") instead of wrapping it in mcp_tool. This
+ * intercepts the NoSuchToolError, finds the owning server, and rewrites
+ * the call as a valid mcp_tool invocation — avoiding a stream crash.
+ */
+const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
+  toolCall,
+  error,
+}) => {
+  if (!NoSuchToolError.isInstance(error)) return null;
+
+  const calledName = toolCall.toolName;
+  const allTools = getAllTools();
+  const match = allTools.find((t) => t.name === calledName);
+
+  if (!match) {
+    console.warn(`[Agent Repair] No MCP tool found for "${calledName}", cannot repair`);
+    return null;
+  }
+
+  console.log(`[Agent Repair] Rewriting "${calledName}" → mcp_tool(${match.serverName}/${calledName})`);
+
+  const originalArgs = JSON.parse(toolCall.input || "{}");
+  return {
+    ...toolCall,
+    toolName: "mcp_tool",
+    input: JSON.stringify({
+      serverName: match.serverName,
+      toolName: calledName,
+      args: originalArgs,
+    }),
+  };
+};
+
+/**
+ * Creates the main chat agent with proxy architecture.
+ *
+ * Tools are a fixed set: `pip_close` + `mcp_tool` (proxy). The actual MCP
+ * tool listing is injected as a dynamic system message via `prepareStep`,
+ * which runs before every model step. This means:
+ * - Static instructions benefit from Anthropic's prompt caching
+ * - MCP tool listings are always fresh (rebuilt from live CachedTool[])
+ * - Mid-turn server restarts with tool changes are handled gracefully
+ * - If the model bypasses the proxy and calls a tool by name, repairToolCall
+ *   intercepts and rewrites it as a valid mcp_tool call
  */
 export const createAgent = async ({
   folderPath,
@@ -293,21 +426,12 @@ export const createAgent = async ({
   sessionSummary?: string | null;
 }) => {
   const pipTools = createPipTools({ closePipInstance });
-  // Pass handleToolCall to route all agent tool calls through Control Plane
-  // File tools are now provided by mcp-ide MCP server
-  const mcpTools = await getMcpToolsForAgent(handleToolCall);
+  const mcpProxyTool = createMcpProxyTool();
 
   const { provider, modelId } = createProvider(credentials);
-  const baseModel = provider(modelId);
-  // Only use devtools middleware in development (causes /.devtools error in packaged builds)
-  const model = app.isPackaged
-    ? baseModel
-    : wrapLanguageModel({
-        model: baseModel,
-        middleware: devToolsMiddleware(),
-      });
+  const model = provider(modelId);
 
-  // Build system prompt with current pip state, custom instructions, and session summary
+  // Build static system prompt (personality, guidelines, profile, context)
   const systemPrompt = buildSystemPrompt({
     folderPath,
     customInstructions,
@@ -317,7 +441,52 @@ export const createAgent = async ({
   return new ToolLoopAgent({
     model,
     instructions: systemPrompt,
-    tools: { ...pipTools, ...mcpTools },
+    tools: { ...pipTools, mcp_tool: mcpProxyTool },
+    /**
+     * Disable the default step limit (stepCountIs(20)) so the agent
+     * can work for as long as it needs without being silently cut off.
+     * The agent stops naturally when the model returns a non-tool-call response.
+     */
+    stopWhen: () => false,
+    /**
+     * Runs before every model step in the tool loop.
+     * Rebuilds the MCP tools listing from live CachedTool[] data
+     * so the model always sees current tools — even mid-turn.
+     * Also drains any pending server crash errors and injects them
+     * so the model is immediately aware of crashes without needing
+     * to call devkit_get_logs.
+     */
+    prepareStep: async () => {
+      const mcpToolsMessage = buildMcpToolsSystemMessage();
+
+      const dynamicMessages: SystemModelMessage[] = [
+        { content: mcpToolsMessage, role: "system" as const },
+      ];
+
+      // Drain pending errors (server crashes + UI runtime errors) and inject
+      // as a system message. This surfaces tsx watch crashes (SyntaxError,
+      // missing exports, etc.) and UI errors (TypeError, unhandled rejections)
+      // directly to the model so it can self-correct immediately.
+      const pendingErrors = drainPendingAgentErrors();
+      if (pendingErrors.length > 0) {
+        const errorLines = pendingErrors.map(
+          (e) => `[${e.source}:${e.serverName}] ${e.message}`
+        );
+        dynamicMessages.push({
+          content: `# Errors Detected\n\nThe following errors occurred in the MCP App. Fix them before continuing:\n\n${errorLines.join("\n\n")}`,
+          role: "system" as const,
+        });
+      }
+
+      return {
+        system: [...systemPrompt, ...dynamicMessages],
+      };
+    },
+    /**
+     * Catches tool calls the model makes by raw MCP name instead of
+     * through the mcp_tool proxy, and rewrites them to valid proxy calls.
+     */
+    experimental_repairToolCall: repairToolCall,
   });
 };
 

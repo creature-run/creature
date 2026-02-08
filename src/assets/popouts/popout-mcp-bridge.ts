@@ -93,6 +93,9 @@ let browserWebview: WebviewElement | null = null;
 /** Browser instance ID (only used in browser mode) */
 let browserInstanceId: string | undefined;
 
+/** Loading overlay element — visible by default, hidden when Guest sends initialized */
+let loadingOverlay: HTMLDivElement | null = null;
+
 /** Track if browser navigation has started (prevents double loadURL from tool-input + tool-result) */
 let browserNavigationStarted = false;
 
@@ -109,6 +112,34 @@ let activeIframe: HTMLIFrameElement | null = null;
 let uiErrorOverlay: HTMLDivElement | null = null;
 let uiErrorBody: HTMLDivElement | null = null;
 let uiErrorCopyButton: HTMLButtonElement | null = null;
+
+/**
+ * Hide the loading overlay with a fade-out transition.
+ * Called when the Guest sends ui/notifications/initialized, signaling
+ * the MCP App is ready to be displayed to the user.
+ */
+const hideLoadingOverlay = (): void => {
+  if (!loadingOverlay) {
+    loadingOverlay = document.getElementById("loading-overlay") as HTMLDivElement | null;
+  }
+  if (loadingOverlay) {
+    loadingOverlay.classList.add("hidden");
+  }
+};
+
+/**
+ * Show the loading overlay (reset to visible state).
+ * Called before re-initializing content on refresh so the user
+ * sees a spinner while the new content boots.
+ */
+const showLoadingOverlay = (): void => {
+  if (!loadingOverlay) {
+    loadingOverlay = document.getElementById("loading-overlay") as HTMLDivElement | null;
+  }
+  if (loadingOverlay) {
+    loadingOverlay.classList.remove("hidden");
+  }
+};
 
 /**
  * Initialize the UI error overlay elements.
@@ -330,6 +361,10 @@ const initializePopout = async (): Promise<void> => {
       },
       onInitialized: () => {
         console.log("[Popout] Ready", { instanceId: metadata.instanceId });
+
+        // Reveal the MCP App by hiding the loading overlay
+        hideLoadingOverlay();
+
         // Notify main process that pip is ready to receive notifications
         window.electronAPI.controlPlane
           .pipReady(metadata.instanceId)
@@ -450,14 +485,16 @@ const setupTeardownListener = (instanceId: string): void => {
   window.electronAPI.controlPlane.onPipTeardown(async (data) => {
     if (data.instanceId !== instanceId || !bridgeInstance) return;
 
+    console.debug("[Popout] Teardown requested, cleaning up bridge");
     try {
-      // AppBridge handles sending ui/resource-teardown and waiting for response
+      // AppBridge handles sending ui/resource-teardown with a short timeout
       await bridgeInstance.cleanup();
     } catch {
       // Teardown errors are expected if pip already closed
     }
 
     // Notify control plane that teardown is complete
+    console.debug("[Popout] Teardown complete, notifying control plane");
     window.electronAPI.controlPlane.pipTeardownComplete(instanceId);
   });
 };
@@ -530,27 +567,34 @@ const setupTitleChangeListener = (instanceId: string): void => {
 };
 
 /**
- * Set up listener for pip refresh events (HMR).
- * When the control plane refreshes the pip content (e.g., after HMR notification),
- * we need to update the iframe's srcdoc with the new HTML.
+ * Set up listener for pip refresh events.
+ * When the control plane refreshes the pip content, update the iframe's srcdoc
+ * with the new HTML.
  */
 const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement): void => {
   window.electronAPI.controlPlane.onPipRefresh(async (data) => {
     if (data.instanceId !== instanceId) return;
     
-    console.log("[Popout] Pip refresh received, updating content", { 
+    console.log("[Popout] Pip refresh received", { 
       instanceId, 
       htmlLength: data.htmlContent?.length || 0 
     });
 
-    // Clean up existing bridge before loading new content
+    // Show loading overlay while new content boots
+    showLoadingOverlay();
+
+    // Clean up existing bridge before loading new content.
+    // The cleanup function has a short teardown timeout (1.5s) so this
+    // won't block for long even if the Guest is unresponsive.
     if (bridgeInstance) {
+      console.debug("[Popout] Cleaning up existing bridge before refresh");
       try {
         await bridgeInstance.cleanup();
       } catch {
-        // Cleanup errors are expected
+        // Cleanup errors are expected during refresh — Guest may be unloading
       }
       bridgeInstance = null;
+      console.debug("[Popout] Previous bridge cleaned up");
     }
 
     // Reset UI error overlay for fresh content
@@ -583,6 +627,7 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
     }
 
     // Recreate bridge with fresh content
+    console.debug("[Popout] Recreating AppBridge after refresh");
     try {
       bridgeInstance = await createCreatureAppBridge({
         iframe,
@@ -604,6 +649,10 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
         },
         onInitialized: () => {
           console.log("[Popout] Refreshed pip ready", { instanceId: metadata.instanceId });
+
+          // Reveal the refreshed MCP App
+          hideLoadingOverlay();
+
           window.electronAPI.controlPlane
             .pipReady(metadata.instanceId)
             .catch((error) => {
@@ -623,6 +672,7 @@ const setupPipRefreshListener = (instanceId: string, iframe: HTMLIFrameElement):
           });
         },
       });
+      console.debug("[Popout] AppBridge recreated, waiting for Guest initialization");
     } catch (error) {
       console.error("[Popout] Failed to recreate AppBridge after refresh:", error);
     }

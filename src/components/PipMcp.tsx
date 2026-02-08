@@ -9,6 +9,7 @@ import {
 import { widgetStateStore } from "../lib/widgetStateStore";
 import type { McpUiTheme, McpUiDisplayMode } from "@modelcontextprotocol/ext-apps";
 import { Copy } from "@phosphor-icons/react";
+import { Spinner } from "./Spinner";
 
 /** Minimal placeholder HTML to initialize iframe before injecting real content */
 const PLACEHOLDER_HTML = `<!DOCTYPE html><html><head></head><body></body></html>`;
@@ -185,10 +186,13 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
      * Bridge must be ready BEFORE real content is injected.
      */
     const initBridge = async () => {
+      console.debug(`[PipMcp:${pip.instanceId}] initBridge starting for version ${versionKey}`);
+
       // Brief wait for iframe element to be fully ready
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       if (isCleanedUp || !iframe.contentWindow) {
+        console.debug(`[PipMcp:${pip.instanceId}] initBridge aborted (cleanedUp=${isCleanedUp}, hasWindow=${!!iframe.contentWindow})`);
         return;
       }
 
@@ -277,9 +281,11 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
 
     return () => {
       isCleanedUp = true;
+      console.debug(`[PipMcp:${pip.instanceId}] Effect cleanup — tearing down bridge for version ${versionKey}`);
 
-      // Clean up either pending bridge OR current bridge
-      // (pendingBridge may be null if unmount happens before initBridge completes)
+      // Clean up either pending bridge OR current bridge.
+      // Cleanup is fire-and-forget — the short teardown timeout in appBridge.ts
+      // ensures this completes quickly even if the Guest is unresponsive.
       const bridgeToCleanup = pendingBridge || bridgeRef.current;
       if (bridgeToCleanup) {
         bridgeToCleanup.cleanup().catch(console.error);
@@ -307,17 +313,26 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
   /**
    * Phase 2: Inject real HTML content AFTER bridge is ready.
    * This ensures Host is listening before Guest sends ui/initialize.
+   *
+   * The bridgeRef.current check guards against a stale bridgeReady state during
+   * pip refresh. When refreshVersion increments, Phase 1 cleanup synchronously
+   * sets bridgeRef.current = null and queues setBridgeReady(false), but the
+   * current render still sees the previous bridgeReady=true. Without this check,
+   * content would be injected before the new bridge is created, causing the
+   * Guest's ui/initialize request to go unanswered and the pip to hang in a
+   * loading state indefinitely.
    */
   useEffect(() => {
     const iframe = iframeRef.current;
 
-    if (!bridgeReady || !iframe || !pip.htmlContent) {
+    if (!bridgeReady || !iframe || !pip.htmlContent || !bridgeRef.current) {
       return;
     }
 
     // Inject real content now that bridge is listening
+    console.debug(`[PipMcp:${pip.instanceId}] Phase 2 — injecting HTML (${pip.htmlContent.length} bytes, v${pip.refreshVersion ?? 0})`);
     iframe.srcdoc = pip.htmlContent;
-  }, [bridgeReady, pip.htmlContent, pip.instanceId]);
+  }, [bridgeReady, pip.htmlContent, pip.instanceId, pip.refreshVersion]);
 
   /**
    * Listen for UI runtime errors posted from the iframe.
@@ -521,6 +536,19 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
         title={pip.title}
         onLoad={handleIframeLoad}
       />
+      {/* Loading overlay — covers the iframe until the Guest sends ui/notifications/initialized.
+       *  Prevents black flashes, blank placeholder flashes, and routing flashes.
+       *  Uses a smooth opacity transition so the app fades in once ready. */}
+      <div
+        className="absolute inset-0 flex items-center justify-center z-10 transition-opacity duration-200"
+        style={{
+          backgroundColor: colors.backgroundPrimary,
+          opacity: initialized ? 0 : 1,
+          pointerEvents: initialized ? "none" : "auto",
+        }}
+      >
+        <Spinner size={22} />
+      </div>
       {uiError && (
         <div
           className="absolute inset-0 p-4 flex flex-col gap-3 overflow-auto"
