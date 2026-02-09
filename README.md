@@ -1,5 +1,6 @@
 <img width="3000" height="1000" alt="creautre-github" src="https://github.com/user-attachments/assets/3f81630d-c468-4ad0-a158-01e9bb991f47" />
 
+**Beta:** This software is currently in-development and has not been officially released.
 
 **MCP Apps** — Visual AI tools that agents summon to show content relevant to your task—tools you use collaboratively, with the agent ready to pick up exactly where you leave off. Based on an open specification supported by all major AI companies.
 
