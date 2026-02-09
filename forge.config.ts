@@ -488,6 +488,11 @@ const config: ForgeConfig = {
           config: 'vite.main.config.mts',
           target: 'main',
         },
+        {
+          entry: 'src/electron/mcps/chaos/chaos-server.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
+        },
       ],
       renderer: [
         {

@@ -1362,6 +1362,13 @@ const BUILTIN_MCP_SERVERS: MCPServerConfig[] = [
     command: "node",
     args: ["desktop/.vite/build/devkit-server.js"],
   },
+  {
+    name: "chaos",
+    path: "mcp-chaos",
+    transport: "streamable-http",
+    command: "node",
+    args: ["desktop/.vite/build/chaos-server.js"],
+  },
 ];
 
 

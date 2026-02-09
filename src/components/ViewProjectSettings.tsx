@@ -38,6 +38,7 @@ const BUILTIN_MCPS = [
   { name: "crm", description: "Contact and relationship management" },
   { name: "ide", description: "Read and write files within the project directory" },
   { name: "terminal", description: "Execute terminal commands" },
+  { name: "chaos", description: "Host compliance and failure mode testing" },
 ];
 
 const formatGitDescription = (git: { url: string; ref?: string; subdir?: string }): string => {
