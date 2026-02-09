@@ -399,8 +399,6 @@ const config: ForgeConfig = {
     new MakerDMG({
       icon: path.join(__dirname, 'icons', 'icon.icns'),
       format: 'ULFO',
-      // Volume title must not contain spaces - hdiutil detach fails with unquoted paths
-      title: buildIdentity.packagerName.replace(/\s+/g, '-'),
       background: path.join(__dirname, 'icons', 'dmg-background.png'),
       contents: (opts) => [
         { x: 180, y: 200, type: 'file', path: opts.appPath },
