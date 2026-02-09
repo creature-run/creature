@@ -34,7 +34,7 @@ export default function App() {
   return (
     <HostProvider name="__APP_NAME__" version="0.1.0">
       <div className="flex flex-col items-center justify-center h-full gap-3 bg-bg-primary">
-        <div className="opacity-30">
+        <div style={{ opacity: 0.4 }}>
           <CreatureIcon />
         </div>
         <p className="text-sm font-medium text-txt-secondary">MCP App Template</p>
