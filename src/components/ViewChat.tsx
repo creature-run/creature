@@ -1885,7 +1885,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       />
 
       {/* Floating input area - positioned at bottom, matches content width */}
-      <div className="absolute bottom-[40px] [@media(min-height:800px)]:bottom-[80px] left-0 right-0 pointer-events-none z-20">
+      <div className="absolute bottom-[0px] [@media(min-height:800px)]:bottom-[40px] left-0 right-0 pointer-events-none z-20">
         <div className="w-full max-w-[750px] mx-auto px-6 pointer-events-auto">
           <ChatInput
             input={input}

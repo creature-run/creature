@@ -366,6 +366,150 @@ const createMcpProxyTool = () => {
 };
 
 /**
+ * Create a host-only tool that returns a clear error for malformed tool input.
+ *
+ * This gives the model an explicit, structured response when a tool call
+ * cannot be repaired, rather than crashing the stream.
+ */
+const createToolCallErrorTool = () => {
+  return tool({
+    description:
+      "Report a malformed tool call to the model with guidance to retry using valid JSON.",
+    inputSchema: z.object({
+      message: z.string().describe("Explanation of the tool input error"),
+      toolName: z.string().optional().describe("Original tool name (if available)"),
+      rawInput: z.string().optional().describe("Original raw tool input (if available)"),
+    }),
+    execute: async ({ message, toolName, rawInput }) => {
+      return {
+        success: false,
+        error: message,
+        toolName: toolName ?? null,
+        rawInput: rawInput ?? null,
+      };
+    },
+  });
+};
+
+/**
+ * Check whether an error indicates malformed tool input JSON.
+ *
+ * This is used to decide when to attempt a repair or provide a structured
+ * correction response instead of crashing the stream.
+ */
+const isInvalidToolInputError = ({ error }: { error: unknown }): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("InvalidToolInput") ||
+    message.includes("Invalid input") ||
+    message.includes("JSON parsing failed") ||
+    message.includes("valid dictionary")
+  );
+};
+
+/**
+ * Attempt to parse a JSON object from a tool input string.
+ *
+ * Returns null when parsing fails or the result is not a plain object.
+ */
+const tryParseJsonObject = ({
+  input,
+}: {
+  input: string;
+}): Record<string, unknown> | null => {
+  try {
+    const parsed = JSON.parse(input);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Normalize common template artifacts into JSON-compatible text.
+ *
+ * This targets patterns like `<parameter name="path">` that occasionally
+ * leak into tool input and break JSON parsing.
+ */
+const normalizeToolInputTemplate = ({ input }: { input: string }): string => {
+  return input.replace(/<parameter name="([^"]+)">/g, '"$1":');
+};
+
+/**
+ * Attempt to salvage an mcp_tool input payload from malformed text.
+ *
+ * This prioritizes extracting serverName/toolName and common args like
+ * path/content for IDE write operations.
+ */
+const tryRepairMcpToolInput = ({
+  rawInput,
+}: {
+  rawInput: string;
+}): { serverName: string; toolName: string; args: Record<string, unknown> } | null => {
+  const parsed = tryParseJsonObject({ input: rawInput });
+  if (parsed) {
+    const serverName = typeof parsed.serverName === "string" ? parsed.serverName : null;
+    const toolName = typeof parsed.toolName === "string" ? parsed.toolName : null;
+    const args =
+      parsed.args && typeof parsed.args === "object" && !Array.isArray(parsed.args)
+        ? (parsed.args as Record<string, unknown>)
+        : {};
+    if (serverName && toolName) {
+      return { serverName, toolName, args };
+    }
+  }
+
+  const normalized = normalizeToolInputTemplate({ input: rawInput });
+  const normalizedParsed = tryParseJsonObject({ input: normalized });
+  if (normalizedParsed) {
+    const serverName =
+      typeof normalizedParsed.serverName === "string" ? normalizedParsed.serverName : null;
+    const toolName =
+      typeof normalizedParsed.toolName === "string" ? normalizedParsed.toolName : null;
+    const args =
+      normalizedParsed.args &&
+      typeof normalizedParsed.args === "object" &&
+      !Array.isArray(normalizedParsed.args)
+        ? (normalizedParsed.args as Record<string, unknown>)
+        : {};
+    if (serverName && toolName) {
+      return { serverName, toolName, args };
+    }
+  }
+
+  const serverNameMatch = rawInput.match(/"serverName"\s*:\s*"([^"]+)"/);
+  const toolNameMatch = rawInput.match(/"toolName"\s*:\s*"([^"]+)"/);
+  const serverName = serverNameMatch?.[1];
+  const toolName = toolNameMatch?.[1];
+
+  if (!serverName || !toolName) {
+    return null;
+  }
+
+  const args: Record<string, unknown> = {};
+  const pathMatch =
+    rawInput.match(/<parameter name="path">\s*([^,\n]+)\s*,/i) ??
+    rawInput.match(/"path"\s*:\s*"([^"]+)"/i);
+  if (pathMatch?.[1]) {
+    args.path = pathMatch[1].trim();
+  }
+
+  const contentMatch = rawInput.match(/"content"\s*:\s*"([\s\S]*?)"\s*(?:,|\})/i);
+  if (contentMatch?.[1]) {
+    try {
+      args.content = JSON.parse(`"${contentMatch[1]}"`);
+    } catch {
+      args.content = contentMatch[1];
+    }
+  }
+
+  return { serverName, toolName, args };
+};
+
+/**
  * Repair function for tool calls that fail AI SDK validation.
  *
  * The most common failure: the model calls a tool by its raw MCP name
@@ -377,27 +521,61 @@ const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
   toolCall,
   error,
 }) => {
-  if (!NoSuchToolError.isInstance(error)) return null;
+  if (NoSuchToolError.isInstance(error)) {
+    const calledName = toolCall.toolName;
+    const allTools = getAllTools();
+    const match = allTools.find((t) => t.name === calledName);
 
-  const calledName = toolCall.toolName;
-  const allTools = getAllTools();
-  const match = allTools.find((t) => t.name === calledName);
+    if (!match) {
+      console.warn(`[Agent Repair] No MCP tool found for "${calledName}", cannot repair`);
+      return null;
+    }
 
-  if (!match) {
-    console.warn(`[Agent Repair] No MCP tool found for "${calledName}", cannot repair`);
-    return null;
+    console.log(`[Agent Repair] Rewriting "${calledName}" → mcp_tool(${match.serverName}/${calledName})`);
+
+    const originalArgs = JSON.parse(toolCall.input || "{}");
+    return {
+      ...toolCall,
+      toolName: "mcp_tool",
+      input: JSON.stringify({
+        serverName: match.serverName,
+        toolName: calledName,
+        args: originalArgs,
+      }),
+    };
   }
 
-  console.log(`[Agent Repair] Rewriting "${calledName}" → mcp_tool(${match.serverName}/${calledName})`);
+  if (!isInvalidToolInputError({ error })) return null;
+  if (toolCall.toolName !== "mcp_tool") return null;
 
-  const originalArgs = JSON.parse(toolCall.input || "{}");
+  const rawInput = typeof toolCall.input === "string" ? toolCall.input : JSON.stringify(toolCall.input ?? {});
+  const repaired = tryRepairMcpToolInput({ rawInput });
+
+  if (!repaired) {
+    console.warn("[Agent Repair] Failed to repair malformed mcp_tool input");
+    return {
+      ...toolCall,
+      toolName: "tool_call_error",
+      input: JSON.stringify({
+        message:
+          "Tool input was not valid JSON. Re-send the call with a JSON object for args.",
+        toolName: toolCall.toolName,
+        rawInput,
+      }),
+    };
+  }
+
+  console.warn(
+    `[Agent Repair] Repaired malformed mcp_tool input for ${repaired.serverName}/${repaired.toolName}`
+  );
+
   return {
     ...toolCall,
     toolName: "mcp_tool",
     input: JSON.stringify({
-      serverName: match.serverName,
-      toolName: calledName,
-      args: originalArgs,
+      serverName: repaired.serverName,
+      toolName: repaired.toolName,
+      args: repaired.args,
     }),
   };
 };
@@ -427,6 +605,7 @@ export const createAgent = async ({
 }) => {
   const pipTools = createPipTools({ closePipInstance });
   const mcpProxyTool = createMcpProxyTool();
+  const toolCallErrorTool = createToolCallErrorTool();
 
   const { provider, modelId } = createProvider(credentials);
   const model = provider(modelId);
@@ -441,7 +620,7 @@ export const createAgent = async ({
   return new ToolLoopAgent({
     model,
     instructions: systemPrompt,
-    tools: { ...pipTools, mcp_tool: mcpProxyTool },
+    tools: { ...pipTools, mcp_tool: mcpProxyTool, tool_call_error: toolCallErrorTool },
     /**
      * Disable the default step limit (stepCountIs(20)) so the agent
      * can work for as long as it needs without being silently cut off.

@@ -43,7 +43,7 @@ import { BrowserWindow, app } from "electron";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, restartMcp, getAllDevMcpInfo, type ResourceIcon, type Views } from "./client";
+import { readResource, callTool, getTool, getToolsForResourceUri, getResourceUrisForMcp, clearResourceCache, getResourceMetadata, restartMcp, getAllDevMcpInfo, bufferUiError, type ResourceIcon, type Views } from "./client";
 import { getPopoutWindow } from "../window/popoutWindows";
 import { logAggregator } from "../logging";
 import * as browserManager from "../browser";
@@ -51,6 +51,7 @@ import type { WidgetState } from "../../shared/types";
 import { resolveInstanceIdForTool, type RoutingResult } from "./routing";
 import { getCurrentConversation } from "../ipc/chat.handlers";
 import { getCurrentSystemPrompt } from "../agent";
+import { isPlainObject, normalizePersistedPipState, stripLargeImageData } from "../../lib/utils";
 
 export type { WidgetState };
 
@@ -455,148 +456,6 @@ const sendToPipWindow = (instanceId: string, channel: string, data: unknown) => 
   }
 };
 
-const normalizeWidgetState = (value: unknown): WidgetState | undefined => {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-
-  const raw = value as Record<string, unknown>;
-  const next: WidgetState = {};
-
-  if (
-    raw.modelContent === null ||
-    typeof raw.modelContent === "string" ||
-    (typeof raw.modelContent === "object" && !Array.isArray(raw.modelContent))
-  ) {
-    next.modelContent = raw.modelContent as WidgetState["modelContent"];
-  }
-
-  if (
-    raw.privateContent === null ||
-    (typeof raw.privateContent === "object" && !Array.isArray(raw.privateContent))
-  ) {
-    next.privateContent = raw.privateContent as WidgetState["privateContent"];
-  }
-
-  if (Array.isArray(raw.imageIds)) {
-    next.imageIds = raw.imageIds.filter((id): id is string => typeof id === "string");
-  }
-
-  if (
-    next.modelContent === undefined &&
-    next.privateContent === undefined &&
-    next.imageIds === undefined
-  ) {
-    return undefined;
-  }
-
-  return next;
-};
-
-const normalizePersistedPipSnapshot = (value: unknown): PersistedPipSnapshot | null => {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const raw = value as Record<string, unknown>;
-  if (
-    typeof raw.instanceId !== "string" ||
-    typeof raw.serverName !== "string" ||
-    typeof raw.resourceUri !== "string" ||
-    typeof raw.toolName !== "string" ||
-    typeof raw.title !== "string"
-  ) {
-    return null;
-  }
-
-  if (
-    raw.instanceId.length === 0 ||
-    raw.serverName.length === 0 ||
-    raw.resourceUri.length === 0
-  ) {
-    return null;
-  }
-
-  const normalized: PersistedPipSnapshot = {
-    instanceId: raw.instanceId,
-    serverName: raw.serverName,
-    resourceUri: raw.resourceUri,
-    toolName: raw.toolName,
-    title: raw.title,
-    createdAt:
-      typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt)
-        ? Number(raw.createdAt)
-        : Date.now(),
-  };
-
-  if (typeof raw.triggeredByTool === "boolean") {
-    normalized.triggeredByTool = raw.triggeredByTool;
-  }
-
-  if (typeof raw.openInBackground === "boolean") {
-    normalized.openInBackground = raw.openInBackground;
-  }
-
-  const widgetState = normalizeWidgetState(raw.widgetState);
-  if (widgetState) {
-    normalized.widgetState = widgetState;
-  }
-
-  return normalized;
-};
-
-const normalizePersistedPipState = (value: unknown): PersistedPipState => {
-  if (!value || typeof value !== "object") {
-    return {
-      pips: [],
-      pipOrder: [],
-      activePipId: null,
-    };
-  }
-
-  const raw = value as {
-    pips?: unknown;
-    pipOrder?: unknown;
-    activePipId?: unknown;
-  };
-
-  const pips = Array.isArray(raw.pips)
-    ? raw.pips
-        .map(normalizePersistedPipSnapshot)
-        .filter((snapshot): snapshot is PersistedPipSnapshot => !!snapshot)
-    : [];
-
-  const pipIds = new Set(pips.map((snapshot) => snapshot.instanceId));
-  const pipOrder: string[] = [];
-  const addPipOrder = (instanceId: string) => {
-    if (!pipIds.has(instanceId)) return;
-    if (pipOrder.includes(instanceId)) return;
-    pipOrder.push(instanceId);
-  };
-
-  if (Array.isArray(raw.pipOrder)) {
-    for (const value of raw.pipOrder) {
-      if (typeof value === "string") {
-        addPipOrder(value);
-      }
-    }
-  }
-
-  for (const snapshot of pips) {
-    addPipOrder(snapshot.instanceId);
-  }
-
-  const activePipId =
-    typeof raw.activePipId === "string" && pipIds.has(raw.activePipId)
-      ? raw.activePipId
-      : null;
-
-  return {
-    pips,
-    pipOrder,
-    activePipId,
-  };
-};
 
 /**
  * Create a new Pip Instance for a UI Resource.
@@ -1224,7 +1083,7 @@ export const restorePips = async ({
 }: {
   pipState: PersistedPipState;
 }): Promise<RestorePipsResult> => {
-  const normalized = normalizePersistedPipState(pipState);
+  const normalized = normalizePersistedPipState({ value: pipState });
   if (normalized.pips.length === 0) {
     return {
       restoredInstanceIds: [],
@@ -1353,6 +1212,98 @@ export const restorePips = async ({
 // =============================================================================
 
 /**
+ * Describe which structured payload fields are present in a tool result.
+ *
+ * This is used to validate UI tool responses without assuming a specific shape.
+ */
+const describeToolResultShape = ({
+  result,
+}: {
+  result: unknown;
+}): { hasStructuredContent: boolean; hasData: boolean } => {
+  if (!isPlainObject({ value: result })) {
+    return { hasStructuredContent: false, hasData: false };
+  }
+
+  return {
+    hasStructuredContent: Object.prototype.hasOwnProperty.call(result, "structuredContent"),
+    hasData: Object.prototype.hasOwnProperty.call(result, "data"),
+  };
+};
+
+/**
+ * Build a structured error result for tool output shape mismatches.
+ *
+ * This is returned to the caller and used to keep the UI from consuming
+ * incompatible data shapes that would cause runtime errors.
+ */
+const buildToolResultShapeError = ({
+  serverName,
+  toolName,
+  expectedShape,
+  actualShape,
+}: {
+  serverName: string;
+  toolName: string;
+  expectedShape: string;
+  actualShape: string;
+}) => {
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: `Tool result shape mismatch for ${serverName}/${toolName}. Expected ${expectedShape}, got ${actualShape}.`,
+      },
+    ],
+    structuredContent: {
+      error: "tool_result_shape_mismatch",
+      expectedShape,
+      actualShape,
+      serverName,
+      toolName,
+    },
+  };
+};
+
+/**
+ * Validate tool result shapes for UI tools and return a safe payload.
+ *
+ * UI tools should return structured data for view routing and rendering.
+ */
+const validateToolResultShape = ({
+  result,
+  serverName,
+  toolName,
+  resourceUri,
+}: {
+  result: unknown;
+  serverName: string;
+  toolName: string;
+  resourceUri?: string;
+}): { result: unknown; errorMessage: string | null } => {
+  if (!resourceUri) {
+    return { result, errorMessage: null };
+  }
+
+  const { hasStructuredContent, hasData } = describeToolResultShape({ result });
+  if (hasData && !hasStructuredContent) {
+    const errorMessage = `Tool result missing structuredContent for ${serverName}/${toolName}. UI tools must return structuredContent (data is not consumed by useViews).`;
+    return {
+      result: buildToolResultShapeError({
+        serverName,
+        toolName,
+        expectedShape: "structuredContent",
+        actualShape: "data",
+      }),
+      errorMessage,
+    };
+  }
+
+  return { result, errorMessage: null };
+};
+
+/**
  * Extract instanceId from an MCP tool result.
  * Looks in structuredContent.instanceId first, then parses content[0].text as JSON.
  *
@@ -1424,43 +1375,6 @@ const extractTitle = (result: unknown): string | undefined => {
   }
 
   return undefined;
-};
-
-/**
- * Strip large image data from tool results to prevent token limit errors.
- *
- * Large image content can be 100k+ tokens when base64 encoded.
- * This replaces image content with a placeholder message while preserving
- * the result structure for the agent.
- *
- * The UI pip still receives the full result via pip:tool-result IPC.
- */
-const stripLargeImageData = (result: unknown): unknown => {
-  if (!result || typeof result !== "object") return result;
-
-  const resultObj = result as Record<string, unknown>;
-  if (!resultObj.content || !Array.isArray(resultObj.content)) return result;
-
-  const hasLargeImage = resultObj.content.some(
-    (item: { type?: string; data?: string }) =>
-      item.type === "image" && item.data && item.data.length > 1000
-  );
-
-  if (!hasLargeImage) return result;
-
-  // Replace image content with placeholder
-  return {
-    ...resultObj,
-    content: resultObj.content.map((item: { type?: string; data?: string }) => {
-      if (item.type === "image" && item.data && item.data.length > 1000) {
-        return {
-          type: "text",
-          text: "[Image omitted from conversation to save tokens]",
-        };
-      }
-      return item;
-    }),
-  };
 };
 
 /**
@@ -1751,6 +1665,19 @@ export const handleToolCall = async ({
     });
   }
 
+  const validation = validateToolResultShape({
+    result,
+    serverName,
+    toolName,
+    resourceUri,
+  });
+
+  if (validation.errorMessage) {
+    bufferUiError({ serverName, message: validation.errorMessage });
+  }
+
+  result = validation.result;
+
   // Create pip if needed (for new instanceIds)
   try {
     if (shouldManagePip && resourceUri && targetInstanceId && isNewPip) {
@@ -1934,7 +1861,7 @@ export const handleToolCall = async ({
 
     const resultObj = result as Record<string, unknown>;
     // Strip large image data to prevent token limit errors
-    const sanitizedResult = stripLargeImageData(resultObj);
+    const sanitizedResult = stripLargeImageData({ result: resultObj });
     return {
       ...(sanitizedResult as Record<string, unknown>),
       _inlineDisplay: {
@@ -1949,7 +1876,7 @@ export const handleToolCall = async ({
 
   // Strip large image data to prevent token limit errors.
   // The UI pip already received the full result via pip:tool-result IPC.
-  return stripLargeImageData(result);
+  return stripLargeImageData({ result });
 };
 
 /**

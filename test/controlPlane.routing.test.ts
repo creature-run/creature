@@ -17,7 +17,6 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  extractParamNames,
   getViewForTool,
   findPipByParams,
   findRootPip,
@@ -27,6 +26,7 @@ import {
   type RoutablePipInstance,
   type ResourceMetadata,
 } from "../src/electron/mcp/routing";
+import { extractParamNames } from "../src/lib/utils";
 
 // ============================================================================
 // Test Harness
@@ -550,23 +550,26 @@ describe("Control Plane Routing", () => {
 describe("View Parsing", () => {
   describe("extractParamNames", () => {
     it("extracts single param", () => {
-      expect(extractParamNames("/editor/:noteId")).toEqual(["noteId"]);
+      expect(extractParamNames({ viewPath: "/editor/:noteId" })).toEqual(["noteId"]);
     });
 
     it("extracts multiple params", () => {
-      expect(extractParamNames("/folder/:folderId/file/:fileId")).toEqual(["folderId", "fileId"]);
+      expect(extractParamNames({ viewPath: "/folder/:folderId/file/:fileId" })).toEqual([
+        "folderId",
+        "fileId",
+      ]);
     });
 
     it("returns empty array for root path", () => {
-      expect(extractParamNames("/")).toEqual([]);
+      expect(extractParamNames({ viewPath: "/" })).toEqual([]);
     });
 
     it("returns empty array for static path", () => {
-      expect(extractParamNames("/editor")).toEqual([]);
+      expect(extractParamNames({ viewPath: "/editor" })).toEqual([]);
     });
 
     it("handles underscores in param names", () => {
-      expect(extractParamNames("/item/:item_id")).toEqual(["item_id"]);
+      expect(extractParamNames({ viewPath: "/item/:item_id" })).toEqual(["item_id"]);
     });
   });
 

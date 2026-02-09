@@ -22,6 +22,7 @@
  */
 
 import type { WidgetState } from "../../shared/types";
+import { extractParamNames, generateInstanceId } from "../../lib/utils";
 
 // ============================================================================
 // Types
@@ -85,16 +86,6 @@ export interface ResourceMetadata {
 // ============================================================================
 
 /**
- * Extract param names from a view path pattern.
- * E.g., "/editor/:noteId" → ["noteId"]
- * E.g., "/folder/:folderId/file/:fileId" → ["folderId", "fileId"]
- */
-export const extractParamNames = (viewPath: string): string[] => {
-  const matches = viewPath.match(/:([a-zA-Z_][a-zA-Z0-9_]*)/g);
-  return matches ? matches.map((m) => m.slice(1)) : [];
-};
-
-/**
  * Find the view path for a tool from views config.
  *
  * @param toolName - The tool being called
@@ -112,7 +103,7 @@ export const getViewForTool = ({
 
   for (const [viewPath, tools] of Object.entries(views)) {
     if (tools.includes(toolName)) {
-      const paramNames = extractParamNames(viewPath);
+      const paramNames = extractParamNames({ viewPath });
       return {
         viewPath,
         paramNames,
@@ -123,14 +114,6 @@ export const getViewForTool = ({
   }
 
   return undefined;
-};
-
-/**
- * Generate a unique instance ID for pip routing.
- * Format matches SDK format for consistency.
- */
-export const generateInstanceId = (): string => {
-  return `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 };
 
 /**
@@ -292,7 +275,7 @@ export const resolveInstanceIdForTool = ({
       };
     }
     return {
-      instanceId: generateInstanceId(),
+      instanceId: generateInstanceId({}),
       existingPip: undefined,
       viewPath: view?.viewPath,
       isReusingPip: false,
@@ -315,7 +298,7 @@ export const resolveInstanceIdForTool = ({
       };
     }
     return {
-      instanceId: generateInstanceId(),
+      instanceId: generateInstanceId({}),
       existingPip: undefined,
       viewPath: view.viewPath,
       isReusingPip: false,
@@ -347,7 +330,7 @@ export const resolveInstanceIdForTool = ({
 
     // No matching pip found → create new pip
     return {
-      instanceId: generateInstanceId(),
+      instanceId: generateInstanceId({}),
       existingPip: undefined,
       viewPath: view.viewPath,
       isReusingPip: false,
@@ -358,7 +341,7 @@ export const resolveInstanceIdForTool = ({
   // Used for tools that create new resources (e.g., notes_create opens a new editor)
   if (view && !view.isRoot && !view.hasParams) {
     return {
-      instanceId: generateInstanceId(),
+      instanceId: generateInstanceId({}),
       existingPip: undefined,
       viewPath: view.viewPath,
       isReusingPip: false,

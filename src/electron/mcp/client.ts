@@ -38,6 +38,7 @@ import { getMcpStorageDir } from "../storage/mcpStorageDir";
 import { getMcpRepoDir } from "../storage/mcpRepoDir";
 import { DEFAULT_SAMPLING_SETTINGS, readUserDataProjectConfig, type SamplingSettings } from "../storage/projectSettings";
 import { dispatchStorageMethod, isStorageMethod, STORAGE_METHODS } from "./storage";
+import { normalizeFileData } from "../../lib/utils";
 import { requestSamplingApproval } from "./sampling";
 import * as telemetry from "../telemetry";
 import type { ResourceIcon } from "../../shared/types";
@@ -398,15 +399,6 @@ const mapMcpToolChoice = (toolChoice?: ToolChoice): LanguageModelV3ToolChoice | 
   return { type: "auto" };
 };
 
-const normalizeFileData = (data: unknown): string => {
-  if (typeof data === "string") return data;
-  if (data instanceof URL) return data.toString();
-  if (data instanceof Uint8Array) {
-    return Buffer.from(data).toString("base64");
-  }
-  return JSON.stringify(data);
-};
-
 const toolResultToOutput = (toolResult: ToolResultContent): LanguageModelV3ToolResultOutput => {
   const onlyText =
     toolResult.content?.length === 1 &&
@@ -573,7 +565,7 @@ const modelContentToMcpBlocks = (content: LanguageModelV3Content[]): SamplingMes
     }
     if (part.type === "file") {
       const mediaType = part.mediaType || "application/octet-stream";
-      const data = normalizeFileData(part.data);
+      const data = normalizeFileData({ data: part.data });
       if (mediaType.startsWith("image/")) {
         blocks.push({ type: "image", data, mimeType: mediaType });
       } else if (mediaType.startsWith("audio/")) {
