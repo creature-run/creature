@@ -110,6 +110,25 @@ const copyMcpUIs = (resourcesPath: string) => {
 };
 
 /**
+ * Copy the MCP app template to Resources/mcp-app-template/.
+ * This template is used by the dev-mcp project profile to scaffold
+ * new MCP App projects. Without it, project creation fails in packaged builds
+ * because findTemplatePath() looks for the template in process.resourcesPath.
+ */
+const copyMcpAppTemplate = (resourcesPath: string) => {
+  const srcDir = path.join(__dirname, 'templates', 'mcp-app');
+  const destDir = path.join(resourcesPath, 'mcp-app-template');
+
+  if (fs.existsSync(srcDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.cpSync(srcDir, destDir, { recursive: true });
+    console.log('[Forge] Copied MCP app template to resources');
+  } else {
+    console.warn(`[Forge] Warning: MCP app template not found at ${srcDir}`);
+  }
+};
+
+/**
  * Copy the standalone Node.js binary to Resources/bin/.
  * 
  * We bundle a real Node.js binary (not Electron) to avoid macOS showing
@@ -381,6 +400,7 @@ const config: ForgeConfig = {
       copyNodeBinary(resourcesPath);
       copyBundledNpm(resourcesPath);
       copyMcpUIs(resourcesPath);
+      copyMcpAppTemplate(resourcesPath);
       copyNativeDeps(resourcesPath);
       generateAppUpdateConfig(resourcesPath);
       
