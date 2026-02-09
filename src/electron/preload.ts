@@ -148,54 +148,6 @@ export interface ProjectWithValidation extends Project {
   _isAppManaged?: boolean;
 }
 
-export interface ChatSessionSummary {
-  id: string;
-  title: string;
-  isAutoTitle: boolean;
-  isPinned: boolean;
-  created_at: string;
-  updated_at: string;
-  last_message_at: string | null;
-  message_count: number;
-}
-
-export interface ChatTokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-}
-
-export interface PersistedPipSnapshot {
-  instanceId: string;
-  serverName: string;
-  resourceUri: string;
-  toolName: string;
-  title: string;
-  createdAt: number;
-  triggeredByTool?: boolean;
-  openInBackground?: boolean;
-  widgetState?: WidgetState;
-}
-
-export interface PersistedPipState {
-  pips: PersistedPipSnapshot[];
-  pipOrder: string[];
-  activePipId: string | null;
-}
-
-export interface ChatSessionState {
-  streamedMessages: unknown[];
-  injectedMessages: unknown[];
-  messageOrder: Record<string, number>;
-  nextOrder: number;
-  tokenUsage: ChatTokenUsage;
-  pipState: PersistedPipState;
-}
-
-export interface ChatSessionWithState {
-  summary: ChatSessionSummary;
-  state: ChatSessionState;
-}
 
 /**
  * Pip Instance data sent from the Control Plane to the renderer.
@@ -340,61 +292,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("chat:isRunning"),
   },
 
-  chatSession: {
-    list: (params: { projectId: string }): Promise<{
-      success: boolean;
-      sessions?: ChatSessionSummary[];
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:list", params),
-    getActive: (params: { projectId: string }): Promise<{
-      success: boolean;
-      session?: ChatSessionWithState;
-      sessions?: ChatSessionSummary[];
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:getActive", params),
-    create: (params: { projectId: string }): Promise<{
-      success: boolean;
-      session?: ChatSessionWithState;
-      sessions?: ChatSessionSummary[];
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:create", params),
-    switch: (params: { projectId: string; sessionId: string }): Promise<{
-      success: boolean;
-      session?: ChatSessionWithState;
-      sessions?: ChatSessionSummary[];
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:switch", params),
-    save: (params: {
-      projectId: string;
-      sessionId: string;
-      state: ChatSessionState;
-    }): Promise<{
-      success: boolean;
-      session?: ChatSessionSummary;
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:save", params),
-    rename: (params: {
-      projectId: string;
-      sessionId: string;
-      title: string;
-    }): Promise<{
-      success: boolean;
-      session?: ChatSessionSummary;
-      sessions?: ChatSessionSummary[];
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:rename", params),
-    setPinned: (params: {
-      projectId: string;
-      sessionId: string;
-      pinned: boolean;
-    }): Promise<{
-      success: boolean;
-      session?: ChatSessionSummary;
-      sessions?: ChatSessionSummary[];
-      error?: string;
-    }> => ipcRenderer.invoke("chatSession:setPinned", params),
-  },
-
   // Image upload for chat messages
   image: {
     upload: (filePathOrBuffer: string | { buffer: Uint8Array; filename: string }, projectId: string): Promise<{
@@ -488,7 +385,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * Get all UI resources from connected MCP servers.
      * Returns resources with ui:// URI scheme for sidebar display.
      */
-    getUIResources: (): Promise<Array<{ serverName: string; uri: string; name: string; icon?: ResourceIcon }>> =>
+    getUIResources: (): Promise<Array<{ serverName: string; uri: string; name: string; icon?: ResourceIcon; _isDev?: boolean }>> =>
       ipcRenderer.invoke("mcp:getUIResources"),
     /**
      * Launch a pip for a UI resource directly (without a tool call).
@@ -636,15 +533,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       } | null;
     }): Promise<{ success: boolean }> =>
       ipcRenderer.invoke("pip:updateWidgetState", { instanceId: params.instanceId, widgetState: params.widgetState }),
-
-    /**
-     * Restore pip tabs from persisted chat session state.
-     */
-    restorePips: (params: { pipState: PersistedPipState }): Promise<{
-      restoredInstanceIds: string[];
-      skipped: Array<{ instanceId: string; reason: string }>;
-      activePipId: string | null;
-    }> => ipcRenderer.invoke("pip:restore", params),
 
     // Call a tool on an MCP server (for UI-initiated tool calls per MCP Apps spec)
     callTool: (params: {
@@ -1008,60 +896,6 @@ declare global {
         start: () => Promise<{ success: boolean; error?: string }>;
         isRunning: () => Promise<{ running: boolean }>;
       };
-      chatSession: {
-        list: (params: { projectId: string }) => Promise<{
-          success: boolean;
-          sessions?: ChatSessionSummary[];
-          error?: string;
-        }>;
-        getActive: (params: { projectId: string }) => Promise<{
-          success: boolean;
-          session?: ChatSessionWithState;
-          sessions?: ChatSessionSummary[];
-          error?: string;
-        }>;
-        create: (params: { projectId: string }) => Promise<{
-          success: boolean;
-          session?: ChatSessionWithState;
-          sessions?: ChatSessionSummary[];
-          error?: string;
-        }>;
-        switch: (params: { projectId: string; sessionId: string }) => Promise<{
-          success: boolean;
-          session?: ChatSessionWithState;
-          sessions?: ChatSessionSummary[];
-          error?: string;
-        }>;
-        save: (params: {
-          projectId: string;
-          sessionId: string;
-          state: ChatSessionState;
-        }) => Promise<{
-          success: boolean;
-          session?: ChatSessionSummary;
-          error?: string;
-        }>;
-        rename: (params: {
-          projectId: string;
-          sessionId: string;
-          title: string;
-        }) => Promise<{
-          success: boolean;
-          session?: ChatSessionSummary;
-          sessions?: ChatSessionSummary[];
-          error?: string;
-        }>;
-        setPinned: (params: {
-          projectId: string;
-          sessionId: string;
-          pinned: boolean;
-        }) => Promise<{
-          success: boolean;
-          session?: ChatSessionSummary;
-          sessions?: ChatSessionSummary[];
-          error?: string;
-        }>;
-      };
       auth: {
         getState: () => Promise<AuthState>;
         saveCredentials: (credentials: ProviderCredentials) => Promise<{ success: boolean; error?: string }>;
@@ -1096,7 +930,7 @@ declare global {
         onRestarted: (callback: (data: { name: string }) => void) => () => void;
         onDisabled: (callback: (data: { name: string }) => void) => () => void;
         onStatus: (callback: (data: { name: string; status: "ok" | "error"; error?: string }) => void) => () => void;
-        getUIResources: () => Promise<Array<{ serverName: string; uri: string; name: string; icon?: ResourceIcon }>>;
+        getUIResources: () => Promise<Array<{ serverName: string; uri: string; name: string; icon?: ResourceIcon; _isDev?: boolean }>>;
         launchResourcePip: (serverName: string, resourceUri: string) => Promise<{
           success: boolean;
           instanceId?: string;
@@ -1178,11 +1012,6 @@ declare global {
             imageIds?: string[];
           } | null;
         }) => Promise<{ success: boolean }>;
-        restorePips: (params: { pipState: PersistedPipState }) => Promise<{
-          restoredInstanceIds: string[];
-          skipped: Array<{ instanceId: string; reason: string }>;
-          activePipId: string | null;
-        }>;
         callTool: (params: {
           serverName: string;
           toolName: string;

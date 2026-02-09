@@ -343,14 +343,10 @@ function TodoApp() {
   useEffect(() => {
     if (updateState.data) {
       updateTodosFromData(updateState.data);
-      if (updateState.data.todo && selectedTodo?.id === updateState.data.todo.id) {
-        // Update selected todo with full data including notes
-        setSelectedTodo(updateState.data.todo);
-      }
       setIsSaving(false);
       setLastSaved(new Date());
     }
-  }, [updateState.data, updateTodosFromData, selectedTodo?.id]);
+  }, [updateState.data, updateTodosFromData]);
 
   useEffect(() => {
     if (searchState.data) {
@@ -400,6 +396,11 @@ function TodoApp() {
 
   const handleToggle = useCallback(
     async (id: string) => {
+      // Optimistically update selectedTodo so the detail view checkbox
+      // reflects the change immediately without waiting for the server.
+      setSelectedTodo(prev =>
+        prev?.id === id ? { ...prev, completed: !prev.completed } : prev
+      );
       try {
         await toggleTodo({ ids: [id] });
       } catch (err) {

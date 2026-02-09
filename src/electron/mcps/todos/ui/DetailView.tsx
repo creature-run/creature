@@ -40,6 +40,19 @@ export function DetailView({
   const editorRef = useRef<MilkdownEditorRef>(null);
 
   /**
+   * Cancel any pending debounced save on unmount.
+   * Without this, the timer fires after the component is gone,
+   * triggering a save whose response can override navigation state.
+   */
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, []);
+
+  /**
    * Sync state when todo changes (e.g., switching todos or external updates).
    * Detects external changes and updates editor content.
    */

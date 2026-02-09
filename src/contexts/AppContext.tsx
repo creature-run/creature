@@ -137,7 +137,7 @@ interface PipsState {
  * Local project structure.
  * Simplified from cloud version - no org_id, created_by, associated_package.
  */
-interface ProjectWithValidation {
+export interface ProjectWithValidation {
   id: string;
   name: string;
   profile: "playground" | "dev-general" | "dev-mcp";

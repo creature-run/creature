@@ -5,36 +5,15 @@ import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  CaretRight,
-  CaretDown,
-  Plus,
-  Warning,
-  XCircle,
-  PushPin,
-  PushPinSlash,
-  PencilSimple,
-  Check,
-  X,
-} from "@phosphor-icons/react";
+import { CaretRight, CaretDown, Warning, XCircle, Plugs, ChatCircle, Code } from "@phosphor-icons/react";
 import { ChatInput } from "./ChatInput";
 import { Button } from "./Button";
 import { Alert, AlertTitle, AlertDescription } from "./Alert";
 import { InlineWidget } from "./InlineWidget";
 import { Spinner } from "./Spinner";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./DropdownMenu";
-import { Input } from "./Input";
 import { cn, startUpgrade } from "../lib/utils";
 import { useTheme } from "../contexts/ThemeContext";
 import { useApp } from "../contexts/AppContext";
-import { widgetStateStore, makePipWidgetId, parseWidgetId } from "../lib/widgetStateStore";
-import type {
-  ChatSessionState,
-  ChatSessionSummary,
-  ChatSessionWithState,
-  PersistedPipState,
-  PersistedPipSnapshot,
-} from "../electron/preload";
 
 /**
  * Maps file extensions to IANA media types for images.
@@ -111,99 +90,8 @@ const normalizeTokenUsage = (value: unknown): TokenUsage => {
   };
 };
 
-const sortSessionSummaries = (sessions: ChatSessionSummary[]): ChatSessionSummary[] => {
-  return [...sessions].sort((a, b) => {
-    if (a.isPinned !== b.isPinned) {
-      return a.isPinned ? -1 : 1;
-    }
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-  });
-};
-
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 const MARKDOWN_ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
-
-const normalizePersistedPipState = (value: unknown): PersistedPipState => {
-  if (!value || typeof value !== "object") {
-    return {
-      pips: [],
-      pipOrder: [],
-      activePipId: null,
-    };
-  }
-
-  const raw = value as {
-    pips?: unknown;
-    pipOrder?: unknown;
-    activePipId?: unknown;
-  };
-
-  const pips = Array.isArray(raw.pips)
-    ? raw.pips
-        .map((pip): PersistedPipSnapshot | null => {
-          if (!pip || typeof pip !== "object") return null;
-          const snapshot = pip as Partial<PersistedPipSnapshot>;
-          if (
-            typeof snapshot.instanceId !== "string" ||
-            typeof snapshot.serverName !== "string" ||
-            typeof snapshot.resourceUri !== "string" ||
-            typeof snapshot.toolName !== "string" ||
-            typeof snapshot.title !== "string"
-          ) {
-            return null;
-          }
-          return {
-            instanceId: snapshot.instanceId,
-            serverName: snapshot.serverName,
-            resourceUri: snapshot.resourceUri,
-            toolName: snapshot.toolName,
-            title: snapshot.title,
-            createdAt:
-              typeof snapshot.createdAt === "number" && Number.isFinite(snapshot.createdAt)
-                ? Number(snapshot.createdAt)
-                : Date.now(),
-            ...(typeof snapshot.triggeredByTool === "boolean"
-              ? { triggeredByTool: snapshot.triggeredByTool }
-              : {}),
-            ...(typeof snapshot.openInBackground === "boolean"
-              ? { openInBackground: snapshot.openInBackground }
-              : {}),
-            ...(snapshot.widgetState ? { widgetState: snapshot.widgetState } : {}),
-          };
-        })
-        .filter((pip): pip is PersistedPipSnapshot => !!pip)
-    : [];
-
-  const instanceIds = new Set(pips.map((pip) => pip.instanceId));
-  const pipOrder: string[] = [];
-  const pushOrder = (instanceId: string) => {
-    if (!instanceIds.has(instanceId) || pipOrder.includes(instanceId)) return;
-    pipOrder.push(instanceId);
-  };
-
-  if (Array.isArray(raw.pipOrder)) {
-    for (const value of raw.pipOrder) {
-      if (typeof value === "string") {
-        pushOrder(value);
-      }
-    }
-  }
-
-  for (const pip of pips) {
-    pushOrder(pip.instanceId);
-  }
-
-  const activePipId =
-    typeof raw.activePipId === "string" && instanceIds.has(raw.activePipId)
-      ? raw.activePipId
-      : null;
-
-  return {
-    pips,
-    pipOrder,
-    activePipId,
-  };
-};
 
 // ============================================================================
 // ChatSession Component (Internal)
@@ -226,7 +114,7 @@ interface ChatSessionProps {
  */
 function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: ChatSessionProps) {
   const { isDarkMode } = useTheme();
-  const { session, setProject, setSessionId, closeAllPips, pips, setActivePipId } = useApp();
+  const { session, setProject } = useApp();
   const [input, setInput] = useState("");
 
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
@@ -236,18 +124,6 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const userScrolledUpRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
-  const [sessionOptions, setSessionOptions] = useState<ChatSessionSummary[]>([]);
-  const [seedMessages, setSeedMessages] = useState<UIMessage[]>([]);
-  const [isSessionLoading, setIsSessionLoading] = useState(false);
-  const [isSwitchingSession, setIsSwitchingSession] = useState(false);
-  const [isSessionMetaUpdating, setIsSessionMetaUpdating] = useState(false);
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
-  const [isSessionMenuOpen, setIsSessionMenuOpen] = useState(false);
-  const [widgetStateRevision, setWidgetStateRevision] = useState(0);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hydratingSessionRef = useRef(true);
-  const restoreGenerationRef = useRef(0);
 
   /**
    * Separate state for UI-injected messages (pip events, UI tool calls).
@@ -322,6 +198,9 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   const injectedMessagesRef = useRef<(UIMessage & { _order?: number })[]>([]);
   injectedMessagesRef.current = injectedMessages;
 
+  const chatSessionId =
+    session.project?.id ? `project-${session.project.id}` : session.sessionId;
+
   /**
    * Create a stable transport instance for useChat.
    * The transport handles communication with the chat API endpoint.
@@ -335,7 +214,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       new DefaultChatTransport({
         api: "http://localhost:43891/api/chat",
         headers: {
-          "X-Session-Id": session.sessionId,
+          "X-Session-Id": chatSessionId,
         },
         prepareSendMessagesRequest: (options) => {
           // Merge streamed messages with injected context for agent
@@ -353,14 +232,14 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
             ...options,
             body: {
               messages: allMessages,
-              sessionId: session.sessionId,
+              sessionId: chatSessionId,
               folderPath: folderPathRef.current,
               customInstructions: customInstructionsRef.current,
             },
           };
         },
       }),
-    [session.sessionId]
+    [chatSessionId]
   );
 
   /**
@@ -381,8 +260,8 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
   }, []);
 
   const { messages: streamedMessages, status, error, sendMessage, stop } = useChat({
-    id: session.sessionId,
-    messages: seedMessages,
+    id: chatSessionId,
+    messages: [],
     transport,
     onFinish: ({ message }) => {
       const metadata = message.metadata as {
@@ -402,542 +281,6 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
     },
   });
 
-  const toUiMessages = useCallback((items: unknown[]): UIMessage[] => {
-    return items.filter((item): item is UIMessage => {
-      if (!item || typeof item !== "object") return false;
-      const candidate = item as { id?: unknown; role?: unknown };
-      return typeof candidate.id === "string" && typeof candidate.role === "string";
-    });
-  }, []);
-
-  const toInjectedUiMessages = useCallback((items: unknown[]): (UIMessage & { _order?: number })[] => {
-    return items
-      .filter((item): item is UIMessage & { _order?: number } => {
-        if (!item || typeof item !== "object") return false;
-        const candidate = item as { id?: unknown; role?: unknown };
-        return typeof candidate.id === "string" && typeof candidate.role === "string";
-      })
-      .map((message) => {
-        const candidate = message as UIMessage & { _order?: unknown };
-        if (Number.isFinite(candidate._order)) {
-          return { ...message, _order: Number(candidate._order) };
-        }
-        return message;
-      });
-  }, []);
-
-  const upsertSessionSummary = useCallback((summary: ChatSessionSummary) => {
-    setSessionOptions((prev) => {
-      return sortSessionSummaries([
-        summary,
-        ...prev.filter((sessionOption) => sessionOption.id !== summary.id),
-      ]);
-    });
-  }, []);
-
-  const buildPersistedPipState = useCallback((): PersistedPipState => {
-    const pipSnapshots: PersistedPipSnapshot[] = pips.pips
-      .filter((pip) => pip.pipType === "mcp" && pip.mcpServer && pip.resourceUri)
-      .map((pip) => {
-        const widgetState = widgetStateStore.get(
-          makePipWidgetId({ conversationId: session.sessionId, instanceId: pip.instanceId })
-        );
-
-        const snapshot: PersistedPipSnapshot = {
-          instanceId: pip.instanceId,
-          serverName: pip.mcpServer!,
-          resourceUri: pip.resourceUri!,
-          toolName: pip.toolName || "",
-          title: pip.title || "",
-          createdAt: Number.isFinite(pip.createdAt) ? pip.createdAt : Date.now(),
-        };
-
-        if (typeof pip.triggeredByTool === "boolean") {
-          snapshot.triggeredByTool = pip.triggeredByTool;
-        }
-
-        if (typeof pip.openInBackground === "boolean") {
-          snapshot.openInBackground = pip.openInBackground;
-        }
-
-        if (widgetState) {
-          snapshot.widgetState = widgetState;
-        }
-
-        return snapshot;
-      });
-
-    const snapshotIds = new Set(pipSnapshots.map((snapshot) => snapshot.instanceId));
-    const pipOrder: string[] = [];
-    const pushOrder = (instanceId: string) => {
-      if (!snapshotIds.has(instanceId) || pipOrder.includes(instanceId)) return;
-      pipOrder.push(instanceId);
-    };
-
-    for (const instanceId of pips.pipOrder) {
-      pushOrder(instanceId);
-    }
-    for (const snapshot of pipSnapshots) {
-      pushOrder(snapshot.instanceId);
-    }
-
-    const activePipId =
-      pips.activePipId && snapshotIds.has(pips.activePipId) ? pips.activePipId : null;
-
-    return {
-      pips: pipSnapshots,
-      pipOrder,
-      activePipId,
-    };
-  }, [pips.activePipId, pips.pipOrder, pips.pips, session.sessionId, widgetStateRevision]);
-
-  const restoreWidgetStateStoreForSession = useCallback(
-    (conversationId: string, pipState: PersistedPipState) => {
-      for (const key of widgetStateStore.keys()) {
-        const parsed = parseWidgetId(key);
-        if (parsed?.conversationId === conversationId && parsed.type === "pip") {
-          widgetStateStore.delete(key);
-        }
-      }
-
-      for (const snapshot of pipState.pips) {
-        if (!snapshot.widgetState) continue;
-
-        const widgetId = makePipWidgetId({
-          conversationId,
-          instanceId: snapshot.instanceId,
-        });
-        widgetStateStore.set(widgetId, snapshot.widgetState, {
-          mcpServerName: snapshot.serverName,
-          resourceUri: snapshot.resourceUri,
-          instanceId: snapshot.instanceId,
-          conversationId,
-        });
-      }
-    },
-    []
-  );
-
-  const restorePipsForSession = useCallback(
-    async ({
-      pipState,
-      generation,
-    }: {
-      pipState: PersistedPipState;
-      generation: number;
-    }) => {
-      if (!session.project?.id || pipState.pips.length === 0) {
-        return;
-      }
-
-      try {
-        const result = await window.electronAPI.controlPlane.restorePips({ pipState });
-        if (restoreGenerationRef.current !== generation) {
-          return;
-        }
-
-        const activePipId =
-          result.activePipId ||
-          pipState.activePipId ||
-          result.restoredInstanceIds[0] ||
-          null;
-
-        if (activePipId) {
-          requestAnimationFrame(() => {
-            if (restoreGenerationRef.current === generation) {
-              setActivePipId(activePipId);
-            }
-          });
-        }
-      } catch (error) {
-        console.error("[ViewChat] Failed to restore pips:", error);
-      }
-    },
-    [session.project?.id, setActivePipId]
-  );
-
-  const hydrateFromSession = useCallback(
-    (payload: ChatSessionWithState, allSessions: ChatSessionSummary[]) => {
-      const nextStreamed = toUiMessages(payload.state.streamedMessages);
-      const nextInjected = toInjectedUiMessages(payload.state.injectedMessages);
-      const nextPipState = normalizePersistedPipState(payload.state.pipState);
-      const nextOrderEntries = Object.entries(payload.state.messageOrder ?? {});
-      const nextOrderMap = new Map<string, number>();
-      for (const [id, value] of nextOrderEntries) {
-        if (Number.isFinite(value)) {
-          nextOrderMap.set(id, Number(value));
-        }
-      }
-      const nextOrder = Number.isFinite(payload.state.nextOrder)
-        ? Math.max(0, Math.floor(payload.state.nextOrder))
-        : nextOrderMap.size;
-
-      hydratingSessionRef.current = true;
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-
-      setSessionOptions(sortSessionSummaries(allSessions));
-      setSeedMessages(nextStreamed);
-      setInjectedMessages(nextInjected);
-      setTokenUsage(normalizeTokenUsage(payload.state.tokenUsage));
-      messageOrderMapRef.current = nextOrderMap;
-      messageOrderCounterRef.current = nextOrder;
-      userScrolledUpRef.current = false;
-      setMessageQueue([]);
-      setExpandedTools(new Set());
-      setInput("");
-      setRenamingSessionId(null);
-      setRenameDraft("");
-      setIsSessionMenuOpen(false);
-      setSessionId(payload.summary.id);
-      restoreGenerationRef.current += 1;
-      const restoreGeneration = restoreGenerationRef.current;
-
-      restoreWidgetStateStoreForSession(payload.summary.id, nextPipState);
-      void restorePipsForSession({
-        pipState: nextPipState,
-        generation: restoreGeneration,
-      });
-
-      setTimeout(() => {
-        hydratingSessionRef.current = false;
-      }, 0);
-    },
-    [
-      restorePipsForSession,
-      restoreWidgetStateStoreForSession,
-      setSessionId,
-      toInjectedUiMessages,
-      toUiMessages,
-    ]
-  );
-
-  const buildPersistedState = useCallback((): ChatSessionState => {
-    const messageOrder: Record<string, number> = {};
-    for (const [id, order] of messageOrderMapRef.current.entries()) {
-      messageOrder[id] = order;
-    }
-
-    return {
-      streamedMessages,
-      injectedMessages,
-      messageOrder,
-      nextOrder: messageOrderCounterRef.current,
-      tokenUsage,
-      pipState: buildPersistedPipState(),
-    };
-  }, [buildPersistedPipState, streamedMessages, injectedMessages, tokenUsage]);
-
-  const persistState = useCallback(
-    async (state: ChatSessionState) => {
-      if (!session.project?.id || !session.sessionId) return;
-
-      const result = await window.electronAPI.chatSession.save({
-        projectId: session.project.id,
-        sessionId: session.sessionId,
-        state,
-      });
-
-      if (result.success && result.session) {
-        upsertSessionSummary(result.session);
-      }
-    },
-    [session.project?.id, session.sessionId, upsertSessionSummary]
-  );
-
-  const flushPendingSave = useCallback(async () => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    if (hydratingSessionRef.current) return;
-    await persistState(buildPersistedState());
-  }, [buildPersistedState, persistState]);
-
-  const flushPendingSaveRef = useRef(flushPendingSave);
-  useEffect(() => {
-    flushPendingSaveRef.current = flushPendingSave;
-  }, [flushPendingSave]);
-
-  useEffect(() => {
-    const unsubscribe = widgetStateStore.onChange((event) => {
-      if (event.conversationId && event.conversationId !== session.sessionId) {
-        return;
-      }
-      setWidgetStateRevision((value) => value + 1);
-    });
-
-    return unsubscribe;
-  }, [session.sessionId]);
-
-  const applySessionUpdate = useCallback(
-    (result: { session?: ChatSessionSummary; sessions?: ChatSessionSummary[] }) => {
-      if (result.sessions) {
-        setSessionOptions(sortSessionSummaries(result.sessions));
-        return;
-      }
-      if (result.session) {
-        upsertSessionSummary(result.session);
-      }
-    },
-    [upsertSessionSummary]
-  );
-
-  const handleStartRenameSession = useCallback((sessionOption: ChatSessionSummary) => {
-    setRenamingSessionId(sessionOption.id);
-    setRenameDraft(sessionOption.title);
-    setIsSessionMenuOpen(true);
-  }, []);
-
-  const handleCancelRenameSession = useCallback(() => {
-    setRenamingSessionId(null);
-    setRenameDraft("");
-  }, []);
-
-  const handleConfirmRenameSession = useCallback(async () => {
-    if (!session.project?.id || !renamingSessionId) return;
-    const normalizedTitle = renameDraft.trim();
-    if (!normalizedTitle) return;
-    if (isSessionMetaUpdating) return;
-
-    setIsSessionMetaUpdating(true);
-    try {
-      const result = await window.electronAPI.chatSession.rename({
-        projectId: session.project.id,
-        sessionId: renamingSessionId,
-        title: renameDraft,
-      });
-
-      if (result.success) {
-        applySessionUpdate(result);
-        setRenamingSessionId(null);
-        setRenameDraft("");
-      }
-    } catch (renameError) {
-      console.error("[ViewChat] Failed to rename session:", renameError);
-    } finally {
-      setIsSessionMetaUpdating(false);
-    }
-  }, [
-    applySessionUpdate,
-    isSessionMetaUpdating,
-    renameDraft,
-    renamingSessionId,
-    session.project?.id,
-  ]);
-
-  const handleSetPinned = useCallback(
-    async (sessionOption: ChatSessionSummary, pinned: boolean) => {
-      if (!session.project?.id || isSessionMetaUpdating) return;
-
-      setIsSessionMetaUpdating(true);
-      try {
-        const result = await window.electronAPI.chatSession.setPinned({
-          projectId: session.project.id,
-          sessionId: sessionOption.id,
-          pinned,
-        });
-
-        if (result.success) {
-          applySessionUpdate(result);
-        }
-      } catch (pinError) {
-        console.error("[ViewChat] Failed to update session pin:", pinError);
-      } finally {
-        setIsSessionMetaUpdating(false);
-      }
-    },
-    [applySessionUpdate, isSessionMetaUpdating, session.project?.id]
-  );
-
-  const handleSwitchSession = useCallback(
-    async (targetSessionId: string) => {
-      if (!session.project?.id || !targetSessionId || targetSessionId === session.sessionId) {
-        return;
-      }
-      if (isSwitchingSession || isSessionMetaUpdating) return;
-
-      setIsSwitchingSession(true);
-      try {
-        setRenamingSessionId(null);
-        setRenameDraft("");
-        setIsSessionMenuOpen(false);
-        await stop();
-        await flushPendingSave();
-        await closeAllPips();
-
-        const result = await window.electronAPI.chatSession.switch({
-          projectId: session.project.id,
-          sessionId: targetSessionId,
-        });
-
-        if (result.success && result.session && result.sessions) {
-          hydrateFromSession(result.session, result.sessions);
-        }
-      } catch (switchError) {
-        console.error("[ViewChat] Failed to switch session:", switchError);
-      } finally {
-        setIsSwitchingSession(false);
-      }
-    },
-    [
-      closeAllPips,
-      flushPendingSave,
-      hydrateFromSession,
-      isSessionMetaUpdating,
-      isSwitchingSession,
-      session.project?.id,
-      session.sessionId,
-      stop,
-    ]
-  );
-
-  const handleCreateSession = useCallback(async () => {
-    if (!session.project?.id || isSwitchingSession || isSessionMetaUpdating) return;
-
-    setIsSwitchingSession(true);
-    try {
-      setRenamingSessionId(null);
-      setRenameDraft("");
-      setIsSessionMenuOpen(false);
-      await stop();
-      await flushPendingSave();
-      await closeAllPips();
-
-      const result = await window.electronAPI.chatSession.create({
-        projectId: session.project.id,
-      });
-
-      if (result.success && result.session && result.sessions) {
-        hydrateFromSession(result.session, result.sessions);
-      }
-    } catch (createError) {
-      console.error("[ViewChat] Failed to create session:", createError);
-    } finally {
-      setIsSwitchingSession(false);
-    }
-  }, [
-    closeAllPips,
-    flushPendingSave,
-    hydrateFromSession,
-    isSessionMetaUpdating,
-    isSwitchingSession,
-    session.project?.id,
-    stop,
-  ]);
-
-  useEffect(() => {
-    const projectId = session.project?.id;
-    hydratingSessionRef.current = true;
-    restoreGenerationRef.current += 1;
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-
-    setSeedMessages([]);
-    setInjectedMessages([]);
-    setTokenUsage({ ...DEFAULT_TOKEN_USAGE });
-    setSessionOptions([]);
-    setIsSessionMetaUpdating(false);
-    setRenamingSessionId(null);
-    setRenameDraft("");
-    setIsSessionMenuOpen(false);
-    messageOrderMapRef.current = new Map<string, number>();
-    messageOrderCounterRef.current = 0;
-    setMessageQueue([]);
-    setExpandedTools(new Set());
-    setInput("");
-
-    if (!projectId) {
-      setSessionOptions([]);
-      return;
-    }
-
-    let cancelled = false;
-    const loadActiveSession = async () => {
-      let loaded = false;
-      setIsSessionLoading(true);
-      try {
-        const result = await window.electronAPI.chatSession.getActive({
-          projectId,
-        });
-
-        if (cancelled) return;
-        if (result.success && result.session && result.sessions) {
-          hydrateFromSession(result.session, result.sessions);
-          loaded = true;
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          console.error("[ViewChat] Failed to load active session:", loadError);
-        }
-      } finally {
-        if (!cancelled) {
-          if (!loaded) {
-            hydratingSessionRef.current = false;
-          }
-          setIsSessionLoading(false);
-        }
-      }
-    };
-
-    void loadActiveSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hydrateFromSession, session.project?.id]);
-
-  useEffect(() => {
-    if (!session.project?.id || isSessionLoading || isSwitchingSession) return;
-    if (hydratingSessionRef.current) return;
-
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-
-    const state = buildPersistedState();
-    saveTimerRef.current = setTimeout(() => {
-      void persistState(state);
-      saveTimerRef.current = null;
-    }, 1000);
-
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [
-    buildPersistedState,
-    injectedMessages,
-    isSessionLoading,
-    isSwitchingSession,
-    persistState,
-    session.project?.id,
-    session.sessionId,
-    streamedMessages,
-    tokenUsage,
-  ]);
-
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      void flushPendingSaveRef.current();
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      void flushPendingSaveRef.current();
-    };
-  }, []);
 
   /**
    * Merge streamed messages with injected context for Dev Console and agent.
@@ -981,6 +324,22 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
       inputRef.current?.focus();
     }
   }, [focusTrigger]);
+
+  /**
+   * Reset in-memory chat state when the active project changes.
+   * Ensures each project starts with a clean conversation buffer.
+   */
+  useEffect(() => {
+    void stop();
+    setInjectedMessages([]);
+    setTokenUsage({ ...DEFAULT_TOKEN_USAGE });
+    messageOrderMapRef.current = new Map<string, number>();
+    messageOrderCounterRef.current = 0;
+    userScrolledUpRef.current = false;
+    setMessageQueue([]);
+    setExpandedTools(new Set());
+    setInput("");
+  }, [session.project?.id, stop]);
 
   /**
    * Auto-scroll to bottom when streamed messages change,
@@ -1069,9 +428,15 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
 
   const isStreaming = status === "streaming" || status === "submitted";
   const hasStreamError = status === "error";
-  const activeSession = sessionOptions.find((sessionOption) => sessionOption.id === session.sessionId);
-  const isSessionBusy = isSessionLoading || isSwitchingSession || isSessionMetaUpdating;
-  const activeSessionTitle = activeSession?.title ?? "Session";
+
+  /**
+   * Whether the conversation is empty and a welcome message should be shown.
+   * Each project profile gets a tailored welcome to orient the user.
+   */
+  const isEmptyConversation =
+    !!session.project?.profile &&
+    streamedMessages.length === 0 &&
+    !isStreaming;
 
   /**
    * Handles form submission from ChatInput.
@@ -1080,7 +445,6 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
    */
   const handleSubmit = useCallback(
     (finalContent: string, _attachedPaths: string[], images: Array<{ url?: string; filename: string }>) => {
-      if (isSessionBusy) return;
       if (!finalContent.trim() && images.length === 0) return;
 
       // Re-enable auto-scroll when user sends a new message
@@ -1115,7 +479,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
         }
       }
     },
-    [isSessionBusy, isStreaming, sendMessage]
+    [isStreaming, sendMessage]
   );
 
   /**
@@ -1453,180 +817,44 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
         )}
       />
       {/* Scrollable content area */}
-      <div className="flex-1 min-h-0 overflow-y-auto show-scrollbar pb-[120px] [@media(min-height:800px)]:pb-[175px]" ref={outputRef}>
-        <div className="p-6 pb-[80px] w-full max-w-[750px] mx-auto">
-          <div className="mb-5 mt-1 flex items-center">
-            <DropdownMenu
-              open={isSessionMenuOpen}
-              onOpenChange={(open) => {
-                setIsSessionMenuOpen(open);
-                if (!open) {
-                  handleCancelRenameSession();
-                }
-              }}
-            >
-              <DropdownMenuTrigger asChild>
-                <button
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md border border-border-secondary bg-background-secondary px-2.5 py-1 text-xs text-text-secondary transition-colors",
-                    "hover:text-text-primary hover:border-border-primary",
-                    isSessionBusy && "opacity-70 cursor-not-allowed"
-                  )}
-                  disabled={isSessionBusy}
-                >
-                  {activeSession?.isPinned && <PushPin size={12} />}
-                  <span className="max-w-[360px] truncate">
-                    {isSessionLoading ? "Loading session..." : activeSessionTitle}
-                  </span>
-                  <CaretDown size={12} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="bottom" className="min-w-[300px]">
-                {sessionOptions.map((sessionOption) => (
-                  <DropdownMenuItem
-                    key={sessionOption.id}
-                    onSelect={(event) => {
-                      event.preventDefault();
-                    }}
-                    className="text-xs"
-                  >
-                    {renamingSessionId === sessionOption.id ? (
-                      <div
-                        className="flex w-full items-center gap-1.5"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                        }}
-                      >
-                        <Input
-                          value={renameDraft}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              void handleConfirmRenameSession();
-                            } else if (event.key === "Escape") {
-                              event.preventDefault();
-                              handleCancelRenameSession();
-                            }
-                          }}
-                          autoFocus
-                          disabled={isSessionBusy}
-                          className="h-7 text-xs"
-                          maxLength={64}
-                        />
-                        <button
-                          type="button"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
-                          disabled={isSessionBusy || !renameDraft.trim()}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void handleConfirmRenameSession();
-                          }}
-                        >
-                          <Check size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
-                          disabled={isSessionBusy}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleCancelRenameSession();
-                          }}
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex w-full items-center gap-1.5">
-                        <button
-                          type="button"
-                          className={cn(
-                            "flex flex-1 items-center gap-1.5 truncate text-left",
-                            sessionOption.id !== session.sessionId &&
-                              !isSessionBusy &&
-                              "hover:text-text-primary"
-                          )}
-                          disabled={isSessionBusy || sessionOption.id === session.sessionId}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            if (sessionOption.id !== session.sessionId) {
-                              void handleSwitchSession(sessionOption.id);
-                              setIsSessionMenuOpen(false);
-                            }
-                          }}
-                        >
-                          {sessionOption.isPinned && <PushPin size={10} />}
-                          <span className="truncate">{sessionOption.title}</span>
-                        </button>
-                        {sessionOption.id === session.sessionId && (
-                          <span className="text-[10px] text-text-secondary">Current</span>
-                        )}
-                        <button
-                          type="button"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
-                          disabled={isSessionBusy}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void handleSetPinned(sessionOption, !sessionOption.isPinned);
-                          }}
-                        >
-                          {sessionOption.isPinned ? <PushPinSlash size={12} /> : <PushPin size={12} />}
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:text-text-primary disabled:opacity-50"
-                          disabled={isSessionBusy}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleStartRenameSession(sessionOption);
-                          }}
-                        >
-                          <PencilSimple size={12} />
-                        </button>
-                      </div>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem
-                  disabled={isSessionBusy}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleCreateSession();
-                    setIsSessionMenuOpen(false);
-                  }}
-                  className="text-xs"
-                >
-                  <Plus size={12} />
-                  <span>New Session</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+      <div
+        className={cn(
+          "flex-1 min-h-0 overflow-y-auto show-scrollbar",
+          !isEmptyConversation && "pb-[120px] [@media(min-height:800px)]:pb-[175px]"
+        )}
+        ref={outputRef}
+      >
+        {isEmptyConversation ? (
+          /* Welcome message - vertically centered when conversation is empty.
+             Content varies by project profile to orient the user. */
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center px-6 max-w-[360px]">
+              {session.project?.profile === "dev-mcp" ? (
+                <>
+                  <Plugs size={24} weight="duotone" className="text-text-secondary/50 mx-auto mb-3" />
+                  <p className="text-[13px] text-text-secondary/70 leading-relaxed">
+                    Your development MCP is connected. Start chatting to build it together, or open the IDE in the sidebar to code it yourself.
+                  </p>
+                </>
+              ) : session.project?.profile === "dev-general" ? (
+                <>
+                  <Code size={24} weight="duotone" className="text-text-secondary/50 mx-auto mb-3" />
+                  <p className="text-[13px] text-text-secondary/70 leading-relaxed">
+                    Work on your software project with MCP Apps. Use the IDE, terminal, browser, and more.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <ChatCircle size={24} weight="duotone" className="text-text-secondary/50 mx-auto mb-3" />
+                  <p className="text-[13px] text-text-secondary/70 leading-relaxed">
+                    Experiment freely with MCP Apps. Take notes, track todos, automate browsing, and more.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
-
+        ) : (
+        <div className="p-6 pb-[80px] w-full max-w-[750px] mx-auto">
           {/* Message list - renders only streamed messages (users don't see injected context) */}
           {streamedMessages.map((msg) => (
               <div key={msg.id}>
@@ -1871,6 +1099,7 @@ function ChatSession({ isActive, folderPath, focusTrigger, samplingApproval }: C
             )
           )}
         </div>
+        )}
       </div>
 
       {/* Gradient overlay that fades content behind the chat input area.

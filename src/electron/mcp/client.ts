@@ -3116,6 +3116,8 @@ export interface UIResourceInfo {
   uri: string;
   name: string;
   icon?: ResourceIcon;
+  /** Whether this resource belongs to a dev MCP (the app being developed in a dev-mcp project) */
+  _isDev?: boolean;
 }
 
 /**
@@ -3128,6 +3130,9 @@ export interface UIResourceInfo {
  */
 export const getUIResources = (): UIResourceInfo[] => {
   const resources: UIResourceInfo[] = [];
+  const devMcpNames = currentProjectProfile === "dev-mcp"
+    ? new Set(devMcpPathToName.values())
+    : null;
   
   for (const [serverName, conn] of connections.entries()) {
     for (const resource of conn.resources.values()) {
@@ -3138,6 +3143,7 @@ export const getUIResources = (): UIResourceInfo[] => {
           uri: resource.uri,
           name: resource.name,
           icon: resource.icon,
+          _isDev: devMcpNames?.has(serverName) || false,
         });
       }
     }
@@ -3145,11 +3151,10 @@ export const getUIResources = (): UIResourceInfo[] => {
 
   // In dev-mcp profile, sort dev MCP resources to the top so the app
   // being developed is always the first icon in the sidebar.
-  if (currentProjectProfile === "dev-mcp") {
-    const devMcpNames = new Set(devMcpPathToName.values());
+  if (devMcpNames) {
     resources.sort((a, b) => {
-      const aIsDev = devMcpNames.has(a.serverName) ? 0 : 1;
-      const bIsDev = devMcpNames.has(b.serverName) ? 0 : 1;
+      const aIsDev = a._isDev ? 0 : 1;
+      const bIsDev = b._isDev ? 0 : 1;
       return aIsDev - bIsDev;
     });
   }

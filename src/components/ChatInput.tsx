@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { cn, truncatePathLeft } from "../lib/utils";
 import { Folder, FileText, PaperPlaneRight, Stop, CaretDown, Check } from "@phosphor-icons/react";
 import { useApp } from "../contexts/AppContext";
+import type { ProjectWithValidation } from "../contexts/AppContext";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./HoverCard";
 import { Button } from "./Button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./DropdownMenu";
@@ -42,39 +43,6 @@ interface TokenUsage {
   totalTokens: number;
 }
 
-interface ProjectWithValidation {
-  id: string;
-  org_id: string;
-  created_by: string;
-  name: string;
-  profile: "dev-general" | "dev-mcp";
-  context: {
-    local_directory?: { path: string };
-    custom_instructions?: string;
-  };
-  mcps: Array<{
-    name: string;
-    registry?: string;
-    command?: string;
-    args?: string[];
-    cwd?: string;
-    env?: Record<string, string>;
-    enabled: boolean;
-  }>;
-  sampling?: {
-    approvalMode: "per_request" | "allowlist" | "allow_all";
-    allowlist: string[];
-  };
-  deleted_at?: string;
-  created_at: string;
-  updated_at: string;
-  last_accessed_at: string;
-  _localValidation?: {
-    valid: boolean;
-    error?: string;
-  };
-}
-
 interface ChatInputProps {
   input: string;
   setInput: (value: string) => void;
@@ -107,12 +75,13 @@ const formatCompactNumber = (num: number): string => {
 };
 
 const CHAT_MODEL_LABELS: Record<ChatModelPreference, string> = {
+  "haiku-4-5": "Haiku 4.5",
   "sonnet-4-5": "Sonnet 4.5",
   "opus-4-6": "Opus 4.6",
 };
 
 const isChatModelPreference = (value: unknown): value is ChatModelPreference => {
-  return value === "sonnet-4-5" || value === "opus-4-6";
+  return value === "haiku-4-5" || value === "sonnet-4-5" || value === "opus-4-6";
 };
 
 
@@ -1193,13 +1162,17 @@ export function ChatInput({
               <button
                 type="button"
                 disabled={auth.providerType !== "anthropic" || isUpdatingChatModel}
-                className="h-6 min-w-[120px] rounded-md border border-border-secondary bg-transparent px-2.5 text-xs text-text-secondary inline-flex items-center justify-between gap-2 transition-colors hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                className="min-w-[100px] rounded-md border border-border-secondary bg-transparent pl-3 pr-2 py-2 text-xs text-text-secondary inline-flex items-center justify-between gap-3 transition-colors hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{modelLabel}</span>
                 <CaretDown size={10} weight="bold" className="text-text-secondary" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="top" className="min-w-[140px]">
+              <DropdownMenuItem onClick={() => handleChatModelChange("haiku-4-5")} className="text-xs py-1">
+                {chatModel === "haiku-4-5" ? <Check size={12} weight="bold" /> : <span className="w-3.5" />}
+                Haiku 4.5
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleChatModelChange("sonnet-4-5")} className="text-xs py-1">
                 {chatModel === "sonnet-4-5" ? <Check size={12} weight="bold" /> : <span className="w-3.5" />}
                 Sonnet 4.5

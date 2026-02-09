@@ -38,7 +38,7 @@ export interface AuthState {
 let cachedCredentials: ProviderCredentials | null = null;
 
 const isValidChatModel = (value: unknown): value is ChatModelPreference => {
-  return value === "sonnet-4-5" || value === "opus-4-6";
+  return value === "haiku-4-5" || value === "sonnet-4-5" || value === "opus-4-6";
 };
 
 /**

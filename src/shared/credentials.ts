@@ -7,7 +7,7 @@
 
 export type ProviderType = "anthropic" | "bedrock" | "vertex";
 
-export type ChatModelPreference = "sonnet-4-5" | "opus-4-6";
+export type ChatModelPreference = "haiku-4-5" | "sonnet-4-5" | "opus-4-6";
 
 export const DEFAULT_CHAT_MODEL: ChatModelPreference = "sonnet-4-5";
 

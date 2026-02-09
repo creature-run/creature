@@ -19,6 +19,11 @@ import {
  * Chat model IDs across providers.
  */
 export const MODEL_IDS: Record<ChatModelPreference, { anthropic: string; bedrock: string; vertex: string }> = {
+  "haiku-4-5": {
+    anthropic: "claude-haiku-4-5",
+    bedrock: "anthropic.claude-haiku-4-5-20250514-v1:0",
+    vertex: "claude-haiku-4-5@20250514",
+  },
   "sonnet-4-5": {
     anthropic: "claude-sonnet-4-5",
     bedrock: "anthropic.claude-sonnet-4-5-20250514-v1:0",

@@ -229,8 +229,11 @@ export function PipMcpContent({ pip, colors }: PipMcpContentProps) {
             },
             widgetState: restoredWidgetState || undefined,
             openContext: {
-              // Use "restore" for restored tabs, pop-back-in flows, and refreshes with state.
-              triggeredBy: pip.restored || restoredWidgetState
+              // Use "restore" for restored tabs, pop-back-in flows, and pip refreshes.
+              // A pip refresh (refreshVersion > 0) is semantically a restore — the SDK
+              // should set isReady immediately without waiting for a tool-result that
+              // may never come (or whose source was overwritten by a UI tool call).
+              triggeredBy: (pip.refreshVersion ?? 0) > 0 || pip.restored || restoredWidgetState
                 ? "restore"
                 : pip.triggeredByTool !== false
                   ? "tool"

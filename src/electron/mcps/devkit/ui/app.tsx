@@ -463,6 +463,90 @@ const LogRow = memo(({
 });
 
 /**
+ * Format a log entry as a single plain-text line for clipboard copy.
+ * Matches the DevConsole's copy format: [time] [source] [level] message
+ */
+const formatLogForCopy = (entry: LogEntry): string => {
+  const time = formatTimestamp(entry.timestamp);
+  const source = getSourceDisplay(entry);
+  return `[${time}] [${source}] [${entry.level}] ${entry.message}`;
+};
+
+/**
+ * Copy dropdown for logs, matching the DevConsole's options.
+ * Provides "Last 50", "Last 100", and "All" copy options.
+ * Dropdown closes on selection or when clicking outside.
+ */
+const CopyLogsDropdown = ({ logs }: { logs: LogEntry[] }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Close the dropdown when clicking outside of it.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [isOpen]);
+
+  /**
+   * Copy the specified number of log entries to clipboard.
+   * "all" copies every entry; a number copies the last N entries.
+   */
+  const handleCopy = useCallback(
+    ({ lineCount }: { lineCount: "all" | number }) => {
+      const entries = lineCount === "all" ? logs : logs.slice(-lineCount);
+      const text = entries.map(formatLogForCopy).join("\n");
+      navigator.clipboard.writeText(text);
+      setIsOpen(false);
+    },
+    [logs]
+  );
+
+  const options: { label: string; value: "all" | number }[] = [
+    { label: "Last 50", value: 50 },
+    { label: "Last 100", value: 100 },
+    { label: "All", value: "all" },
+  ];
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        className="inline-flex items-center gap-0.5 text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors cursor-pointer"
+      >
+        <span>Copy</span>
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 4.5L6 7.5L9 4.5" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div
+          className="absolute right-0 top-full mt-1 py-0.5 rounded-sm border border-bdr-secondary bg-bg-primary z-10"
+          style={{ minWidth: 80 }}
+        >
+          {options.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={(e) => { e.stopPropagation(); handleCopy({ lineCount: opt.value }); }}
+              className="block w-full text-left px-2.5 py-1 text-[11px] text-txt-secondary hover:bg-bg-secondary hover:text-txt-primary cursor-pointer transition-colors"
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
  * Log viewer with virtualized scrolling.
  * Preserves scroll position and expanded state across data refreshes.
  */
@@ -497,7 +581,11 @@ const LogsView = ({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <Toolbar onRefresh={onRefresh} isLoading={isLoading}>
+      <Toolbar
+        onRefresh={onRefresh}
+        isLoading={isLoading}
+        actions={logs.length > 0 ? <CopyLogsDropdown logs={logs} /> : undefined}
+      >
         <span>{data?.filter === "errors" ? "Errors only" : data?.filter === "current_mcp_app" && data?.mcpName ? `MCP: ${data.mcpName}` : "All logs"}</span>
       </Toolbar>
       <div ref={parentRef} className="flex-1 overflow-y-auto min-h-0 py-1">
@@ -1061,10 +1149,12 @@ const DevkitInner = () => {
 
   /**
    * Route incoming tool results to the correct tab's state.
-   * Works for both agent-initiated and UI-initiated tool calls.
+   * Only processes UI-initiated results -- agent tool calls are ignored
+   * so the agent cannot overwrite or disrupt the developer's view.
    */
   useEffect(() => {
     return onToolResult((result) => {
+      if (result.source === "agent") return;
       const data = result.structuredContent as unknown as DevkitData;
       if (!data || typeof data !== "object" || !("type" in data)) return;
 

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -33,6 +33,8 @@ interface UIResourceInfo {
   uri: string;
   name: string;
   icon?: ResourceIcon;
+  /** Whether this resource belongs to a dev MCP (the app being developed) */
+  _isDev?: boolean;
 }
 
 /**
@@ -152,6 +154,61 @@ export function SidebarLeft() {
       cleanupDisabled();
     };
   }, [hasProjectOpen]);
+
+  /**
+   * Tracks which project ID has had its dev MCP PIP auto-launched.
+   * Prevents duplicate launches on resource refreshes or re-renders.
+   */
+  const devMcpAutoLaunchedRef = useRef<string | null>(null);
+
+  /**
+   * Reset auto-launch tracking when leaving a project,
+   * so the PIP will auto-open again if the same project is re-opened.
+   */
+  useEffect(() => {
+    if (!hasProjectOpen) {
+      devMcpAutoLaunchedRef.current = null;
+    }
+  }, [hasProjectOpen]);
+
+  /**
+   * Auto-launch the dev MCP's PIP when a dev-mcp project opens.
+   * Triggers once per project after a short delay to let the UI settle.
+   *
+   * Guard: only fires when exactly one dev MCP resource exists. Built-in
+   * MCPs (ide, terminal, devkit) are excluded via the `_isDev` flag.
+   * If the project has multiple dev MCP resources, we skip entirely
+   * since we can't know which one the user wants foregrounded.
+   */
+  useEffect(() => {
+    if (session.project?.profile !== "dev-mcp") return;
+    if (devMcpAutoLaunchedRef.current === session.project.id) return;
+
+    const devResources = uiResources.filter((r) => r._isDev);
+    if (devResources.length !== 1) return;
+
+    devMcpAutoLaunchedRef.current = session.project.id;
+
+    const devResource = devResources[0];
+
+    const timer = setTimeout(() => {
+      if (!layout.isPipAreaVisible) {
+        togglePipArea();
+      }
+
+      window.electronAPI.mcp.launchResourcePip(devResource.serverName, devResource.uri)
+        .then((result) => {
+          if (result.success && result.instanceId) {
+            setActivePipId(result.instanceId);
+          }
+        })
+        .catch((error) => {
+          console.error("[Sidebar] Failed to auto-launch dev MCP pip:", error);
+        });
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [session.project?.profile, session.project?.id, uiResources, layout.isPipAreaVisible, togglePipArea, setActivePipId]);
 
   /**
    * Handle clicking a UI resource icon.

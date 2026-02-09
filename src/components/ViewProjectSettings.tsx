@@ -74,6 +74,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
   const [samplingAllowlist, setSamplingAllowlist] = useState<string[]>(
     session.project?.sampling?.allowlist || []
   );
+  const showSamplingOptions = false;
 
   // MCP state
   const [mcpServers, setMcpServers] = useState<MCPServerConfigForRenderer[]>([]);
@@ -459,82 +460,84 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
               </p>
             </div>
 
-            {/* Sampling Approvals */}
-            <div className="mb-10">
-              <Label>
-                <div className="flex items-center gap-2">
-                  <span>Sampling Approvals</span>
-                </div>
-              </Label>
-              <div className="mt-2 flex flex-col gap-3">
-                <div className="inline-flex w-fit rounded-md border border-border-primary overflow-hidden">
-                  {[
-                    { id: "allowlist", label: "Allowlist" },
-                    { id: "per_request", label: "Ask Every Time" },
-                    { id: "allow_all", label: "Allow All" },
-                  ].map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setSamplingMode(option.id as typeof samplingMode)}
-                      className={cn(
-                        "px-3 py-1.5 text-xs font-medium transition-colors",
-                        samplingMode === option.id
-                          ? "bg-background-tertiary text-text-primary"
-                          : "text-text-secondary hover:text-text-primary"
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-text-tertiary">
-                  {samplingMode === "allowlist" &&
-                    "First request from each MCP asks for approval. Approved servers are auto-allowlisted for this project."}
-                  {samplingMode === "per_request" &&
-                    "Every sampling request requires approval."}
-                  {samplingMode === "allow_all" &&
-                    "All sampling requests are approved automatically."}
-                </p>
-
-                {samplingMode === "allowlist" && (
-                  <div className="mt-2">
-                    {samplingAllowlist.length === 0 ? (
-                      <p className="text-sm text-text-secondary">No allowlisted servers yet.</p>
-                    ) : (
-                      <div className="rounded-md border border-border-primary">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="w-auto">Server</TableHead>
-                              <TableHead className="w-[120px] text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {samplingAllowlist.map((server) => (
-                              <TableRow key={server}>
-                                <TableCell className="font-medium">{server}</TableCell>
-                                <TableCell className="text-right">
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() =>
-                                      setSamplingAllowlist((prev) => prev.filter((name) => name !== server))
-                                    }
-                                  >
-                                    Remove
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
+            {showSamplingOptions && (
+              /* Sampling Approvals */
+              <div className="mb-10">
+                <Label>
+                  <div className="flex items-center gap-2">
+                    <span>Sampling Approvals</span>
                   </div>
-                )}
+                </Label>
+                <div className="mt-2 flex flex-col gap-3">
+                  <div className="inline-flex w-fit rounded-md border border-border-primary overflow-hidden">
+                    {[
+                      { id: "allowlist", label: "Allowlist" },
+                      { id: "per_request", label: "Ask Every Time" },
+                      { id: "allow_all", label: "Allow All" },
+                    ].map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setSamplingMode(option.id as typeof samplingMode)}
+                        className={cn(
+                          "px-3 py-1.5 text-xs font-medium transition-colors",
+                          samplingMode === option.id
+                            ? "bg-background-tertiary text-text-primary"
+                            : "text-text-secondary hover:text-text-primary"
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-text-tertiary">
+                    {samplingMode === "allowlist" &&
+                      "First request from each MCP asks for approval. Approved servers are auto-allowlisted for this project."}
+                    {samplingMode === "per_request" &&
+                      "Every sampling request requires approval."}
+                    {samplingMode === "allow_all" &&
+                      "All sampling requests are approved automatically."}
+                  </p>
+
+                  {samplingMode === "allowlist" && (
+                    <div className="mt-2">
+                      {samplingAllowlist.length === 0 ? (
+                        <p className="text-sm text-text-secondary">No allowlisted servers yet.</p>
+                      ) : (
+                        <div className="rounded-md border border-border-primary">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-auto">Server</TableHead>
+                                <TableHead className="w-[120px] text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {samplingAllowlist.map((server) => (
+                                <TableRow key={server}>
+                                  <TableCell className="font-medium">{server}</TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() =>
+                                        setSamplingAllowlist((prev) => prev.filter((name) => name !== server))
+                                      }
+                                    >
+                                      Remove
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* MCPs Section */}
             <div>
