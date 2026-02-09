@@ -337,6 +337,11 @@ const hasAppleCredentials = !!(
 );
 
 const buildIdentity = getBuildIdentity();
+const localDmgNameOverride = process.env.CREATURE_DMG_NAME?.trim();
+
+if (localDmgNameOverride) {
+  console.log(`[Forge] Using custom DMG name override: ${localDmgNameOverride}`);
+}
 
 if (hasAppleCredentials) {
   console.log('[Forge] Apple credentials detected - signing enabled');
@@ -417,6 +422,7 @@ const config: ForgeConfig = {
     }),
     new MakerZIP({}, ['darwin']),
     new MakerDMG({
+      ...(localDmgNameOverride ? { name: localDmgNameOverride } : {}),
       icon: path.join(__dirname, 'icons', 'icon.icns'),
       format: 'ULFO',
       background: path.join(__dirname, 'icons', 'dmg-background.png'),

@@ -2642,7 +2642,7 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
   // A brief settling delay (500ms) after initial startup avoids
   // reacting to the boot's "MCP server ready" (which has already
   // fired by the time createConnection reaches this point).
-  if (!app.isPackaged && spawnedProcess && actualTransportType === "streamable-http") {
+  if (spawnedProcess && actualTransportType === "streamable-http") {
     const storedName = canonicalName;
 
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
