@@ -37,7 +37,6 @@
   },
   "keywords": [],
   "author": "Serverless Inc",
-  "license": "MIT",
   "devDependencies": {
     "@babel/core": "^7.26.0",
     "@electron-forge/cli": "^7.10.2",
