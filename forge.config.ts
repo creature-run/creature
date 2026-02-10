@@ -110,6 +110,25 @@ const copyMcpUIs = (resourcesPath: string) => {
 };
 
 /**
+ * Copy the MCP app template to Resources/mcp-app-template/.
+ * This template is used by the dev-mcp project profile to scaffold
+ * new MCP App projects. Without it, project creation fails in packaged builds
+ * because findTemplatePath() looks for the template in process.resourcesPath.
+ */
+const copyMcpAppTemplate = (resourcesPath: string) => {
+  const srcDir = path.join(__dirname, 'templates', 'mcp-app');
+  const destDir = path.join(resourcesPath, 'mcp-app-template');
+
+  if (fs.existsSync(srcDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.cpSync(srcDir, destDir, { recursive: true });
+    console.log('[Forge] Copied MCP app template to resources');
+  } else {
+    console.warn(`[Forge] Warning: MCP app template not found at ${srcDir}`);
+  }
+};
+
+/**
  * Copy the standalone Node.js binary to Resources/bin/.
  * 
  * We bundle a real Node.js binary (not Electron) to avoid macOS showing
@@ -318,6 +337,11 @@ const hasAppleCredentials = !!(
 );
 
 const buildIdentity = getBuildIdentity();
+const localDmgNameOverride = process.env.CREATURE_DMG_NAME?.trim();
+
+if (localDmgNameOverride) {
+  console.log(`[Forge] Using custom DMG name override: ${localDmgNameOverride}`);
+}
 
 if (hasAppleCredentials) {
   console.log('[Forge] Apple credentials detected - signing enabled');
@@ -381,6 +405,7 @@ const config: ForgeConfig = {
       copyNodeBinary(resourcesPath);
       copyBundledNpm(resourcesPath);
       copyMcpUIs(resourcesPath);
+      copyMcpAppTemplate(resourcesPath);
       copyNativeDeps(resourcesPath);
       generateAppUpdateConfig(resourcesPath);
       
@@ -397,6 +422,7 @@ const config: ForgeConfig = {
     }),
     new MakerZIP({}, ['darwin']),
     new MakerDMG({
+      ...(localDmgNameOverride ? { name: localDmgNameOverride } : {}),
       icon: path.join(__dirname, 'icons', 'icon.icns'),
       format: 'ULFO',
       background: path.join(__dirname, 'icons', 'dmg-background.png'),
