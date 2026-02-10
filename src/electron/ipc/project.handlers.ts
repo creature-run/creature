@@ -31,6 +31,7 @@ import {
   type ProjectWithValidation,
 } from "../storage/projectStore";
 import type { SamplingSettings } from "../storage/projectSettings";
+import { validateCommandLineString, validateNodeBasedLaunch } from "../../shared/mcpCommandPolicy";
 
 // Re-export types for use by other modules
 export type { ProjectProfile, ProjectContext, ProjectMcpConfig, ProjectWithValidation };
@@ -219,6 +220,34 @@ interface UpdateProjectRequest {
   sampling?: SamplingSettings;
 }
 
+const validateNodeBasedMcpConfigs = (mcps?: ProjectMcpConfig[]): void => {
+  if (!mcps) return;
+
+  for (const mcp of mcps) {
+    if (mcp.command?.trim()) {
+      validateNodeBasedLaunch({
+        command: mcp.command,
+        args: mcp.args,
+        context: `MCP "${mcp.name}" command`,
+      });
+    }
+
+    if (mcp.git?.setupCommand?.trim()) {
+      validateCommandLineString({
+        commandLine: mcp.git.setupCommand,
+        context: `MCP "${mcp.name}" Git setup command`,
+      });
+    }
+
+    if (mcp.git?.startCommand?.trim()) {
+      validateCommandLineString({
+        commandLine: mcp.git.startCommand,
+        context: `MCP "${mcp.name}" Git start command`,
+      });
+    }
+  }
+};
+
 /**
  * Register project-related IPC handlers.
  */
@@ -272,6 +301,8 @@ export const registerProjectHandlers = () => {
    */
   ipcMain.handle("project:create", async (_, request: CreateProjectRequest) => {
     try {
+      validateNodeBasedMcpConfigs(request.mcps);
+
       const project = await createProject({
         name: request.name,
         profile: request.profile,
@@ -301,6 +332,8 @@ export const registerProjectHandlers = () => {
     "project:update",
     async (_, { projectId, ...updates }: { projectId: string } & UpdateProjectRequest) => {
       try {
+        validateNodeBasedMcpConfigs(updates.mcps);
+
         const project = await updateProject(projectId, updates);
 
         if (!project) {

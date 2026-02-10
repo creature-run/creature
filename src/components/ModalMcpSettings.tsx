@@ -13,6 +13,7 @@ import {
 } from "./DropdownMenu";
 import { useApp } from "../contexts/AppContext";
 import type { MCPServerConfigForRenderer } from "../electron/preload";
+import { validateNodeBasedLaunch } from "../shared/mcpCommandPolicy";
 
 type MCPTransportType = "stdio" | "streamable-http";
 
@@ -34,6 +35,18 @@ interface HeaderVar {
 interface ModalMcpSettingsProps {
   onClose: () => void;
 }
+
+const argsInputToArray = (value: string): string[] => {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter((a) => a);
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return String(error);
+};
 
 /**
  * View mode for the modal.
@@ -735,6 +748,18 @@ function ServerEditForm({ server, isNew, existingNames, onSave, onCancel }: Serv
           return;
         }
 
+        const parsedArgs = argsInputToArray(args);
+        try {
+          validateNodeBasedLaunch({
+            command: command.trim(),
+            args: parsedArgs,
+            context: "Local MCP command",
+          });
+        } catch (validationError) {
+          setError(getErrorMessage(validationError));
+          return;
+        }
+
         const envObj: Record<string, string> = {};
         for (const { key, value } of envVars) {
           if (key.trim()) {
@@ -746,10 +771,7 @@ function ServerEditForm({ server, isNew, existingNames, onSave, onCancel }: Serv
           name: name.trim(),
           transport: "stdio",
           command: command.trim(),
-          args: args
-            .trim()
-            .split(/\s+/)
-            .filter((a) => a),
+          args: parsedArgs,
           cwd: cwd.trim() || undefined,
           env: Object.keys(envObj).length > 0 ? envObj : undefined,
           builtin: false,
@@ -1264,4 +1286,3 @@ function CreateMcpForm({ existingNames, onComplete, onCancel }: CreateMcpFormPro
     </div>
   );
 }
-

@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { cn } from "../lib/utils";
 import { toast } from "sonner";
 import type { MCPServerConfigForRenderer } from "../electron/preload";
+import { validateCommandLineString, validateNodeBasedLaunch } from "../shared/mcpCommandPolicy";
 
 interface ViewProjectSettingsProps {
   onClose: () => void;
@@ -50,6 +51,15 @@ const formatGitDescription = (git: { url: string; ref?: string; subdir?: string 
     description += `/${normalized}`;
   }
   return description;
+};
+
+const argsInputToArray = (value: string): string[] => {
+  return value.trim() ? value.trim().split(/\s+/) : [];
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return String(error);
 };
 
 /**
@@ -238,10 +248,14 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
         // Connect newly added MCPs (pass config for custom MCPs)
         for (const mcp of mcpsToConnect) {
           try {
-            await window.electronAPI.mcp.restart(mcp.name, mcp);
+            const restartResult = await window.electronAPI.mcp.restart(mcp.name, mcp);
+            if (!restartResult.success) {
+              console.error(`Failed to connect MCP ${mcp.name}:`, restartResult.error);
+              toast.error(restartResult.error || `Failed to connect ${mcp.name}`);
+            }
           } catch (error) {
             console.error(`Failed to connect MCP ${mcp.name}:`, error);
-            toast.error(`Failed to connect ${mcp.name}`);
+            toast.error(getErrorMessage(error));
           }
         }
 
@@ -254,7 +268,7 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
         toast.error(result.error || "Failed to save settings");
       }
     } catch (error) {
-      toast.error("Failed to save settings");
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSaving(false);
     }
@@ -911,6 +925,8 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = () => {
+    setError(null);
+
     if (!name.trim()) {
       setError("Name is required");
       return;
@@ -926,6 +942,19 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
       return;
     }
 
+    if (source === "stdio") {
+      try {
+        validateNodeBasedLaunch({
+          command: command.trim(),
+          args: argsInputToArray(args),
+          context: "Local transport command",
+        });
+      } catch (validationError) {
+        setError(getErrorMessage(validationError));
+        return;
+      }
+    }
+
     if (source === "streamable-http" && !url.trim()) {
       setError("URL is required for HTTP transport");
       return;
@@ -939,6 +968,30 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
     if (source === "git" && gitTransport === "stdio" && !gitStartCommand.trim()) {
       setError("Start command is required for stdio Git MCPs");
       return;
+    }
+
+    if (source === "git" && gitSetupCommand.trim()) {
+      try {
+        validateCommandLineString({
+          commandLine: gitSetupCommand.trim(),
+          context: "Git setup command",
+        });
+      } catch (validationError) {
+        setError(getErrorMessage(validationError));
+        return;
+      }
+    }
+
+    if (source === "git" && gitStartCommand.trim()) {
+      try {
+        validateCommandLineString({
+          commandLine: gitStartCommand.trim(),
+          context: "Git start command",
+        });
+      } catch (validationError) {
+        setError(getErrorMessage(validationError));
+        return;
+      }
     }
 
     const envObj: Record<string, string> = {};
@@ -975,7 +1028,7 @@ function CustomMcpFormInline({ existingNames, onSave, onCancel }: CustomMcpFormI
       };
     } else if (source === "stdio") {
       config.command = command.trim();
-      config.args = args.trim() ? args.trim().split(/\s+/) : [];
+      config.args = argsInputToArray(args);
       if (Object.keys(envObj).length > 0) {
         config.env = envObj;
       }
@@ -1316,6 +1369,8 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = () => {
+    setError(null);
+
     if (!name.trim()) {
       setError("Name is required");
       return;
@@ -1331,6 +1386,19 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
       return;
     }
 
+    if (source === "stdio") {
+      try {
+        validateNodeBasedLaunch({
+          command: command.trim(),
+          args: argsInputToArray(args),
+          context: "Local transport command",
+        });
+      } catch (validationError) {
+        setError(getErrorMessage(validationError));
+        return;
+      }
+    }
+
     if (source === "streamable-http" && !url.trim()) {
       setError("URL is required for HTTP transport");
       return;
@@ -1344,6 +1412,30 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
     if (source === "git" && gitTransport === "stdio" && !gitStartCommand.trim()) {
       setError("Start command is required for stdio Git MCPs");
       return;
+    }
+
+    if (source === "git" && gitSetupCommand.trim()) {
+      try {
+        validateCommandLineString({
+          commandLine: gitSetupCommand.trim(),
+          context: "Git setup command",
+        });
+      } catch (validationError) {
+        setError(getErrorMessage(validationError));
+        return;
+      }
+    }
+
+    if (source === "git" && gitStartCommand.trim()) {
+      try {
+        validateCommandLineString({
+          commandLine: gitStartCommand.trim(),
+          context: "Git start command",
+        });
+      } catch (validationError) {
+        setError(getErrorMessage(validationError));
+        return;
+      }
     }
 
     const envObj: Record<string, string> = {};
@@ -1380,7 +1472,7 @@ function CustomMcpForm({ mcp, existingNames, onSave, onCancel }: CustomMcpFormPr
       };
     } else if (source === "stdio") {
       config.command = command.trim();
-      config.args = args.trim() ? args.trim().split(/\s+/) : [];
+      config.args = argsInputToArray(args);
       if (Object.keys(envObj).length > 0) {
         config.env = envObj;
       }

@@ -52,6 +52,7 @@ import type {
   LanguageModelV3ToolResultOutput,
   SharedV3ProviderOptions,
 } from "@ai-sdk/provider";
+import { validateCommandLineString, validateNodeBasedLaunch } from "../../shared/mcpCommandPolicy";
 
 // =============================================================================
 // Storage Request Schemas (for server→client RPC)
@@ -928,64 +929,6 @@ const isMcpAppPackage = (pkg: PackageJson | null): boolean => {
   );
 };
 
-const splitCommandLine = (input: string): string[] => {
-  const result: string[] = [];
-  let current = "";
-  let quote: "'" | "\"" | null = null;
-  let escape = false;
-
-  for (const char of input.trim()) {
-    if (escape) {
-      current += char;
-      escape = false;
-      continue;
-    }
-
-    if (char === "\\" && quote !== "'") {
-      escape = true;
-      continue;
-    }
-
-    if (quote) {
-      if (char === quote) {
-        quote = null;
-      } else {
-        current += char;
-      }
-      continue;
-    }
-
-    if (char === "'" || char === "\"") {
-      quote = char;
-      continue;
-    }
-
-    if (/\s/.test(char)) {
-      if (current) {
-        result.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current) {
-    result.push(current);
-  }
-
-  return result;
-};
-
-const parseCommandLine = (input: string): { command: string; args: string[] } => {
-  const parts = splitCommandLine(input);
-  if (parts.length === 0) {
-    throw new Error("Command is empty.");
-  }
-  return { command: parts[0], args: parts.slice(1) };
-};
-
 const runGitCommand = async ({
   args,
   cwd,
@@ -1033,7 +976,10 @@ const runSetupCommand = async ({
   commandLine: string;
   cwd: string;
 }): Promise<void> => {
-  const { command, args } = parseCommandLine(commandLine);
+  const { command, args } = validateCommandLineString({
+    commandLine,
+    context: "Git setup command",
+  });
   const resolved = resolveBundledCommand(command, args);
 
   return new Promise((resolve, reject) => {
@@ -1465,6 +1411,11 @@ const resolveRegistryPackage = async (
     const args = distribution.args
       ? [distribution.package, ...distribution.args]
       : ["-y", distribution.package];
+    validateNodeBasedLaunch({
+      command,
+      args,
+      context: `Registry package "${name}"`,
+    });
     return {
       type: "npm",
       command,
@@ -1707,6 +1658,12 @@ const spawnHttpServerProcess = async (
     throw new Error(`MCP server directory not found: ${cwd}`);
   }
 
+  validateNodeBasedLaunch({
+    command,
+    args,
+    context: `MCP "${serverName}" local HTTP command`,
+  });
+
   const env: Record<string, string> = {
     ...process.env,
     NODE_ENV: "production",
@@ -1942,6 +1899,12 @@ const createStdioTransport = async (
   // Default command/args for development
   let finalCommand = resolvedCommand || "npx";
   let finalArgs = resolvedArgs?.length ? resolvedArgs : ["tsx", "src/server.ts"];
+
+  validateNodeBasedLaunch({
+    command: finalCommand,
+    args: finalArgs,
+    context: `MCP "${serverName}" stdio command`,
+  });
 
   // Build environment - default NODE_ENV=production but allow config.env to override.
   // Development MCPs explicitly set NODE_ENV=development in their config.
@@ -2209,6 +2172,13 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     const gitTransport: MCPTransportType = config.git.transport ?? "streamable-http";
 
     if (setupCommand) {
+      validateCommandLineString({
+        commandLine: setupCommand,
+        context: `MCP "${serverName}" Git setup command`,
+      });
+    }
+
+    if (setupCommand) {
       const markerPath = getGitSetupMarkerPath(repoDir);
       if (!fs.existsSync(markerPath)) {
         await runSetupCommand({ commandLine: setupCommand, cwd: appDir });
@@ -2223,7 +2193,10 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
     let nodeEnv: string | undefined;
 
     if (startCommand) {
-      const parsed = parseCommandLine(startCommand);
+      const parsed = validateCommandLineString({
+        commandLine: startCommand,
+        context: `MCP "${serverName}" Git start command`,
+      });
       runCommand = parsed.command;
       runArgs = parsed.args;
     } else {
@@ -2235,6 +2208,12 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       runArgs = detected.args;
       nodeEnv = detected.nodeEnv;
     }
+
+    validateNodeBasedLaunch({
+      command: runCommand,
+      args: runArgs,
+      context: `MCP "${serverName}" Git run command`,
+    });
 
     const env: Record<string, string> = {
       ...config.env,

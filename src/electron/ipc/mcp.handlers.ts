@@ -13,6 +13,7 @@ import { launchResourcePip } from "../mcp/controlPlane";
 import { findWorkspaceRoot } from "../utils/workspace";
 import { buildSpawnEnv, resolveBundledCommand } from "../utils/env";
 import * as telemetry from "../telemetry";
+import { validateCommandLineString, validateNodeBasedLaunch } from "../../shared/mcpCommandPolicy";
 
 /**
  * Find the path to the MCP app skeleton template directory.
@@ -68,6 +69,37 @@ const isWithinWorkspace = (targetPath: string): boolean => {
   } catch {}
 
   return false;
+};
+
+const validateNodeBasedMcpConfig = (config?: {
+  name: string;
+  command?: string;
+  args?: string[];
+  git?: { setupCommand?: string; startCommand?: string };
+}): void => {
+  if (!config) return;
+
+  if (config.command?.trim()) {
+    validateNodeBasedLaunch({
+      command: config.command,
+      args: config.args,
+      context: `MCP "${config.name}" command`,
+    });
+  }
+
+  if (config.git?.setupCommand?.trim()) {
+    validateCommandLineString({
+      commandLine: config.git.setupCommand,
+      context: `MCP "${config.name}" Git setup command`,
+    });
+  }
+
+  if (config.git?.startCommand?.trim()) {
+    validateCommandLineString({
+      commandLine: config.git.startCommand,
+      context: `MCP "${config.name}" Git start command`,
+    });
+  }
 };
 
 /**
@@ -347,6 +379,8 @@ export const registerMcpHandlers = () => {
     };
   }) => {
     try {
+      validateNodeBasedMcpConfig(config);
+
       await restartMcp({ name, config });
 
       // Track MCP restart
