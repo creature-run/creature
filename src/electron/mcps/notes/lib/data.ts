@@ -93,20 +93,31 @@ class KvStore<T> implements DataStore<T> {
 
   async list(): Promise<T[]> {
     const prefix = this.scopePrefix();
-
-    // Use listWithValues to fetch all data in a single RPC call
-    // This avoids N+1 queries when listing many items
-    const entries = await exp.kvListWithValues(prefix);
-    if (!entries) return [];
-
     const results: T[] = [];
-    for (const { value } of entries) {
-      try {
-        results.push(JSON.parse(value) as T);
-      } catch {
-        // Skip invalid entries
+    let cursor: string | undefined;
+
+    while (true) {
+      const page = await exp.kvListWithValues({
+        prefix,
+        cursor,
+        limit: 100,
+      });
+      if (!page) return results;
+
+      for (const { value } of page.entries) {
+        try {
+          results.push(JSON.parse(value) as T);
+        } catch {
+          // Skip invalid entries
+        }
       }
+
+      if (!page.nextCursor) {
+        break;
+      }
+      cursor = page.nextCursor;
     }
+
     return results;
   }
 

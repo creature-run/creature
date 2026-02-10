@@ -23,6 +23,16 @@ export interface SearchResult<T> {
   score?: number;
 }
 
+export interface ListPageOptions {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ListPageResult<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
 /**
  * Generic data store interface for CRUD operations.
  *
@@ -34,6 +44,7 @@ export interface DataStore<T> {
   set(id: string, value: T): Promise<void>;
   delete(id: string): Promise<boolean>;
   list(): Promise<T[]>;
+  listPage(options?: ListPageOptions): Promise<ListPageResult<T>>;
   /**
    * Full-text search across stored items.
    * Returns items that match the query, with optional snippets and relevance scores.
@@ -95,22 +106,43 @@ class KvStore<T> implements DataStore<T> {
     return exp.kvDelete(this.scopedKey(id));
   }
 
-  async list(): Promise<T[]> {
+  async listPage(options: ListPageOptions = {}): Promise<ListPageResult<T>> {
     const prefix = this.scopePrefix();
-    
-    // Use listWithValues to fetch all data in a single RPC call
-    // This avoids N+1 queries when listing many items
-    const entries = await exp.kvListWithValues(prefix);
-    if (!entries) return [];
+    const page = await exp.kvListWithValues({
+      prefix,
+      cursor: options.cursor,
+      limit: options.limit,
+    });
+    if (!page) {
+      return { items: [], nextCursor: null };
+    }
 
-    const results: T[] = [];
-    for (const { value } of entries) {
+    const items: T[] = [];
+    for (const { value } of page.entries) {
       try {
-        results.push(JSON.parse(value) as T);
+        items.push(JSON.parse(value) as T);
       } catch {
         // Skip invalid entries
       }
     }
+
+    return {
+      items,
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  async list(): Promise<T[]> {
+    const results: T[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const page = await this.listPage({ cursor, limit: 100 });
+      results.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+
     return results;
   }
 
@@ -139,11 +171,24 @@ class KvStore<T> implements DataStore<T> {
 
   async clear(): Promise<void> {
     const prefix = this.scopePrefix();
-    const keys = await exp.kvList(prefix);
-    if (!keys) return;
+    let cursor: string | undefined;
 
-    for (const key of keys) {
-      await exp.kvDelete(key);
+    while (true) {
+      const page = await exp.kvList({
+        prefix,
+        cursor,
+        limit: 100,
+      });
+      if (!page) return;
+
+      for (const key of page.keys) {
+        await exp.kvDelete(key);
+      }
+
+      if (!page.nextCursor) {
+        break;
+      }
+      cursor = page.nextCursor;
     }
   }
 }
@@ -203,14 +248,45 @@ class InMemoryStore<T> implements DataStore<T> {
     return sharedInMemoryData.delete(this.scopedKey(id));
   }
 
-  async list() {
+  async listPage(options: ListPageOptions = {}): Promise<ListPageResult<T>> {
     const prefix = this.scopePrefix();
-    const results: T[] = [];
-    for (const [key, value] of sharedInMemoryData) {
-      if (key.startsWith(prefix)) {
-        results.push(value as T);
+    const limit = options.limit ?? 100;
+    const entries = [...sharedInMemoryData.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    let startIndex = 0;
+    if (options.cursor) {
+      startIndex = entries.findIndex(([key]) => key > options.cursor);
+      if (startIndex === -1) {
+        return { items: [], nextCursor: null };
       }
     }
+
+    const pageEntries = entries.slice(startIndex, startIndex + limit);
+    const items = pageEntries.map(([, value]) => value as T);
+    const hasMore = startIndex + pageEntries.length < entries.length;
+    const nextCursor = hasMore && pageEntries.length > 0
+      ? pageEntries[pageEntries.length - 1]?.[0] ?? null
+      : null;
+
+    return {
+      items,
+      nextCursor,
+    };
+  }
+
+  async list() {
+    const results: T[] = [];
+
+    let cursor: string | undefined;
+    while (true) {
+      const page = await this.listPage({ cursor, limit: 100 });
+      results.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+
     return results;
   }
 

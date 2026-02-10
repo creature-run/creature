@@ -52,6 +52,8 @@ const MAX_BLOB_SIZE = 10 * 1024 * 1024;
 
 /** Maximum key length */
 const MAX_KEY_LENGTH = 256;
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 1000;
 
 // =============================================================================
 // Method Names
@@ -92,10 +94,14 @@ const KvDeleteSchema = z.object({
 
 const KvListSchema = z.object({
   prefix: z.string().max(MAX_KEY_LENGTH).optional(),
+  cursor: z.string().max(MAX_KEY_LENGTH).optional(),
+  limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional(),
 });
 
 const KvListWithValuesSchema = z.object({
   prefix: z.string().max(MAX_KEY_LENGTH).optional(),
+  cursor: z.string().max(MAX_KEY_LENGTH).optional(),
+  limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional(),
 });
 
 const KvSearchSchema = z.object({
@@ -136,6 +142,8 @@ const BlobDeleteSchema = z.object({
 
 const BlobListSchema = z.object({
   prefix: z.string().max(MAX_KEY_LENGTH).optional(),
+  cursor: z.string().max(MAX_KEY_LENGTH).optional(),
+  limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional(),
 });
 
 // =============================================================================
@@ -185,6 +193,13 @@ const getStorageDirForServer = (serverName: string): string => {
  */
 const getBlobsDir = (storageDir: string): string => {
   return path.join(storageDir, "blobs");
+};
+
+const normalizeListLimit = (limit?: number): number => {
+  if (!Number.isInteger(limit)) {
+    return DEFAULT_LIST_LIMIT;
+  }
+  return Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
 };
 
 // =============================================================================
@@ -239,12 +254,16 @@ export const handleKvDelete = async (
 export const handleKvList = async (
   serverName: string,
   params: unknown
-): Promise<{ keys: string[] }> => {
-  const { prefix } = KvListSchema.parse(params);
+): Promise<{ keys: string[]; nextCursor: string | null }> => {
+  const { prefix, cursor, limit } = KvListSchema.parse(params);
   const storageDir = getStorageDirForServer(serverName);
   const sanitizedPrefix = prefix ? sanitizeKey(prefix) : undefined;
-  const keys = await kvList(storageDir, sanitizedPrefix);
-  return { keys };
+  const sanitizedCursor = cursor ? sanitizeKey(cursor) : undefined;
+  return kvList(storageDir, {
+    prefix: sanitizedPrefix,
+    cursor: sanitizedCursor,
+    limit,
+  });
 };
 
 /**
@@ -254,12 +273,16 @@ export const handleKvList = async (
 export const handleKvListWithValues = async (
   serverName: string,
   params: unknown
-): Promise<{ entries: Array<{ key: string; value: string }> }> => {
-  const { prefix } = KvListWithValuesSchema.parse(params);
+): Promise<{ entries: Array<{ key: string; value: string }>; nextCursor: string | null }> => {
+  const { prefix, cursor, limit } = KvListWithValuesSchema.parse(params);
   const storageDir = getStorageDirForServer(serverName);
   const sanitizedPrefix = prefix ? sanitizeKey(prefix) : undefined;
-  const entries = await kvListWithValues(storageDir, sanitizedPrefix);
-  return { entries };
+  const sanitizedCursor = cursor ? sanitizeKey(cursor) : undefined;
+  return kvListWithValues(storageDir, {
+    prefix: sanitizedPrefix,
+    cursor: sanitizedCursor,
+    limit,
+  });
 };
 
 /**
@@ -431,11 +454,14 @@ export const handleBlobDelete = async (
 export const handleBlobList = async (
   serverName: string,
   params: unknown
-): Promise<{ names: string[] }> => {
-  const { prefix } = BlobListSchema.parse(params);
+): Promise<{ names: string[]; nextCursor: string | null }> => {
+  const { prefix, cursor, limit } = BlobListSchema.parse(params);
 
   const storageDir = getStorageDirForServer(serverName);
   const blobsDir = getBlobsDir(storageDir);
+  const listLimit = normalizeListLimit(limit);
+  const sanitizedPrefix = prefix ? sanitizeKey(prefix) : undefined;
+  const sanitizedCursor = cursor ? sanitizeKey(cursor) : undefined;
 
   try {
     const entries = await fsPromises.readdir(blobsDir, { recursive: true });
@@ -443,15 +469,25 @@ export const handleBlobList = async (
       .filter((e) => typeof e === "string" && !e.endsWith(".meta.json"))
       .map((e) => (typeof e === "string" ? e : String(e)));
 
-    if (prefix) {
-      const sanitizedPrefix = sanitizeKey(prefix);
+    if (sanitizedPrefix) {
       names = names.filter((n) => n.startsWith(sanitizedPrefix));
     }
+    if (sanitizedCursor) {
+      names = names.filter((n) => n > sanitizedCursor);
+    }
 
-    return { names };
+    names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const page = names.slice(0, listLimit + 1);
+    const hasMore = page.length > listLimit;
+    const pagedNames = hasMore ? page.slice(0, listLimit) : page;
+
+    return {
+      names: pagedNames,
+      nextCursor: hasMore ? pagedNames[pagedNames.length - 1] ?? null : null,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { names: [] };
+      return { names: [], nextCursor: null };
     }
     throw error;
   }
@@ -527,6 +563,11 @@ export const CREATURE_STORAGE_CAPABILITIES = {
       provider: "openai",
       maxTextLength: 20000,
       maxResults: 100,
+    },
+    pagination: {
+      defaultLimit: DEFAULT_LIST_LIMIT,
+      maxLimit: MAX_LIST_LIMIT,
+      cursor: "lexicographic",
     },
   },
 };

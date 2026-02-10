@@ -90,12 +90,20 @@ const StorageKvDeleteRequestSchema = createStorageRequestSchema(
 
 const StorageKvListRequestSchema = createStorageRequestSchema(
   STORAGE_METHODS.KV_LIST,
-  z.object({ prefix: z.string().optional() })
+  z.object({
+    prefix: z.string().optional(),
+    cursor: z.string().optional(),
+    limit: z.number().int().optional(),
+  })
 );
 
 const StorageKvListWithValuesRequestSchema = createStorageRequestSchema(
   STORAGE_METHODS.KV_LIST_WITH_VALUES,
-  z.object({ prefix: z.string().optional() })
+  z.object({
+    prefix: z.string().optional(),
+    cursor: z.string().optional(),
+    limit: z.number().int().optional(),
+  })
 );
 
 const StorageKvSearchRequestSchema = createStorageRequestSchema(
@@ -154,7 +162,11 @@ const StorageBlobDeleteRequestSchema = createStorageRequestSchema(
 
 const StorageBlobListRequestSchema = createStorageRequestSchema(
   STORAGE_METHODS.BLOB_LIST,
-  z.object({ prefix: z.string().optional() })
+  z.object({
+    prefix: z.string().optional(),
+    cursor: z.string().optional(),
+    limit: z.number().int().optional(),
+  })
 );
 
 /**

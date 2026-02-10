@@ -421,8 +421,8 @@ import { exp } from "open-mcp-app/server";
 await exp.kvSet("items:123", JSON.stringify(item));
 const data = await exp.kvGet("items:123");
 await exp.kvDelete("items:123");
-const keys = await exp.kvList("items:");
-const pairs = await exp.kvListWithValues("items:");  // [{key, value}] — more efficient than kvList + kvGet
+const keysPage = await exp.kvList({ prefix: "items:", limit: 100 });  // { keys, nextCursor }
+const pairsPage = await exp.kvListWithValues({ prefix: "items:", limit: 100 });  // { entries, nextCursor }
 
 if (exp.kvIsAvailable()) { /* persistent */ } else { /* in-memory fallback */ }
 \`\`\`
@@ -439,8 +439,8 @@ let initialized = false;
 async function ensureDefaults() {
   if (initialized) return;
   initialized = true;
-  const existing = await exp.kvList("items:");
-  if (!existing || existing.length === 0) {
+  const existing = await exp.kvList({ prefix: "items:", limit: 1 });
+  if (!existing || existing.keys.length === 0) {
     await exp.kvSet("items:1", JSON.stringify(defaultItem));
   }
 }
@@ -463,7 +463,7 @@ if (await exp.exists("data/export.json")) { /* file exists */ }
 await exp.blobPut("images/photo.png", imageBuffer, "image/png");
 const blob = await exp.blobGet("images/photo.png");  // { data: Buffer, mimeType: string }
 await exp.blobDelete("images/photo.png");
-const blobs = await exp.blobList("images/");
+const blobsPage = await exp.blobList({ prefix: "images/", limit: 100 });  // { names, nextCursor }
 
 if (exp.blobIsAvailable()) { /* persistent */ } else { /* unavailable */ }
 \`\`\`

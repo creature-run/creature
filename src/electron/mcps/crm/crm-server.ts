@@ -32,12 +32,13 @@ const app = createApp({
   instructions: `CRM data explorer with customers, orders, and line items.
 
 Tools:
-- crm_list { query?, status?, sortField?, sortDirection?, page, pageSize }: List customers with filtering and pagination
+- crm_list { query?, status?, sortField?, sortDirection?, cursor?, page, pageSize }: List customers. Uses cursor pagination for default browsing (createdAt asc) and offset pagination for filtered/sorted views.
 - crm_customer_get { customerId }: Get customer details with order history
 - crm_customer_create { name, email, company, status? }: Create a new customer
 - crm_order_create { customerId, items: [{ sku, title, qty, unitPriceCents }] }: Create an order
 - crm_seed: Generate ~25 customers with ~75 orders of demo data
 - crm_reset { confirm: true }: Clear all CRM data
+- crm_storage_pagination_validate { collection?, limit? }: Validate KV cursor pagination across CRM collections
 
 Use crm_seed first to populate with demo data. The UI shows a sortable customer table with search, filters, and a detail panel for viewing orders.
 

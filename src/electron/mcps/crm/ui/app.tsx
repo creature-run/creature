@@ -77,10 +77,13 @@ interface LineItem {
 }
 
 interface Pagination {
+  mode: "cursor" | "offset";
   page: number;
   pageSize: number;
-  total: number;
-  totalPages: number;
+  total: number | null;
+  totalPages: number | null;
+  cursor: string | null;
+  nextCursor: string | null;
 }
 
 interface SortConfig {
@@ -99,8 +102,8 @@ interface ListData {
   filters: Filters;
   sort: SortConfig;
   summary: {
-    totalCustomers: number;
-    totalOrders: number;
+    totalCustomers: number | null;
+    totalOrders: number | null;
   };
 }
 
@@ -116,8 +119,8 @@ interface CustomerDetailData {
 
 interface WidgetState {
   modelContent: {
-    totalCustomers: number;
-    totalOrders: number;
+    totalCustomers: number | null;
+    totalOrders: number | null;
     selectedCustomerId?: string;
   };
   privateContent: {
@@ -126,6 +129,7 @@ interface WidgetState {
     filters: Filters;
     sort: SortConfig;
     page: number;
+    cursors: Array<string | null>;
   };
 }
 
@@ -280,33 +284,49 @@ function SortableHeader({
  */
 function PaginationControls({
   pagination,
-  onPageChange,
+  visibleCount,
+  canPrevious,
+  canNext,
+  onPrevious,
+  onNext,
 }: {
   pagination: Pagination;
-  onPageChange: (page: number) => void;
+  visibleCount: number;
+  canPrevious: boolean;
+  canNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
 }) {
   const { page, totalPages, total } = pagination;
+  const pageLabel =
+    totalPages === null
+      ? `Page ${page}`
+      : `${page} / ${totalPages}`;
+  const totalLabel =
+    total === null
+      ? `${visibleCount} shown`
+      : `${total} total`;
 
   return (
     <div className="flex items-center justify-between py-2.5 px-4 border-t border-bdr-secondary bg-bg-secondary shrink-0">
       <span className="text-txt-secondary text-sm">
-        {total} total
+        {totalLabel}
       </span>
       <div className="flex items-center gap-2">
         <button
-          disabled={page <= 1}
-          onClick={() => onPageChange(page - 1)}
+          disabled={!canPrevious}
+          onClick={onPrevious}
           title="Previous page"
           className="flex items-center justify-center w-7 h-7 bg-bg-primary border border-bdr-secondary rounded-sm text-txt-primary cursor-pointer hover:border-ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <CaretLeft size={16} />
         </button>
         <span className="text-sm text-txt-secondary min-w-[60px] text-center">
-          {page} / {totalPages}
+          {pageLabel}
         </span>
         <button
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
+          disabled={!canNext}
+          onClick={onNext}
           title="Next page"
           className="flex items-center justify-center w-7 h-7 bg-bg-primary border border-bdr-secondary rounded-sm text-txt-primary cursor-pointer hover:border-ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
         >
@@ -555,8 +575,9 @@ function CrmApp() {
   const [customerDetail, setCustomerDetail] = useState<CustomerDetailData | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>();
   const [filters, setFilters] = useState<Filters>({});
-  const [sort, setSort] = useState<SortConfig>({ field: "createdAt", direction: "desc" });
+  const [sort, setSort] = useState<SortConfig>({ field: "createdAt", direction: "asc" });
   const [page, setPage] = useState(1);
+  const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [isSeeding, setIsSeeding] = useState(false);
   const hasInitiallyFetched = useRef(false);
 
@@ -574,14 +595,29 @@ function CrmApp() {
   // Restore state from widget state
   useEffect(() => {
     if (widgetState?.privateContent) {
-      const { listData: savedList, customerDetail: savedDetail, filters: savedFilters, sort: savedSort, page: savedPage } = widgetState.privateContent;
+      const {
+        listData: savedList,
+        customerDetail: savedDetail,
+        filters: savedFilters,
+        sort: savedSort,
+        page: savedPage,
+        cursors: savedCursors,
+      } = widgetState.privateContent;
       if (savedList) setListData(savedList);
       if (savedDetail) setCustomerDetail(savedDetail);
       if (savedFilters) setFilters(savedFilters);
       if (savedSort) setSort(savedSort);
-      if (savedPage) setPage(savedPage);
+      if (savedCursors?.length) {
+        setCursors(savedCursors);
+        if (savedPage && savedPage <= savedCursors.length) setPage(savedPage);
+      } else {
+        setCursors([null]);
+        setPage(1);
+      }
     }
   }, []);
+
+  const currentCursor = useMemo(() => cursors[page - 1] ?? null, [cursors, page]);
 
   // Fetch customers when ready or when filters/sort/page change
   const fetchCustomers = useCallback(async () => {
@@ -590,10 +626,11 @@ function CrmApp() {
       status: filters.status,
       sortField: sort.field,
       sortDirection: sort.direction,
+      cursor: currentCursor ?? undefined,
       page,
       pageSize: 20,
     });
-  }, [listCustomers, filters, sort, page]);
+  }, [listCustomers, filters, sort, currentCursor, page]);
 
   // Initial fetch
   useEffect(() => {
@@ -603,12 +640,12 @@ function CrmApp() {
     }
   }, [isReady, fetchCustomers]);
 
-  // Refetch when filters/sort/page change
+  // Refetch when filters/sort/page/cursor change
   useEffect(() => {
     if (hasInitiallyFetched.current) {
       fetchCustomers();
     }
-  }, [filters, sort, page]);
+  }, [filters, sort, page, currentCursor, fetchCustomers]);
 
   // Handle list data updates
   useEffect(() => {
@@ -618,8 +655,8 @@ function CrmApp() {
       // Save to widget state
       setWidgetState({
         modelContent: {
-          totalCustomers: listState.data.summary.totalCustomers,
-          totalOrders: listState.data.summary.totalOrders,
+          totalCustomers: listState.data.summary.totalCustomers ?? listState.data.customers.length,
+          totalOrders: listState.data.summary.totalOrders ?? 0,
           selectedCustomerId,
         },
         privateContent: {
@@ -628,10 +665,11 @@ function CrmApp() {
           filters,
           sort,
           page,
+          cursors,
         },
       });
     }
-  }, [listState.data]);
+  }, [listState.data, selectedCustomerId, customerDetail, filters, sort, page, cursors, setWidgetState]);
 
   // Handle customer detail updates
   useEffect(() => {
@@ -644,12 +682,22 @@ function CrmApp() {
   useEffect(() => {
     if (seedState.data) {
       setIsSeeding(false);
-      fetchCustomers();
+      setPage(1);
+      setCursors([null]);
+      void listCustomers({
+        query: filters.query,
+        status: filters.status,
+        sortField: sort.field,
+        sortDirection: sort.direction,
+        cursor: undefined,
+        page: 1,
+        pageSize: 20,
+      });
     }
     if (seedState.error) {
       setIsSeeding(false);
     }
-  }, [seedState.data, seedState.error]);
+  }, [seedState.data, seedState.error, listCustomers, filters.query, filters.status, sort.field, sort.direction]);
 
   // Handle reset completion
   useEffect(() => {
@@ -657,9 +705,19 @@ function CrmApp() {
       setListData(null);
       setCustomerDetail(null);
       setSelectedCustomerId(undefined);
-      fetchCustomers();
+      setPage(1);
+      setCursors([null]);
+      void listCustomers({
+        query: filters.query,
+        status: filters.status,
+        sortField: sort.field,
+        sortDirection: sort.direction,
+        cursor: undefined,
+        page: 1,
+        pageSize: 20,
+      });
     }
-  }, [resetState.data]);
+  }, [resetState.data, listCustomers, filters.query, filters.status, sort.field, sort.direction]);
 
   // Subscribe to agent-initiated tool calls
   useEffect(() => {
@@ -672,16 +730,36 @@ function CrmApp() {
           setCustomerDetail(data);
           setSelectedCustomerId(data.customer.id);
         } else if (data?.seeded) {
-          fetchCustomers();
+          setPage(1);
+          setCursors([null]);
+          void listCustomers({
+            query: filters.query,
+            status: filters.status,
+            sortField: sort.field,
+            sortDirection: sort.direction,
+            cursor: undefined,
+            page: 1,
+            pageSize: 20,
+          });
         } else if (data?.deleted) {
           setListData(null);
           setCustomerDetail(null);
           setSelectedCustomerId(undefined);
-          fetchCustomers();
+          setPage(1);
+          setCursors([null]);
+          void listCustomers({
+            query: filters.query,
+            status: filters.status,
+            sortField: sort.field,
+            sortDirection: sort.direction,
+            cursor: undefined,
+            page: 1,
+            pageSize: 20,
+          });
         }
       }
     });
-  }, [onToolResult, fetchCustomers]);
+  }, [onToolResult, listCustomers, filters.query, filters.status, sort.field, sort.direction]);
 
   // Handle customer selection
   const handleSelectCustomer = useCallback(
@@ -699,12 +777,14 @@ function CrmApp() {
       direction: prev.field === field && prev.direction === "asc" ? "desc" : "asc",
     }));
     setPage(1);
+    setCursors([null]);
   }, []);
 
   // Handle filter change
   const handleFilterChange = useCallback((newFilters: Filters) => {
     setFilters(newFilters);
     setPage(1);
+    setCursors([null]);
   }, []);
 
   // Handle seed
@@ -724,7 +804,29 @@ function CrmApp() {
     setCustomerDetail(null);
   }, []);
 
-  const hasData = (listData?.summary.totalCustomers ?? 0) > 0;
+  const handlePreviousPage = useCallback(() => {
+    setPage((prev) => Math.max(1, prev - 1));
+  }, []);
+
+  const handleNextPage = useCallback(() => {
+    if (!listData) return;
+    if (listData.pagination.mode === "offset") {
+      setPage((prev) => prev + 1);
+      return;
+    }
+
+    const nextCursor = listData?.pagination.nextCursor ?? null;
+    if (!nextCursor) return;
+
+    setCursors((prev) => {
+      const next = prev.slice(0, page);
+      next[page] = nextCursor;
+      return next;
+    });
+    setPage((prev) => prev + 1);
+  }, [listData, page]);
+
+  const hasData = (listData?.summary.totalCustomers ?? listData?.customers.length ?? 0) > 0;
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-bg-primary text-txt-primary">
@@ -732,7 +834,9 @@ function CrmApp() {
         <h1 className="text-lg font-medium">CRM</h1>
         {listData && (
           <span className="text-txt-secondary text-sm">
-            {listData.summary.totalCustomers} customers · {listData.summary.totalOrders} orders
+            {listData.summary.totalCustomers === null
+              ? `${listData.customers.length} shown`
+              : `${listData.summary.totalCustomers} customers · ${listData.summary.totalOrders ?? 0} orders`}
           </span>
         )}
       </header>
@@ -763,7 +867,15 @@ function CrmApp() {
               />
               <PaginationControls
                 pagination={listData.pagination}
-                onPageChange={setPage}
+                visibleCount={listData.customers.length}
+                canPrevious={page > 1}
+                canNext={
+                  listData.pagination.mode === "cursor"
+                    ? Boolean(listData.pagination.nextCursor)
+                    : page < (listData.pagination.totalPages ?? 1)
+                }
+                onPrevious={handlePreviousPage}
+                onNext={handleNextPage}
               />
             </>
           ) : (

@@ -14,10 +14,11 @@
  * - crm_order_create: Create an order for a customer
  * - crm_seed: Generate demo data
  * - crm_reset: Clear all data
+ * - crm_storage_pagination_validate: Validate cursor pagination behavior in KV storage
  */
 
 import { z } from "zod";
-import type { App } from "open-mcp-app/server";
+import { exp, type App } from "open-mcp-app/server";
 import {
   CRM_UI_URI,
   type Customer,
@@ -58,7 +59,8 @@ const CrmListSchema = z.object({
   status: z.enum(["active", "inactive", "lead"]).optional().describe("Filter by customer status"),
   sortField: z.enum(["name", "email", "company", "status", "createdAt"]).optional().describe("Field to sort by"),
   sortDirection: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
-  page: z.number().min(1).default(1).describe("Page number (1-based)"),
+  cursor: z.string().optional().describe("Cursor token from a previous crm_list response"),
+  page: z.number().int().min(1).default(1).describe("Current page number (UI state)"),
   pageSize: z.number().min(1).max(100).default(20).describe("Items per page"),
 });
 
@@ -89,6 +91,14 @@ const CrmResetSchema = z.object({
   confirm: z.boolean().describe("Must be true to confirm data deletion"),
 });
 
+const CrmStoragePaginationValidateSchema = z.object({
+  collection: z
+    .enum(["customers", "orders", "lineItems", "all"])
+    .default("all")
+    .describe("Which CRM collection prefix to validate"),
+  limit: z.number().int().min(1).max(200).default(25).describe("Page size for cursor pagination checks"),
+});
+
 // =============================================================================
 // Tool Handlers
 // =============================================================================
@@ -100,45 +110,111 @@ const handleList = async (
   input: z.infer<typeof CrmListSchema>,
   stores: CrmStores
 ): Promise<ToolResult> => {
-  // Get all customers (we need all for filtering/sorting before pagination)
-  let customers = await stores.customers.list();
-
-  // Apply filters
-  customers = filterCustomersByQuery(customers, input.query);
-  customers = filterCustomersByStatus(customers, input.status);
-
-  // Apply sorting
   const sort = input.sortField
     ? { field: input.sortField, direction: input.sortDirection || "asc" as SortDirection }
-    : undefined;
+    : { field: "createdAt" as CustomerSortField, direction: "asc" as SortDirection };
+
+  const canUseCursorPagination =
+    !input.query &&
+    !input.status &&
+    sort.field === "createdAt" &&
+    sort.direction === "asc";
+
+  if (canUseCursorPagination) {
+    if (input.page > 1 && !input.cursor) {
+      return {
+        isError: true,
+        text: "Cursor is required for page > 1 when using cursor pagination.",
+        data: {
+          customers: [],
+          pagination: {
+            mode: "cursor",
+            page: input.page,
+            pageSize: input.pageSize,
+            total: null,
+            totalPages: null,
+            cursor: null,
+            nextCursor: null,
+          },
+          filters: {
+            query: input.query,
+            status: input.status,
+          },
+          sort,
+          summary: {
+            totalCustomers: null,
+            totalOrders: null,
+          },
+        },
+      };
+    }
+
+    const page = await stores.customers.listPage({
+      cursor: input.cursor,
+      limit: input.pageSize,
+    });
+    const customers = await enrichCustomersWithStats(page.items, stores.orders);
+
+    return {
+      data: {
+        customers,
+        pagination: {
+          mode: "cursor",
+          page: input.page,
+          pageSize: input.pageSize,
+          total: null,
+          totalPages: null,
+          cursor: input.cursor ?? null,
+          nextCursor: page.nextCursor,
+        },
+        filters: {
+          query: input.query,
+          status: input.status,
+        },
+        sort,
+        summary: {
+          totalCustomers: null,
+          totalOrders: null,
+        },
+      },
+      title: "CRM",
+      text: customers.length === 0
+        ? "No customers found. Use crm_seed to generate demo data."
+        : page.nextCursor
+          ? `Showing ${customers.length} customers (page ${input.page}, more available)`
+          : `Showing ${customers.length} customers (page ${input.page}, end reached)`,
+    };
+  }
+
+  let customers = await stores.customers.list();
+  customers = filterCustomersByQuery(customers, input.query);
+  customers = filterCustomersByStatus(customers, input.status);
   customers = sortCustomers(customers, sort);
 
-  // Enrich with stats (uses cached stats from customer records)
   const enriched = await enrichCustomersWithStats(customers, stores.orders);
-
-  // Paginate
   const result = paginate(enriched, {
     page: input.page,
     pageSize: input.pageSize,
   });
-
-  // Compute total orders from cached stats to avoid loading orders collection
   const totalOrders = enriched.reduce((sum, c) => sum + (c.orderCount ?? 0), 0);
 
   return {
     data: {
       customers: result.items,
       pagination: {
+        mode: "offset",
         page: result.page,
         pageSize: result.pageSize,
         total: result.total,
         totalPages: result.totalPages,
+        cursor: null,
+        nextCursor: null,
       },
       filters: {
         query: input.query,
         status: input.status,
       },
-      sort: sort || { field: "createdAt", direction: "desc" },
+      sort,
       summary: {
         totalCustomers: enriched.length,
         totalOrders,
@@ -366,6 +442,125 @@ const handleReset = async (
   };
 };
 
+const strictAscending = (values: string[]): boolean => {
+  for (let i = 1; i < values.length; i += 1) {
+    if (values[i - 1] >= values[i]) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const hasNoDuplicates = (values: string[]): boolean => {
+  return new Set(values).size === values.length;
+};
+
+const collectKeys = async (prefix: string, limit: number): Promise<string[]> => {
+  const keys: string[] = [];
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await exp.kvList({ prefix, cursor, limit });
+    if (!page) {
+      throw new Error("KV storage unavailable");
+    }
+
+    keys.push(...page.keys);
+
+    if (!page.nextCursor) {
+      break;
+    }
+    cursor = page.nextCursor;
+  }
+
+  return keys;
+};
+
+const collectEntryKeys = async (prefix: string, limit: number): Promise<string[]> => {
+  const keys: string[] = [];
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await exp.kvListWithValues({ prefix, cursor, limit });
+    if (!page) {
+      throw new Error("KV storage unavailable");
+    }
+
+    for (const entry of page.entries) {
+      keys.push(entry.key);
+    }
+
+    if (!page.nextCursor) {
+      break;
+    }
+    cursor = page.nextCursor;
+  }
+
+  return keys;
+};
+
+const handleStoragePaginationValidate = async (
+  input: z.infer<typeof CrmStoragePaginationValidateSchema>
+): Promise<ToolResult> => {
+  if (!exp.kvIsAvailable()) {
+    return {
+      isError: true,
+      text: "KV storage is unavailable for CRM pagination validation.",
+      data: { ok: false },
+    };
+  }
+
+  const prefixes =
+    input.collection === "all"
+      ? [
+          { collection: "customers", prefix: "customers:global:" },
+          { collection: "orders", prefix: "orders:global:" },
+          { collection: "lineItems", prefix: "lineItems:global:" },
+        ]
+      : [{ collection: input.collection, prefix: `${input.collection}:global:` }];
+
+  const checks: Array<{
+    collection: string;
+    totalKeys: number;
+    strictAscending: boolean;
+    noDuplicates: boolean;
+    listMatchesListWithValues: boolean;
+  }> = [];
+
+  for (const target of prefixes) {
+    const keys = await collectKeys(target.prefix, input.limit);
+    const entryKeys = await collectEntryKeys(target.prefix, input.limit);
+    checks.push({
+      collection: target.collection,
+      totalKeys: keys.length,
+      strictAscending: strictAscending(keys),
+      noDuplicates: hasNoDuplicates(keys),
+      listMatchesListWithValues:
+        keys.length === entryKeys.length &&
+        keys.every((key, index) => key === entryKeys[index]),
+    });
+  }
+
+  const ok = checks.every(
+    (check) =>
+      check.strictAscending &&
+      check.noDuplicates &&
+      check.listMatchesListWithValues
+  );
+
+  return {
+    data: {
+      ok,
+      limit: input.limit,
+      checks,
+    },
+    text: ok
+      ? `CRM storage cursor pagination passed (${checks.length} collection checks).`
+      : "CRM storage cursor pagination validation failed.",
+    isError: !ok,
+  };
+};
+
 // =============================================================================
 // Tool Registration
 // =============================================================================
@@ -378,7 +573,7 @@ export const registerCrmTools = (app: App) => {
   app.tool(
     "crm_list",
     {
-      description: "List customers with sorting, filtering, and pagination. Shows customer data in an interactive table.",
+      description: "List customers with filtering and pagination. Uses cursor pagination by default and falls back to offset pagination when filters or non-default sorting are applied.",
       input: CrmListSchema,
       ui: CRM_UI_URI,
       visibility: ["model", "app"],
@@ -479,6 +674,24 @@ export const registerCrmTools = (app: App) => {
     },
     async (input: z.infer<typeof CrmResetSchema>, context: ToolContext) => {
       return withStores(context, async (stores) => handleReset(input, stores));
+    }
+  );
+
+  app.tool(
+    "crm_storage_pagination_validate",
+    {
+      description:
+        "Validate CRM KV cursor pagination by checking key ordering, deduplication, and kvList/kvListWithValues parity.",
+      input: CrmStoragePaginationValidateSchema,
+      ui: CRM_UI_URI,
+      visibility: ["model", "app"],
+      displayModes: ["pip", "inline"],
+      experimental: {
+        defaultDisplayMode: "pip",
+      },
+    },
+    async (input: z.infer<typeof CrmStoragePaginationValidateSchema>) => {
+      return handleStoragePaginationValidate(input);
     }
   );
 };

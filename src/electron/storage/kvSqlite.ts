@@ -29,6 +29,32 @@ export interface KvSearchOptions {
   limit?: number;
 }
 
+export interface KvListOptions {
+  prefix?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface KvListResult {
+  keys: string[];
+  nextCursor: string | null;
+}
+
+export interface KvListWithValuesResult {
+  entries: Array<{ key: string; value: string }>;
+  nextCursor: string | null;
+}
+
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 1000;
+
+const normalizeListLimit = (limit?: number): number => {
+  if (!Number.isInteger(limit)) {
+    return DEFAULT_LIST_LIMIT;
+  }
+  return Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
+};
+
 // =============================================================================
 // Database Management
 // =============================================================================
@@ -238,25 +264,41 @@ export const kvDelete = async (
  */
 export const kvList = async (
   storageDir: string,
-  prefix?: string
-): Promise<string[]> => {
+  options: KvListOptions = {}
+): Promise<KvListResult> => {
   await ensureMigration(storageDir);
   const db = getDb(storageDir);
+  const limit = normalizeListLimit(options.limit);
+  const queryLimit = limit + 1;
 
   let stmt: StatementSync;
   let rows: Array<{ key: string }>;
 
-  if (prefix) {
+  if (options.prefix && options.cursor) {
+    const escapedPrefix = options.prefix.replace(/[%_]/g, "\\$&");
+    stmt = db.prepare(
+      "SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\' AND key > ? ORDER BY key ASC LIMIT ?"
+    );
+    rows = stmt.all(`${escapedPrefix}%`, options.cursor, queryLimit) as Array<{ key: string }>;
+  } else if (options.prefix) {
     // Use LIKE with escaped prefix for prefix matching
-    const escapedPrefix = prefix.replace(/[%_]/g, "\\$&");
-    stmt = db.prepare("SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\'");
-    rows = stmt.all(`${escapedPrefix}%`) as Array<{ key: string }>;
+    const escapedPrefix = options.prefix.replace(/[%_]/g, "\\$&");
+    stmt = db.prepare("SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\' ORDER BY key ASC LIMIT ?");
+    rows = stmt.all(`${escapedPrefix}%`, queryLimit) as Array<{ key: string }>;
+  } else if (options.cursor) {
+    stmt = db.prepare("SELECT key FROM kv WHERE key > ? ORDER BY key ASC LIMIT ?");
+    rows = stmt.all(options.cursor, queryLimit) as Array<{ key: string }>;
   } else {
-    stmt = db.prepare("SELECT key FROM kv");
-    rows = stmt.all() as Array<{ key: string }>;
+    stmt = db.prepare("SELECT key FROM kv ORDER BY key ASC LIMIT ?");
+    rows = stmt.all(queryLimit) as Array<{ key: string }>;
   }
 
-  return rows.map((r) => r.key);
+  const hasMore = rows.length > limit;
+  const keys = rows.slice(0, limit).map((r) => r.key);
+  return {
+    keys,
+    nextCursor: hasMore ? keys[keys.length - 1] ?? null : null,
+  };
 };
 
 /**
@@ -265,24 +307,45 @@ export const kvList = async (
  */
 export const kvListWithValues = async (
   storageDir: string,
-  prefix?: string
-): Promise<Array<{ key: string; value: string }>> => {
+  options: KvListOptions = {}
+): Promise<KvListWithValuesResult> => {
   await ensureMigration(storageDir);
   const db = getDb(storageDir);
+  const limit = normalizeListLimit(options.limit);
+  const queryLimit = limit + 1;
 
   let stmt: StatementSync;
   let rows: Array<{ key: string; value: string }>;
 
-  if (prefix) {
-    const escapedPrefix = prefix.replace(/[%_]/g, "\\$&");
-    stmt = db.prepare("SELECT key, value FROM kv WHERE key LIKE ? ESCAPE '\\'");
-    rows = stmt.all(`${escapedPrefix}%`) as Array<{ key: string; value: string }>;
+  if (options.prefix && options.cursor) {
+    const escapedPrefix = options.prefix.replace(/[%_]/g, "\\$&");
+    stmt = db.prepare(
+      "SELECT key, value FROM kv WHERE key LIKE ? ESCAPE '\\' AND key > ? ORDER BY key ASC LIMIT ?"
+    );
+    rows = stmt.all(`${escapedPrefix}%`, options.cursor, queryLimit) as Array<{
+      key: string;
+      value: string;
+    }>;
+  } else if (options.prefix) {
+    const escapedPrefix = options.prefix.replace(/[%_]/g, "\\$&");
+    stmt = db.prepare(
+      "SELECT key, value FROM kv WHERE key LIKE ? ESCAPE '\\' ORDER BY key ASC LIMIT ?"
+    );
+    rows = stmt.all(`${escapedPrefix}%`, queryLimit) as Array<{ key: string; value: string }>;
+  } else if (options.cursor) {
+    stmt = db.prepare("SELECT key, value FROM kv WHERE key > ? ORDER BY key ASC LIMIT ?");
+    rows = stmt.all(options.cursor, queryLimit) as Array<{ key: string; value: string }>;
   } else {
-    stmt = db.prepare("SELECT key, value FROM kv");
-    rows = stmt.all() as Array<{ key: string; value: string }>;
+    stmt = db.prepare("SELECT key, value FROM kv ORDER BY key ASC LIMIT ?");
+    rows = stmt.all(queryLimit) as Array<{ key: string; value: string }>;
   }
 
-  return rows;
+  const hasMore = rows.length > limit;
+  const entries = rows.slice(0, limit);
+  return {
+    entries,
+    nextCursor: hasMore ? entries[entries.length - 1]?.key ?? null : null,
+  };
 };
 
 /**

@@ -206,6 +206,9 @@ If you see a message like "[User closed PIP tab with Instance ID ... for MCP App
 ## Widget State
 Some tabs expose their current state in "Current Widget State" (e.g., selected items, form values). Use this to understand what the user is looking at and provide relevant responses.
 
+## Storage Pagination
+When using storage list APIs (\`exp.kvList\`, \`exp.kvListWithValues\`, \`exp.blobList\`), treat responses as cursor-paginated and continue with \`nextCursor\` when full scans are needed.
+
 ## File and Folder Attachments
 User messages may include attached files or folders. Treat these as high-priority context.
 ${ideToolsAvailable ? "Use IDE tools to read and inspect these files." : "Note: IDE tools are not available without a working directory."}
