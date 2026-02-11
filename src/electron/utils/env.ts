@@ -15,6 +15,7 @@
 import { app } from "electron";
 import fs from "fs";
 import path from "path";
+import os from "node:os";
 
 /**
  * Get the path to the bin directory containing the bundled node binary.
@@ -175,4 +176,49 @@ export const buildSpawnEnv = (
     ...additionalEnv,
     PATH: getExtendedPath(),
   };
+};
+
+/**
+ * Build environment object for spawning MCP server processes.
+ * Ensures PATH extension and fills critical base vars for packaged macOS runs.
+ *
+ * @param options.baseEnv - Base environment to start from (defaults to process.env)
+ * @param options.additionalEnv - Additional variables to merge in
+ * @returns Environment object suitable for MCP process spawn
+ */
+export const buildMcpSpawnEnv = ({
+  baseEnv = process.env,
+  additionalEnv = {},
+}: {
+  baseEnv?: NodeJS.ProcessEnv;
+  additionalEnv?: Record<string, string>;
+} = {}): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = {
+    ...baseEnv,
+    ...additionalEnv,
+  };
+
+  env.PATH = getExtendedPath(env.PATH);
+
+  // Finder-launched packaged apps can miss standard shell vars on macOS.
+  if (app.isPackaged && process.platform === "darwin") {
+    if (!env.HOME) {
+      env.HOME = baseEnv.HOME || os.homedir();
+    }
+    if (!env.TMPDIR) {
+      env.TMPDIR = baseEnv.TMPDIR || os.tmpdir();
+    }
+    if (!env.USER) {
+      try {
+        env.USER = baseEnv.USER || os.userInfo().username;
+      } catch {
+        env.USER = baseEnv.USER || "unknown";
+      }
+    }
+    if (!env.SHELL) {
+      env.SHELL = baseEnv.SHELL || "/bin/zsh";
+    }
+  }
+
+  return env;
 };

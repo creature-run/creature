@@ -12,20 +12,76 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import https from 'https';
 
-// Default Node.js version to download (should match Electron's Node version)
-// Electron 39 uses Node 20.x
-const DEFAULT_NODE_VERSION = '20.18.1';
+// Fallback when Electron runtime detection is unavailable.
+const FALLBACK_NODE_VERSION = '20.18.1';
 
-const getNodeVersion = (): string => {
+const normalizeNodeVersion = (value: string): string | null => {
+  const normalized = value.trim().replace(/^v/, '');
+  return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : null;
+};
+
+const detectElectronNodeVersion = async (): Promise<string | null> => {
+  let electronBinary: string | null = null;
+
+  try {
+    const electronModule = await import('electron');
+    const candidate = (electronModule as unknown as { default?: unknown }).default ?? electronModule;
+    if (typeof candidate === 'string') {
+      electronBinary = candidate;
+    }
+  } catch {
+    // Ignore module resolution failures and try fallback path.
+  }
+
+  if (!electronBinary) {
+    const binName = process.platform === 'win32' ? 'electron.cmd' : 'electron';
+    const candidatePath = path.join(__dirname, '..', 'node_modules', '.bin', binName);
+    if (fs.existsSync(candidatePath)) {
+      electronBinary = candidatePath;
+    }
+  }
+
+  if (!electronBinary) {
+    return null;
+  }
+
+  try {
+    const raw = execFileSync(
+      electronBinary,
+      ['-p', 'process.versions.node'],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+        },
+      }
+    );
+    return normalizeNodeVersion(raw);
+  } catch (error) {
+    console.warn('[downloadNodeBinary] Failed to detect Electron Node.js version:', error);
+    return null;
+  }
+};
+
+const getNodeVersion = async (): Promise<string> => {
   const args = process.argv.slice(2);
   const versionIndex = args.indexOf('--version');
   if (versionIndex !== -1 && args[versionIndex + 1]) {
     return args[versionIndex + 1];
   }
-  return DEFAULT_NODE_VERSION;
+
+  const detected = await detectElectronNodeVersion();
+  if (detected) {
+    console.log(`[downloadNodeBinary] Using Electron Node.js version: ${detected}`);
+    return detected;
+  }
+
+  console.warn(`[downloadNodeBinary] Falling back to default Node.js version: ${FALLBACK_NODE_VERSION}`);
+  return FALLBACK_NODE_VERSION;
 };
 
 const getPlatformInfo = (): { platform: string; arch: string; ext: string } => {
@@ -164,7 +220,7 @@ const extractNodeBinary = (archivePath: string, outputDir: string, nodeVersion: 
 };
 
 const main = async () => {
-  const nodeVersion = getNodeVersion();
+  const nodeVersion = await getNodeVersion();
   const platformInfo = getPlatformInfo();
   
   console.log(`Downloading Node.js v${nodeVersion} for ${platformInfo.platform}-${platformInfo.arch}...`);
