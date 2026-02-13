@@ -35,7 +35,8 @@ Tools:
 - devkit_get_logs { filter?, mcpName? }: Fetch recent logs from Creature's aggregated log system. Filter by "all" (last 50), "current_mcp_app" (logs for a specific MCP App by name), or "errors" (error-level entries only).
 - devkit_reload_mcp_app { mcpName }: Restart an MCP App server and reload all its pip instances. Use this when the user has made code changes to their MCP App.
 - devkit_typecheck { mcpName }: Run TypeScript type checking (tsc --noEmit) on an MCP App. Returns structured errors with file, line, and message. Use this to catch type errors like wrong parameter names that tsx watch won't catch (it only transpiles, no type checking).
-- devkit_get_mcp_app_sdk_docs: Fetch the MCP App SDK reference documentation. Use this to learn how to build MCP Apps with the open-mcp-app SDK.
+- devkit_get_mcp_app_sdk_docs { topics }: Fetch SDK reference docs for one or more topics in a single call. Topics: server, tools, ui-entry, views, callTool, widgetState, styling, storage, onToolResult, development.
+- devkit_get_component_docs { components }: Fetch detailed reference docs (props, types, examples) for one or more open-mcp-app-ui components in a single call. Pass component names (e.g. ["Button", "Select", "DataTable", "Editor"]).
 - devkit_get_conversation: (App-only) Fetch the current conversation history for inspection.
 - devkit_get_system_prompt: (App-only) Fetch the current system prompt for inspection.
 
@@ -66,6 +67,7 @@ app.resource({
       "devkit_reload_mcp_app",
       "devkit_typecheck",
       "devkit_get_mcp_app_sdk_docs",
+      "devkit_get_component_docs",
       "devkit_get_conversation",
       "devkit_get_system_prompt",
     ],
@@ -154,21 +156,44 @@ app.tool(
 );
 
 /**
- * Fetch the MCP App SDK reference documentation.
+ * Fetch SDK reference documentation by topic.
  *
- * Host-managed: the control plane reads the file from disk.
+ * Host-managed: the control plane reads the topic doc file from disk.
  * This handler is a no-op placeholder.
  */
 app.tool(
   "devkit_get_mcp_app_sdk_docs",
   {
-    description: "Fetch the MCP App SDK reference documentation (open-mcp-app). Use this to learn how to build MCP Apps.",
-    input: z.object({}),
+    description: "Fetch MCP App SDK reference docs for one or more topics. Batch multiple topics into a single call to reduce round trips.",
+    input: z.object({
+      topics: z.array(z.string()).describe("Array of SDK topic names (e.g. ['server', 'tools', 'views']). Available: server, tools, ui-entry, views, callTool, widgetState, styling, storage, onToolResult, development"),
+    }),
     visibility: ["model"],
   },
   async () => ({
     data: { placeholder: true },
     text: "SDK docs fetched",
+  })
+);
+
+/**
+ * Fetch detailed reference docs for a specific open-mcp-app-ui component.
+ *
+ * Host-managed: the control plane reads the component doc file from disk.
+ * This handler is a no-op placeholder.
+ */
+app.tool(
+  "devkit_get_component_docs",
+  {
+    description: "Fetch detailed reference docs (props, types, examples) for one or more open-mcp-app-ui components. Batch multiple components into a single call to reduce round trips.",
+    input: z.object({
+      components: z.array(z.string()).describe("Array of component/hook names (e.g. ['Button', 'Select', 'Charts', 'Icons', 'AppLayout', 'useDisplayMode'])"),
+    }),
+    visibility: ["model"],
+  },
+  async () => ({
+    data: { placeholder: true },
+    text: "Component docs fetched",
   })
 );
 

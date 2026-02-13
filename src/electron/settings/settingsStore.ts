@@ -122,8 +122,15 @@ export interface HeadingSizes {
  * Maps to --font-* CSS variables.
  */
 export interface ThemeTypography {
-  /** Font family for sans-serif text. Maps to --font-sans */
+  /** Font family for sans-serif text. Maps to --font-sans on the host app. */
   fontSans?: string;
+  /**
+   * Font family injected into MCP Apps for --font-sans.
+   * When set, MCP Apps receive this instead of fontSans,
+   * allowing the host app to use a branded font (e.g. Sora)
+   * while MCP Apps use a neutral system font (e.g. ui-sans-serif).
+   */
+  mcpFontSans?: string;
   /** Font family for monospace text. Maps to --font-mono */
   fontMono?: string;
   /** Normal font weight. Maps to --font-weight-normal */
@@ -291,6 +298,7 @@ const DEFAULT_DARK_THEME: ThemeMode = {
   },
   typography: {
     fontSans: '"Sora", system-ui, sans-serif',
+    mcpFontSans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontMono: '"SF Mono", Monaco, Consolas, "Liberation Mono", monospace',
     fontWeightNormal: 400,
     fontWeightMedium: 500,
@@ -410,6 +418,7 @@ const DEFAULT_LIGHT_THEME: ThemeMode = {
   },
   typography: {
     fontSans: '"Sora", system-ui, sans-serif',
+    mcpFontSans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontMono: '"SF Mono", Monaco, Consolas, "Liberation Mono", monospace',
     fontWeightNormal: 400,
     fontWeightMedium: 500,
@@ -803,7 +812,10 @@ export const themeToCssVariables = (params: {
     const typo = theme.typography;
     
     // Font families
+    // Host app gets fontSans (e.g. "Sora"). MCP Apps will get mcpFontSans
+    // (e.g. "ui-sans-serif") via ThemeContext override — see specStyleVariables.
     if (typo.fontSans) variables["--font-sans"] = typo.fontSans;
+    if (typo.mcpFontSans) variables["--font-sans-mcp"] = typo.mcpFontSans;
     if (typo.fontMono) variables["--font-mono"] = typo.fontMono;
     
     // Font weights

@@ -133,9 +133,15 @@ src/
     tools/*.ts    # Tool handlers
     lib/*.ts      # Data, types, utilities
   ui/
-    app.tsx       # Entry: HostProvider + main component
+    app.tsx       # Entry: HostProvider + AppLayout + main component
     styles.css    # Custom CSS (prefer Tailwind classes)
 \`\`\`
+
+**Key packages:**
+- \`open-mcp-app\` — SDK (server, react hooks, styles/tailwind)
+- \`open-mcp-app-ui\` — Component library (Button, Input, Card, AppLayout, Show, etc.)
+
+**SDK Reference (use before writing code):** When unsure about SDK behavior or before using an API for the first time, call \`devkit_get_mcp_app_sdk_docs\` with a \`topics\` array. You can batch multiple topics in one call (e.g. \`{ topics: ["server", "tools", "views"] }\`). Don't guess — look it up. Topics: \`server\`, \`tools\`, \`ui-entry\`, \`views\`, \`callTool\`, \`widgetState\`, \`styling\`, \`storage\`, \`onToolResult\`, \`development\`.
 
 ## Server
 
@@ -209,18 +215,44 @@ When changing types or data structures shared across files, update ALL files tha
 **Entry point** (\`app.tsx\`):
 
 \`\`\`tsx
-import { HostProvider } from "open-mcp-app/react";
-import "open-mcp-app/styles/tailwind.css";
+import { HostProvider, useHost } from "open-mcp-app/react";
+import { AppLayout } from "open-mcp-app-ui";
+import "open-mcp-app-ui/styles.css";
 import "./styles.css";
+
+function AppContent() {
+  const { hostContext } = useHost();
+  return (
+    <AppLayout
+      displayMode={hostContext?.displayMode}
+      availableDisplayModes={hostContext?.availableDisplayModes}
+    >
+      <MainView />
+    </AppLayout>
+  );
+}
 
 export default function App() {
   return (
     <HostProvider name="my-app" version="0.1.0">
-      <MainView />
+      <AppContent />
     </HostProvider>
   );
 }
 \`\`\`
+
+**Styles** (\`styles.css\`):
+
+\`\`\`css
+@import "open-mcp-app/styles/tailwind.css";
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+\`\`\`
+
+The Tailwind import in \`styles.css\` is required so that \`@tailwindcss/postcss\` generates utility classes for the app's own source files. Without it, only the pre-compiled utilities from \`open-mcp-app-ui/styles.css\` are available — those only cover classes the library itself uses. The root height declarations ensure \`h-full\` and flex layouts work correctly. **Do not remove either of these.**
 
 **View routing** with \`useViews\` — automatically switches views based on tool results:
 
@@ -359,7 +391,7 @@ setWidgetState({
 
 ## Styling (Tailwind)
 
-The SDK provides host-themed Tailwind via \`import "open-mcp-app/styles/tailwind.css"\` (already in app.tsx). Colors adapt automatically to the host theme (light/dark). Never hardcode colors — always use themed classes.
+The SDK provides host-themed Tailwind via \`@import "open-mcp-app/styles/tailwind.css"\` (already in \`styles.css\`). Colors adapt automatically to the host theme (light/dark). Never hardcode colors — always use themed classes.
 
 **CRITICAL — MCP Apps CSS variables:** Use the MCP Apps standard CSS variables and the SDK Tailwind classes that map to them. The spec guarantees \`--color-background-primary\`, \`--color-background-secondary\`, \`--color-text-primary\`, \`--color-text-secondary\`, \`--color-border-primary\`, \`--color-border-secondary\`, \`--font-sans\`, \`--font-mono\`. Prefer \`bg-bg-primary\`, \`text-txt-primary\`, \`border-bdr-primary\`, \`font-sans\`, \`font-mono\`. If you must write custom CSS, use \`var(--color-*, fallback)\` and avoid hardcoded colors.
 
@@ -384,32 +416,120 @@ The SDK provides host-themed Tailwind via \`import "open-mcp-app/styles/tailwind
 - Icon sizes: \`icon-sm\`, \`icon-md\`
 
 **Common CSS pitfalls (CRITICAL):**
-- Full-height layouts: \`h-full\` and \`flex-1\` require root height. Always include:
-  \`\`\`css
-  html, body, #root {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-  }
-  \`\`\`
+- Full-height layouts: \`h-full\` and \`flex-1\` require root height. The template's \`styles.css\` already includes the required declarations — do not remove them.
 - Scroll containers: use \`min-h-0\` on flex parents and \`overflow-y-auto\` on the scrolling child.
 - Canvas/grid backgrounds: prefer Tailwind + spec variables; avoid hardcoded colors.
 
 **Example layout:**
 
 \`\`\`tsx
-<div className="flex flex-col h-full bg-bg-primary text-txt-primary">
-  <header className="flex items-center justify-between p-4 border-b border-bdr-secondary">
-    <h1 className="heading-lg">Notes</h1>
-    <button className="bg-txt-primary text-txt-inverse px-3 py-1.5 rounded-md text-sm font-medium">
-      + New
-    </button>
-  </header>
-  <main className="flex-1 overflow-y-auto p-4">
-    <p className="text-txt-secondary">No notes yet</p>
-  </main>
-</div>
+import { AppLayout, Show, Heading, Text, Button, Card } from "open-mcp-app-ui";
+
+<AppLayout displayMode={hostContext?.displayMode}>
+  <div className="flex items-center justify-between">
+    <Heading size="lg">Notes</Heading>
+    <Button variant="primary" size="sm">+ New</Button>
+  </div>
+
+  <Show on="inline">
+    <Text variant="secondary" size="sm">3 notes</Text>
+  </Show>
+
+  <Show on={["pip", "fullscreen"]}>
+    {notes.map((note) => (
+      <Card key={note.id}>
+        <Heading size="sm">{note.title}</Heading>
+        <Text variant="secondary" size="sm">{note.body}</Text>
+      </Card>
+    ))}
+  </Show>
+</AppLayout>
 \`\`\`
+
+## Component Library (\`open-mcp-app-ui\`)
+
+The project includes \`open-mcp-app-ui\`, a component library for MCP Apps. **Always use these components instead of writing raw HTML/Tailwind for standard UI elements.** They are pre-themed with spec CSS variables and adapt to display modes automatically.
+
+If you need a component that is not in this library, you may build it with raw Tailwind using spec variables, or use an external package. Prefer this library first — these components are tested and guaranteed to work correctly in MCP App sandboxes.
+
+**CRITICAL — Tabular / grid / list data:** Whenever data needs to be displayed in rows and columns, a table, a grid, or any structured list format, **always use \`<DataTable>\` from \`open-mcp-app-ui/table\`**. Do NOT build custom tables with raw \`<table>\`, \`<div>\` grids, or \`.map()\` loops for tabular data. \`DataTable\` handles theming, sorting, filtering, pagination, virtualization, and responsive behavior automatically. Even simple 2-column key-value displays benefit from \`DataTable\` — it is always the right choice for structured data.
+
+**Before using components, call \`devkit_get_component_docs\` with a \`components\` array** to get exact props, types, and usage examples. Batch all the components you need in one call (e.g. \`{ components: ["Button", "Input", "Card", "Select"] }\`). Don't guess at props — the docs are concise and always up to date.
+
+**Available components:**
+
+| Component | Description |
+|-----------|-------------|
+| \`AppLayout\` | Root layout wrapper. Scroll container + adaptive padding/gap + DisplayModeContext. Use \`noPadding\` for full-bleed layouts. **Always wrap your app in this.** |
+| \`Show\` | Conditional render by display mode. \`<Show on="inline">\` / \`<Show on={["pip", "fullscreen"]}>\` |
+| \`Button\` | Action button. Variants: \`primary\`, \`secondary\`, \`danger\`, \`ghost\`. Supports \`loading\` state. |
+| \`Input\` | Text input with label, error, and helper text. |
+| \`Textarea\` | Multi-line text input with label and error handling. |
+| \`Select\` | Custom dropdown select with keyboard navigation. Supports flat and grouped options. |
+| \`Checkbox\` | Animated checkbox with optional label. |
+| \`Switch\` | Toggle switch for on/off states. |
+| \`RadioGroup\` | Radio option group. Compose with \`RadioGroup.Item\`. |
+| \`Slider\` | Range slider with optional value display and formatting. |
+| \`TagInput\` | Multi-tag input with validation and keyboard support. |
+| \`DatePicker\` | Custom calendar dropdown for date selection (YYYY-MM-DD). |
+| \`DateRangePicker\` | Two coordinated date pickers for start/end range. |
+| \`ToggleGroup\` | Segmented control with animated indicator. Compose with \`ToggleGroup.Option\`. |
+| \`Menu\` | Dropdown menu. Compose with \`Menu.Trigger\`, \`Menu.Content\`, \`Menu.Item\`, \`Menu.Separator\`, \`Menu.Label\`. |
+| \`Tabs\` | Underline-style tab bar. Compose with \`Tabs.Tab\`. |
+| \`Alert\` | Status banner. Colors: \`info\`, \`danger\`, \`success\`, \`warning\`. Variants: \`outline\`, \`soft\`, \`solid\`. |
+| \`Badge\` | Compact status indicator. Variants: \`info\`, \`danger\`, \`success\`, \`warning\`, \`secondary\`. |
+| \`Card\` | Content container with border. Variants: \`default\`, \`secondary\` (lighter border), \`ghost\`. |
+| \`CodeBlock\` | Syntax-highlighted code block with copy button. Always dark background. |
+| \`Heading\` | Semantic heading (h1-h6) with visual size control (\`xs\`-\`3xl\`). |
+| \`Text\` | Body text. Variants: \`primary\`, \`secondary\`, \`tertiary\`. |
+| \`Divider\` | Horizontal separator line. |
+| \`DataTable\` | High-performance virtualized data table (TanStack Table + Virtual). Sorting, filtering, pagination. **Separate import:** \`import { DataTable } from "open-mcp-app-ui/table"\`. |
+| \`Editor\` | Markdown + rich text editor (Milkdown/ProseMirror). WYSIWYG, markdown, and split modes. Toolbar, read-only. **Separate import:** \`import { Editor } from "open-mcp-app-ui/editor"\`. |
+| \`LineChart\` | Line/trend chart (Recharts). **Separate import:** \`import { LineChart, Line, XAxis, YAxis, Tooltip } from "open-mcp-app-ui/charts"\`. |
+| \`BarChart\` | Bar/column chart. **Separate import:** \`import { BarChart, Bar, ... } from "open-mcp-app-ui/charts"\`. |
+| \`AreaChart\` | Area/volume chart. **Separate import:** \`import { AreaChart, Area, ... } from "open-mcp-app-ui/charts"\`. |
+| \`PieChart\` | Pie/donut chart. **Separate import:** \`import { PieChart, Pie, ... } from "open-mcp-app-ui/charts"\`. |
+| \`ScatterChart\` | Scatter/correlation chart. **Separate import:** \`import { ScatterChart, Scatter, ... } from "open-mcp-app-ui/charts"\`. |
+| \`RadarChart\` | Radar/spider chart. **Separate import:** \`import { RadarChart, Radar, ... } from "open-mcp-app-ui/charts"\`. |
+| \`ComposedChart\` | Mixed chart (Bar + Line + Area). **Separate import:** \`import { ComposedChart, ... } from "open-mcp-app-ui/charts"\`. |
+
+**Icons:** \`lucide-react\` is bundled as a dependency of \`open-mcp-app-ui\`. Import icons directly: \`import { Plus, Trash2, Settings } from "lucide-react"\`. ~1,000 icons, tree-shakeable (~1KB each). Use \`size\`, \`color\`, \`strokeWidth\` props. Icons inherit \`currentColor\` by default.
+
+**Hook:** \`useDisplayMode()\` — returns \`{ displayMode, isInline, isPip, isFullscreen, availableDisplayModes }\`.
+
+**Display mode adaptation:**
+
+MCP Apps run in three modes: \`inline\` (60-300px tall, inside conversation), \`pip\` (sidebar tab), and \`fullscreen\`. Use \`<Show>\` for conditional rendering and Tailwind variants (\`inline:\`, \`pip:\`, \`fullscreen:\`) for CSS-level tweaks:
+
+\`\`\`tsx
+{/* Declarative: Show/hide sections by mode */}
+<Show on="inline">
+  <Text variant="secondary">Compact summary</Text>
+</Show>
+<Show on={["pip", "fullscreen"]}>
+  <DetailedList />
+</Show>
+
+{/* CSS: Fine-tune with Tailwind variants */}
+<div className="text-sm inline:text-xs fullscreen:text-base">Adaptive text</div>
+<div className="hidden pip:block fullscreen:block">Hidden in inline</div>
+\`\`\`
+
+**Form example:**
+
+\`\`\`tsx
+import { Card, Heading, Input, Select, Button, Alert } from "open-mcp-app-ui";
+
+<Card>
+  <Heading size="md">Create Item</Heading>
+  {error && <Alert color="danger">{error}</Alert>}
+  <Input label="Title" placeholder="Enter title..." value={title} onChange={(e) => setTitle(e.target.value)} />
+  <Select label="Category" placeholder="Choose..." options={categories} value={cat} onChange={setCat} />
+  <Button variant="primary" onClick={handleCreate} loading={saving}>Create</Button>
+</Card>
+\`\`\`
+
+**Important:** All components accept a \`className\` prop for additional Tailwind classes. Use component library components for structure and Tailwind for custom layout adjustments.
 
 ## Storage
 

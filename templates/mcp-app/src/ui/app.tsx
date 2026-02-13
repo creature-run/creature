@@ -1,12 +1,13 @@
 /**
  * MCP App UI
  *
- * Skeleton UI with host-themed styling.
+ * Skeleton UI with host-themed styling and display-mode-aware layout.
  * Replace this with your app's components.
  */
 
-import { HostProvider } from "open-mcp-app/react";
-import "open-mcp-app/styles/tailwind.css";
+import { HostProvider, useHost } from "open-mcp-app/react";
+import { AppLayout, Heading, Text } from "open-mcp-app-ui";
+import "open-mcp-app-ui/styles.css";
 import "./styles.css";
 
 /**
@@ -30,18 +31,35 @@ const CreatureIcon = ({ size = 48 }: { size?: number }) => (
   </svg>
 );
 
-export default function App() {
+/**
+ * Inner app content with access to SDK hooks.
+ */
+function AppContent() {
+  const { hostContext } = useHost();
+
   return (
-    <HostProvider name="__APP_NAME__" version="0.1.0">
-      <div className="flex flex-col items-center justify-center h-full gap-3 bg-bg-primary">
+    <AppLayout
+      displayMode={hostContext?.displayMode}
+      availableDisplayModes={hostContext?.availableDisplayModes}
+      className="h-full"
+    >
+      <div className="flex-1 flex flex-col items-center justify-center gap-3">
         <div style={{ opacity: 0.4 }}>
           <CreatureIcon />
         </div>
-        <p className="text-sm font-medium text-txt-secondary">MCP App Template</p>
-        <p className="text-xs text-txt-tertiary max-w-64 text-center">
+        <Heading size="sm">MCP App Template</Heading>
+        <Text variant="tertiary" size="sm" className="max-w-64 text-center">
           Your new MCP App is ready. Work with the agent to build tools, add UI components, and make it your own.
-        </p>
+        </Text>
       </div>
+    </AppLayout>
+  );
+}
+
+export default function App() {
+  return (
+    <HostProvider name="__APP_NAME__" version="0.1.0">
+      <AppContent />
     </HostProvider>
   );
 }

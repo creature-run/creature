@@ -1,7 +1,13 @@
 /**
  * App-specific CSS overrides.
- * Prefer Tailwind utility classes over custom CSS.
+ *
+ * The SDK's Tailwind CSS import is required so that @tailwindcss/postcss
+ * generates utility classes for this app's own source files. Without it,
+ * only the pre-compiled utilities inside open-mcp-app-ui/styles.css would
+ * be available — those only cover classes the library itself uses.
  */
+
+@import "open-mcp-app/styles/tailwind.css";
 
 /**
  * Full-height layout foundation.
