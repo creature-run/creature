@@ -28,7 +28,7 @@ import { randomUUID } from "node:crypto";
 import { injectCSP, type CspConfig } from "./csp";
 import { injectConsoleOverride } from "./consoleCapture";
 import { getMainWindow } from "../window/mainWindow";
-import { buildSpawnEnv, getExtendedPath, resolveBundledCommand } from "../utils/env";
+import { buildMcpSpawnEnv, buildSpawnEnv, getExtendedPath, resolveBundledCommand } from "../utils/env";
 import { closeAllPips, getPipInstances, reconcilePipsForMcp, refreshAllPipsForMcp } from "./controlPlane";
 import { logAggregator, type LogLevel } from "../logging";
 import { portManager } from "./portManager";
@@ -1707,11 +1707,12 @@ const spawnHttpServerProcess = async (
     throw new Error(`MCP server directory not found: ${cwd}`);
   }
 
-  const env: Record<string, string> = {
-    ...process.env,
-    NODE_ENV: "production",
-    ...config.env,
-  } as Record<string, string>;
+  const env = buildMcpSpawnEnv({
+    additionalEnv: {
+      NODE_ENV: "production",
+      ...(config.env || {}),
+    },
+  }) as Record<string, string>;
 
   // Use Electron's Node for built-in MCPs (command === "node") in both dev and packaged modes.
   // This ensures native modules like node-pty work correctly since they're compiled against Electron's Node.
@@ -1734,10 +1735,6 @@ const spawnHttpServerProcess = async (
       args = resolved.args;
     }
   }
-
-  // Extend PATH for any remaining commands that need system tools
-  env.PATH = getExtendedPath(env.PATH);
-
 
   // Pass workspace roots to MCPs that need them.
   // For dev MCP apps, MCP_WORKING_DIR is set to their own root (via cwd).
@@ -1945,11 +1942,12 @@ const createStdioTransport = async (
 
   // Build environment - default NODE_ENV=production but allow config.env to override.
   // Development MCPs explicitly set NODE_ENV=development in their config.
-  const env: Record<string, string> = {
-    ...process.env,
-    NODE_ENV: "production",
-    ...config.env,
-  } as Record<string, string>;
+  const env = buildMcpSpawnEnv({
+    additionalEnv: {
+      NODE_ENV: "production",
+      ...(config.env || {}),
+    },
+  }) as Record<string, string>;
 
   // Use Electron's Node for built-in MCPs in both dev and packaged modes.
   // This ensures native modules work correctly since they're compiled against Electron's Node.
@@ -1976,8 +1974,6 @@ const createStdioTransport = async (
       finalCommand = resolved.command;
       finalArgs = resolved.args;
     }
-    // Extend PATH for any remaining commands that need system tools
-    env.PATH = getExtendedPath(env.PATH);
   }
 
   // Validate that the cwd directory exists before attempting to connect (only for local MCPs)
@@ -2316,31 +2312,31 @@ const createConnection = async (serverName: string): Promise<McpConnection> => {
       }
     );
 
-  // Set up MCP protocol logging notification handler.
-  // Per MCP spec, servers can send notifications/message for structured logging.
-  // This is the spec-compliant way to receive logs from MCP servers.
-  client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
-    const { level, logger, data } = notification.params;
+    // Set up MCP protocol logging notification handler.
+    // Per MCP spec, servers can send notifications/message for structured logging.
+    // This is the spec-compliant way to receive logs from MCP servers.
+    client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+      const { level, logger, data } = notification.params;
 
-    // Format the message from data (can be string or object with message field)
-    let message: string;
-    if (typeof data === "string") {
-      message = data;
-    } else if (typeof data === "object" && data !== null && "message" in data) {
-      // Extract the message field if it exists
-      message = String((data as { message: unknown }).message);
-    } else {
-      message = JSON.stringify(data);
-    }
+      // Format the message from data (can be string or object with message field)
+      let message: string;
+      if (typeof data === "string") {
+        message = data;
+      } else if (typeof data === "object" && data !== null && "message" in data) {
+        // Extract the message field if it exists
+        message = String((data as { message: unknown }).message);
+      } else {
+        message = JSON.stringify(data);
+      }
 
-    logAggregator.log({
-      source: "mcp",
-      sourceName: serverName,
-      level: level as LogLevel,
-      message,
-      data: typeof data === "object" ? data : undefined,
+      logAggregator.log({
+        source: "mcp",
+        sourceName: serverName,
+        level: level as LogLevel,
+        message,
+        data: typeof data === "object" ? data : undefined,
+      });
     });
-  });
 
   // Set up storage request handlers for server→client RPC.
   // These allow MCP servers to call back to Creature Desktop for storage operations.
