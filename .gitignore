@@ -20,6 +20,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Proposals (local only, never committed)
+_proposals/
+
 # Logs
 *.log
 npm-debug.log*
