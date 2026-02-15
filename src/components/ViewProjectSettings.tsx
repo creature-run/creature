@@ -722,13 +722,6 @@ export function ViewProjectSettings({ onClose }: ViewProjectSettingsProps) {
           </div>
         </div>
 
-        <div className="sticky bottom-0 z-10 border-t border-border-secondary bg-background-primary/95 backdrop-blur">
-          <div className="mx-auto w-full max-w-[800px] px-6 py-4 flex items-center justify-end">
-            <Button onClick={handleSaveChanges} disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save Changes"}
-            </Button>
-          </div>
-        </div>
       </div>
 
       {/* Add MCPs Dialog (tabbed) */}

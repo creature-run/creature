@@ -1,9 +1,13 @@
 /**
  * MCP Notes Styles
  *
- * Minimal styles for elements that can't be styled with Tailwind classes.
- * Primarily Milkdown editor theming and animations.
+ * The SDK's Tailwind CSS import is required so that @tailwindcss/postcss
+ * generates utility classes for this app's own source files. Without it,
+ * only the pre-compiled utilities inside open-mcp-app-ui/styles.css would
+ * be available — those only cover classes the library itself uses.
  */
+
+@import "open-mcp-app/styles/tailwind.css";
 
 html,
 body,
@@ -11,13 +15,6 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
-}
-
-/* Spin animation for loading spinner */
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* =============================================================================

@@ -1092,7 +1092,7 @@ export function ChatInput({
               </HoverCardTrigger>
               <HoverCardContent side="top" align="start">
                 {project?.context.local_directory?.path ? (
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 text-sm">
                     <Folder size={18} weight="fill" className="shrink-0 mt-0.5" />
                     <div>
                       <div className="font-medium mb-1">Local directory is set</div>
@@ -1131,7 +1131,7 @@ export function ChatInput({
             </HoverCardTrigger>
             <HoverCardContent side="top" align="start">
               {project?.context.custom_instructions ? (
-                <div className="flex gap-3">
+                <div className="flex gap-3 text-sm">
                   <FileText size={18} weight="regular" className="shrink-0 mt-0.5" />
                   <div>
                     <div className="font-medium mb-1">Custom instructions are set</div>

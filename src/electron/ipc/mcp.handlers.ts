@@ -260,9 +260,14 @@ export const createFromTemplate = async ({
     const packageJsonPath = path.join(mcpDir, "package.json");
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
 
-    if (isWithinWorkspace(mcpDir) && packageJson.dependencies?.["open-mcp-app"]) {
-      packageJson.dependencies["open-mcp-app"] = "*";
-      console.log(`[MCP] Within workspace: using * for SDK`);
+    if (isWithinWorkspace(mcpDir)) {
+      if (packageJson.dependencies?.["open-mcp-app"]) {
+        packageJson.dependencies["open-mcp-app"] = "*";
+      }
+      if (packageJson.dependencies?.["open-mcp-app-ui"]) {
+        packageJson.dependencies["open-mcp-app-ui"] = "*";
+      }
+      console.log(`[MCP] Within workspace: using * for SDK packages`);
       fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
     }
 

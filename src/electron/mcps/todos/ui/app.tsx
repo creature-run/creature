@@ -2,22 +2,35 @@
  * MCP Todos UI
  *
  * A clean, interactive todo list with detail view for editing notes.
- * Uses Tailwind 4 with SDK theme mapping for host-provided variables.
+ * Built entirely with open-mcp-app-ui components and the SDK theme mapping
+ * so the app inherits its look from the host platform.
  */
 
 import { useEffect, useCallback, useState, useRef, type FormEvent } from "react";
 import { HostProvider, useHost, type Environment } from "open-mcp-app/react";
-import { MagnifyingGlass } from "@phosphor-icons/react";
+import {
+  AppLayout,
+  Heading,
+  Text,
+  Button,
+  Badge,
+  Input,
+  Checkbox,
+  Card,
+} from "open-mcp-app-ui";
 import { DetailView } from "./DetailView";
 import type { Todo, TodoData, SearchResultData, TodoWidgetState, View } from "./types";
-// Tailwind 4 integration - imports SDK theme mapping for host-provided variables
-import "open-mcp-app/styles/tailwind.css";
+import "open-mcp-app-ui/styles.css";
 import "./styles.css";
 
 // =============================================================================
 // List View Components
 // =============================================================================
 
+/**
+ * Single todo item row.
+ * Clicking the row opens the detail view; checkbox and delete have separate handlers.
+ */
 function TodoItem({
   todo,
   onToggle,
@@ -29,67 +42,52 @@ function TodoItem({
   onDelete: (id: string) => void;
   onOpen: (id: string) => void;
 }) {
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest(".todo-checkbox") || target.closest(".todo-delete")) {
-        return;
-      }
-      onOpen(todo.id);
-    },
-    [todo.id, onOpen]
-  );
-
   return (
-    <div
-      className={`flex items-center gap-2.5 p-2 px-2.5 bg-bg-secondary border border-bdr-secondary rounded-md cursor-pointer transition-colors hover:bg-bg-tertiary ${todo.completed ? "completed" : ""}`}
-      onClick={handleClick}
+    <Card
+      variant="secondary"
+      padding="sm"
+      className="flex items-center gap-4 cursor-pointer transition-colors hover:bg-bg-secondary pl-[18px]"
+      onClick={() => onOpen(todo.id)}
     >
-      <div
-        className={`todo-checkbox w-4 h-4 border-[1.5px] border-bdr-primary rounded-sm cursor-pointer flex items-center justify-center shrink-0 transition-all hover:border-ring-primary ${todo.completed ? "bg-bg-inverse border-bg-inverse" : ""}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle(todo.id);
-        }}
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className={`w-3.5 h-3.5 stroke-txt-inverse stroke-[3] fill-none ${todo.completed ? "opacity-100" : "opacity-0"}`}
-        >
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
+      {/* Wrapper stops click from propagating to the row's onOpen handler */}
+      <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          checked={todo.completed}
+          onChange={() => onToggle(todo.id)}
+        />
       </div>
       <div className="flex-1 flex flex-col gap-0.5 min-w-0">
-        <span className={`break-words text-sm ${todo.completed ? "line-through text-txt-secondary" : ""}`}>
+        <Text
+          as="span"
+          size="sm"
+          variant={todo.completed ? "secondary" : "primary"}
+          className={todo.completed ? "line-through" : ""}
+        >
           {todo.text}
-        </span>
-        {todo.notes && <span className="text-xs text-txt-tertiary">Has notes</span>}
+        </Text>
+        {todo.notes && (
+          <Text as="span" size="sm" variant="tertiary">Has notes</Text>
+        )}
       </div>
-      <button
-        className="todo-delete w-6 h-6 border-none bg-transparent text-txt-secondary cursor-pointer rounded-sm flex items-center justify-center transition-all shrink-0 hover:bg-bg-tertiary hover:text-txt-primary"
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={(e) => {
           e.stopPropagation();
           onDelete(todo.id);
         }}
         title="Delete"
-        type="button"
+        aria-label="Delete"
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-    </div>
+        &times;
+      </Button>
+    </Card>
   );
 }
 
+/**
+ * Scrollable list of todo items, or an empty state message.
+ */
 function TodoList({
   todos,
   onToggle,
@@ -103,25 +101,14 @@ function TodoList({
 }) {
   if (todos.length === 0) {
     return (
-      <div className="flex-1 overflow-y-auto flex flex-col gap-1">
-        <div className="flex-1 flex flex-col items-center justify-center text-txt-secondary gap-2">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1"
-            className="w-12 h-12 opacity-50"
-          >
-            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          <span className="text-base">No todos yet</span>
-        </div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-2">
+        <Text variant="secondary">No todos yet</Text>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto flex flex-col mt-2 gap-2 scrollbar-thin">
+    <div className="flex-1 overflow-y-auto flex flex-col gap-2">
       {todos.map((todo) => (
         <TodoItem
           key={todo.id}
@@ -135,6 +122,10 @@ function TodoList({
   );
 }
 
+/**
+ * Form for adding a new todo.
+ * Uses the library Input and Button for consistent styling.
+ */
 function AddTodoForm({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
   const [text, setText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -156,42 +147,34 @@ function AddTodoForm({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
   );
 
   return (
-    <form className="flex gap-2 items-stretch" onSubmit={handleSubmit}>
-      <div className="relative flex-1">
-        <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-tertiary w-3 h-3 pointer-events-none"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-        <input
-          type="text"
+    <form className="flex gap-2 items-center" onSubmit={handleSubmit}>
+      <div className="flex-1">
+        <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Add a new todo..."
           autoComplete="off"
           disabled={isSubmitting}
           maxLength={250}
-          className="w-full py-2 pl-8 pr-3 bg-bg-secondary border border-bdr-secondary rounded-md text-txt-primary font-inherit text-sm outline-none focus:border-ring-primary placeholder:text-txt-secondary"
+          size="md"
         />
       </div>
-      <button
+      <Button
         type="submit"
+        variant="primary"
+        size="md"
         disabled={isSubmitting || !text.trim()}
-        className="px-4 bg-bg-inverse border border-transparent rounded-md text-txt-inverse font-inherit text-sm font-medium cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Add
-      </button>
+      </Button>
     </form>
   );
 }
 
+/**
+ * Debounced search input.
+ * Fires onSearch after 300ms of inactivity, or onClear when emptied.
+ */
 function SearchBar({
   onSearch,
   onClear,
@@ -224,29 +207,14 @@ function SearchBar({
     [onSearch, onClear]
   );
 
-  const handleClear = useCallback(() => {
-    setQuery("");
-    onClear();
-  }, [onClear]);
-
   return (
-    <div className="pt-2 pb-3 mb-2 -mx-4 px-4 border-b border-bdr-secondary shrink-0">
-      <div className="relative w-full">
-        <MagnifyingGlass
-          size={12}
-          weight="regular"
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-tertiary"
-        />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => handleChange(e.target.value)}
-          placeholder="Search todos..."
-          autoComplete="off"
-          className="w-full py-2 pl-8 pr-3 bg-bg-secondary border border-bdr-secondary rounded-md text-sm text-txt-primary outline-none focus:border-ring-primary placeholder:text-txt-secondary"
-        />
-      </div>
-    </div>
+    <Input
+      value={query}
+      onChange={(e) => handleChange(e.target.value)}
+      placeholder="Search todos..."
+      autoComplete="off"
+      size="md"
+    />
   );
 }
 
@@ -254,6 +222,9 @@ function SearchBar({
 // Main Component
 // =============================================================================
 
+/**
+ * Human-readable label for the current host environment.
+ */
 function getEnvironmentLabel(env: Environment): string {
   switch (env) {
     case "chatgpt":
@@ -284,7 +255,7 @@ function TodoApp() {
   const hasInitialized = useRef(false);
   const hasRestoredState = useRef(false);
 
-  const { callTool, isReady, log, exp, exp_widgetState, onToolResult, environment: hostEnvironment } = useHost();
+  const { callTool, isReady, log, exp, exp_widgetState, onToolResult, environment: hostEnvironment, hostContext } = useHost();
 
   const [widgetState, setWidgetState] = exp_widgetState<TodoWidgetState>();
 
@@ -483,13 +454,19 @@ function TodoApp() {
     setSearchResults(null);
   }, []);
 
+  // -- Loading State --
+
   if (!isReady) {
     return (
-      <div className="flex items-center justify-center h-full w-full bg-bg-primary text-txt-primary">
-        <div className="w-6 h-6 border-2 border-bdr-secondary border-t-txt-primary rounded-full animate-spin" />
-      </div>
+      <AppLayout displayMode={hostContext?.displayMode} className="h-full">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-bdr-secondary border-t-txt-primary rounded-full animate-spin" />
+        </div>
+      </AppLayout>
     );
   }
+
+  // -- Detail View --
 
   if (view === "detail" && selectedTodo) {
     return (
@@ -500,9 +477,12 @@ function TodoApp() {
         onBack={handleBack}
         isSaving={isSaving}
         lastSaved={lastSaved}
+        displayMode={hostContext?.displayMode}
       />
     );
   }
+
+  // -- List View --
 
   const completedCount = todos.filter((t) => t.completed).length;
   const displayTodos = isSearchMode && searchResults
@@ -515,57 +495,51 @@ function TodoApp() {
       }))
     : todos;
 
+  const statusLabel = isSearchMode && searchResults
+    ? `${searchResults.matches.length} found`
+    : todos.length === 0
+      ? "No items"
+      : `${completedCount}/${todos.length} done`;
+
   return (
-    <div className="flex flex-col h-full py-3 px-4 gap-1 bg-bg-primary text-txt-primary">
+    <AppLayout displayMode={hostContext?.displayMode} className="h-full">
       <header className="flex items-baseline justify-between shrink-0">
-        <h1 className="text-lg font-medium m-0 pb-2">Todo List</h1>
-        <span className="text-txt-secondary text-xs">
-          {isSearchMode && searchResults
-            ? `${searchResults.matches.length} found`
-            : todos.length === 0
-              ? "No items"
-              : `${completedCount}/${todos.length} done`}
-        </span>
+        <Heading level={2} size="sm">Todo List</Heading>
+        <Badge variant="secondary">{statusLabel}</Badge>
       </header>
 
       <AddTodoForm onAdd={handleAdd} />
 
-      <SearchBar
-        onSearch={handleSearch}
-        onClear={handleClearSearch}
-        isSearching={searchState.status === "loading"}
-      />
-
-      {isSearchMode && searchResults && searchResults.matches.length === 0 ? (
-        <div className="flex-1 overflow-y-auto flex flex-col gap-1">
-          <div className="flex-1 flex flex-col items-center justify-center text-txt-secondary gap-2">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-              className="w-12 h-12 opacity-50"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <span>No results for "{searchResults.query}"</span>
-          </div>
+      <div className="inline:-mx-2 pip:-mx-3 fullscreen:-mx-4 border-b border-bdr-secondary">
+        <div className="inline:px-2 pip:px-3 fullscreen:px-4 pb-3">
+          <SearchBar
+            onSearch={handleSearch}
+            onClear={handleClearSearch}
+            isSearching={searchState.status === "loading"}
+          />
         </div>
-      ) : (
-        <TodoList
-          todos={displayTodos}
-          onToggle={handleToggle}
-          onDelete={handleDelete}
-          onOpen={handleOpen}
-        />
-      )}
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col">
+        {isSearchMode && searchResults && searchResults.matches.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2">
+            <Text variant="secondary">No results for &ldquo;{searchResults.query}&rdquo;</Text>
+          </div>
+        ) : (
+          <TodoList
+            todos={displayTodos}
+            onToggle={handleToggle}
+            onDelete={handleDelete}
+            onOpen={handleOpen}
+          />
+        )}
+      </div>
 
       {hostEnvironment === "standalone" && (
-        <div className="fixed bottom-2 right-2 py-1 px-2 bg-bg-tertiary text-txt-secondary text-xs rounded-sm opacity-70">
+        <Badge variant="secondary" className="fixed bottom-2 right-2 opacity-70">
           {getEnvironmentLabel(hostEnvironment)}
-        </div>
+        </Badge>
       )}
-    </div>
+    </AppLayout>
   );
 }

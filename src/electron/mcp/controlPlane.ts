@@ -293,25 +293,115 @@ const handleDevkitToolCall = async ({
   }
 
   if (action === "get_mcp_app_sdk_docs") {
-    // Resolve the SDK reference docs path relative to the app root
-    const docsPath = app.isPackaged
-      ? path.join(process.resourcesPath, "docs", "sdk-reference.md")
-      : path.join(__dirname, "..", "..", "..", "docs", "sdk-reference.md");
-
-    try {
-      const content = fs.readFileSync(docsPath, "utf-8");
+    const topics = args.topics as string[] | undefined;
+    if (!topics || topics.length === 0) {
       return {
-        content: [{ type: "text", text: content }],
-        structuredContent: { type: "sdk_docs" },
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      return {
-        content: [{ type: "text", text: `Failed to read SDK docs: ${errorMessage}` }],
-        structuredContent: { type: "sdk_docs", error: errorMessage },
+        content: [{ type: "text", text: "Error: topics array is required. Available topics: server, tools, ui-entry, views, callTool, widgetState, styling, storage, onToolResult, development" }],
+        structuredContent: { type: "sdk_docs", error: "topics is required" },
         isError: true,
       };
     }
+
+    /**
+     * Resolve per-topic SDK doc files from sdk/docs/topics/.
+     * Reads all requested topics and concatenates them with headers.
+     * Any topic not found is reported inline without failing the whole batch.
+     */
+    const topicsDir = app.isPackaged
+      ? path.join(process.resourcesPath, "docs", "topics")
+      : path.join(app.getAppPath(), "artifacts", "sdk", "docs", "topics");
+
+    const sections: string[] = [];
+    const results: { topic: string; found: boolean }[] = [];
+
+    for (const topic of topics) {
+      const docPath = path.join(topicsDir, `${topic}.md`);
+      try {
+        const content = fs.readFileSync(docPath, "utf-8");
+        sections.push(topics.length > 1 ? `--- ${topic} ---\n\n${content}` : content);
+        results.push({ topic, found: true });
+      } catch {
+        sections.push(`--- ${topic} ---\n\nNo docs found for topic "${topic}".`);
+        results.push({ topic, found: false });
+      }
+    }
+
+    const hasErrors = results.some((r) => !r.found);
+    if (hasErrors) {
+      let available: string[] = [];
+      try {
+        available = fs.readdirSync(topicsDir)
+          .filter((f: string) => f.endsWith(".md"))
+          .map((f: string) => f.replace(".md", ""));
+      } catch {
+        // Ignore — directory might not exist in packaged builds
+      }
+      if (available.length > 0) {
+        sections.push(`\nAvailable topics: ${available.join(", ")}`);
+      }
+    }
+
+    return {
+      content: [{ type: "text", text: sections.join("\n\n") }],
+      structuredContent: { type: "sdk_docs", results },
+      ...(hasErrors && results.every((r) => !r.found) ? { isError: true } : {}),
+    };
+  }
+
+  if (action === "get_component_docs") {
+    const components = args.components as string[] | undefined;
+    if (!components || components.length === 0) {
+      return {
+        content: [{ type: "text", text: "Error: components array is required" }],
+        structuredContent: { type: "component_docs", error: "components is required" },
+        isError: true,
+      };
+    }
+
+    /**
+     * Resolve per-component doc files from sdk-ui/docs/components/.
+     * Reads all requested components and concatenates them with headers.
+     * Any component not found is reported inline without failing the whole batch.
+     */
+    const componentDocsDir = app.isPackaged
+      ? path.join(process.resourcesPath, "docs", "components")
+      : path.join(app.getAppPath(), "artifacts", "sdk-ui", "docs", "components");
+
+    const sections: string[] = [];
+    const results: { component: string; found: boolean }[] = [];
+
+    for (const name of components) {
+      const docPath = path.join(componentDocsDir, `${name}.md`);
+      try {
+        const content = fs.readFileSync(docPath, "utf-8");
+        sections.push(components.length > 1 ? `--- ${name} ---\n\n${content}` : content);
+        results.push({ component: name, found: true });
+      } catch {
+        sections.push(`--- ${name} ---\n\nNo docs found for component "${name}".`);
+        results.push({ component: name, found: false });
+      }
+    }
+
+    const hasErrors = results.some((r) => !r.found);
+    if (hasErrors) {
+      let available: string[] = [];
+      try {
+        available = fs.readdirSync(componentDocsDir)
+          .filter((f: string) => f.endsWith(".md"))
+          .map((f: string) => f.replace(".md", ""));
+      } catch {
+        // Ignore — directory might not exist in packaged builds
+      }
+      if (available.length > 0) {
+        sections.push(`\nAvailable components: ${available.join(", ")}`);
+      }
+    }
+
+    return {
+      content: [{ type: "text", text: sections.join("\n\n") }],
+      structuredContent: { type: "component_docs", results },
+      ...(hasErrors && results.every((r) => !r.found) ? { isError: true } : {}),
+    };
   }
 
   if (action === "get_conversation") {

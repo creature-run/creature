@@ -1,8 +1,13 @@
 /**
  * MCP Devkit Styles
  *
- * Minimal styles for elements that can't be styled with Tailwind classes.
+ * The SDK's Tailwind CSS import is required so that @tailwindcss/postcss
+ * generates utility classes for this app's own source files. Without it,
+ * only the pre-compiled utilities inside open-mcp-app-ui/styles.css would
+ * be available — those only cover classes the library itself uses.
  */
+
+@import "open-mcp-app/styles/tailwind.css";
 
 html,
 body,
@@ -10,4 +15,112 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
+}
+
+/**
+ * Forced dark panel for developer tool views (Logs, Conversation, Prompt).
+ * Overrides the MCP Apps spec CSS variables so the content area is always
+ * dark regardless of the host theme, matching Creature's DevConsole style.
+ * Only applied to the content area — tab bar and UI Library remain theme-aware.
+ */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.devkit-dark-panel {
+  /* Force dark color-scheme so light-dark() resolves to dark values
+     and native UI elements (scrollbars, selection) render dark. */
+  color-scheme: dark;
+
+  /*
+   * Override BOTH the MCP Apps spec variables AND the Tailwind theme
+   * tokens (--color-bg-*, --color-txt-*, --color-bdr-*) directly.
+   *
+   * Tailwind 4's @theme creates intermediate tokens at :root that
+   * reference the spec vars via var(). In some contexts the var()
+   * chain resolves at :root before inheriting, so descendant overrides
+   * of only the spec vars don't propagate. Setting both levels
+   * ensures the dark values are always used.
+   */
+
+  /* ===== Background ===== */
+  --color-background-primary: #0D0D0B;
+  --color-background-secondary: #1A1917;
+  --color-background-tertiary: #141311;
+  --color-background-inverse: #efefef;
+  --color-background-ghost: transparent;
+  --color-background-disabled: #1A1917;
+  --color-background-info: #1e3a5f;
+  --color-background-danger: #5c1d1d;
+  --color-background-success: #14532d;
+  --color-background-warning: #713f12;
+
+  --color-bg-primary: #0D0D0B;
+  --color-bg-secondary: #1A1917;
+  --color-bg-tertiary: #141311;
+  --color-bg-inverse: #efefef;
+  --color-bg-ghost: transparent;
+  --color-bg-disabled: #1A1917;
+  --color-bg-info: #1e3a5f;
+  --color-bg-danger: #5c1d1d;
+  --color-bg-success: #14532d;
+  --color-bg-warning: #713f12;
+
+  /* ===== Text ===== */
+  --color-text-primary: #efefef;
+  --color-text-secondary: #888888;
+  --color-text-tertiary: #4A4846;
+  --color-text-inverse: #0D0D0B;
+  --color-text-ghost: #888888;
+  --color-text-disabled: #4A4846;
+  --color-text-info: #60a5fa;
+  --color-text-danger: #f87171;
+  --color-text-success: #4ade80;
+  --color-text-warning: #fbbf24;
+
+  --color-txt-primary: #efefef;
+  --color-txt-secondary: #888888;
+  --color-txt-tertiary: #4A4846;
+  --color-txt-inverse: #0D0D0B;
+  --color-txt-ghost: #888888;
+  --color-txt-disabled: #4A4846;
+  --color-txt-info: #60a5fa;
+  --color-txt-danger: #f87171;
+  --color-txt-success: #4ade80;
+  --color-txt-warning: #fbbf24;
+
+  /* ===== Border ===== */
+  --color-border-primary: #4A4846;
+  --color-border-secondary: #242222;
+  --color-border-tertiary: #1A1917;
+  --color-border-inverse: rgba(255, 255, 255, 0.3);
+  --color-border-ghost: transparent;
+  --color-border-disabled: #242222;
+  --color-border-info: #1e40af;
+  --color-border-danger: #991b1b;
+  --color-border-success: #166534;
+  --color-border-warning: #854d0e;
+
+  --color-bdr-primary: #4A4846;
+  --color-bdr-secondary: #242222;
+  --color-bdr-tertiary: #1A1917;
+  --color-bdr-inverse: rgba(255, 255, 255, 0.3);
+  --color-bdr-ghost: transparent;
+  --color-bdr-disabled: #242222;
+  --color-bdr-info: #1e40af;
+  --color-bdr-danger: #991b1b;
+  --color-bdr-success: #166534;
+  --color-bdr-warning: #854d0e;
+
+  /* ===== Ring / Focus ===== */
+  --color-ring-primary: #cdcdcd;
+  --color-ring-secondary: #4A4846;
+
+  /* ===== Shadows ===== */
+  --shadow-hairline: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
+
+  background-color: #0D0D0B;
+  color: #efefef;
 }

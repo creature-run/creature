@@ -10,8 +10,16 @@
     "build:ui": "vite build --mode production"
   },
   "dependencies": {
+    "@milkdown/kit": "^7.18.0",
+    "@milkdown/plugin-listener": "^7.18.0",
+    "@milkdown/react": "^7.18.0",
+    "@milkdown/utils": "^7.18.0",
+    "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.18",
-    "open-mcp-app": "file:../../../../artifacts/sdk"
+    "lucide-react": "^0.469.0",
+    "open-mcp-app": "file:../../../../artifacts/sdk",
+    "open-mcp-app-ui": "file:../../../../artifacts/sdk-ui",
+    "recharts": "^2.15.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",

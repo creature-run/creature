@@ -155,13 +155,19 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       const cssVars = await window.electronAPI.settings.getCssVariables({ mode });
       applyCssVariables(cssVars);
 
-      // Filter to spec-compliant variables and store in state
-      // This avoids DOM timing issues when MCP Apps need the variables
+      // Filter to spec-compliant variables and store in state.
+      // This avoids DOM timing issues when MCP Apps need the variables.
+      // MCP Apps receive mcpFontSans (e.g. ui-sans-serif) instead of the
+      // host app's branded fontSans (e.g. Sora), so they render with a
+      // neutral system font that feels native on any platform.
       const specVars: Partial<McpUiStyles> = {};
       for (const key of SPEC_STYLE_VARIABLE_KEYS) {
         if (cssVars[key]) {
           specVars[key] = cssVars[key];
         }
+      }
+      if (cssVars["--font-sans-mcp"]) {
+        (specVars as Record<string, string>)["--font-sans"] = cssVars["--font-sans-mcp"];
       }
       setSpecStyleVariables(specVars);
 
