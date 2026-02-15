@@ -44,6 +44,7 @@ function TodoItem({
 }) {
   return (
     <Card
+      variant="secondary"
       padding="sm"
       className="flex items-center gap-4 cursor-pointer transition-colors hover:bg-bg-secondary pl-[18px]"
       onClick={() => onOpen(todo.id)}

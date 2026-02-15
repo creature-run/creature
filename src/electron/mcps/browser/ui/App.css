@@ -1,9 +1,11 @@
 /**
  * Browser MCP Styles
  *
- * Minimal styles for elements that can't be styled with Tailwind classes.
- * All component styling uses Tailwind 4 utility classes with SDK theme tokens.
+ * The SDK's Tailwind CSS import is required so that @tailwindcss/postcss
+ * generates utility classes for this app's own source files.
  */
+
+@import "open-mcp-app/styles/tailwind.css";
 
 html,
 body,

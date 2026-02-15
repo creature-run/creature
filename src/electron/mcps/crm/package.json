@@ -10,7 +10,8 @@
     "build:ui": "vite build --mode production"
   },
   "dependencies": {
-    "open-mcp-app": "file:../../../../artifacts/sdk"
+    "open-mcp-app": "file:../../../../artifacts/sdk",
+    "open-mcp-app-ui": "file:../../../../artifacts/sdk-ui"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",

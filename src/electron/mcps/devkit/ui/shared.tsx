@@ -24,7 +24,7 @@ export const TabBar = ({
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
 }) => (
-  <Tabs value={activeTab} onChange={(v) => onTabChange(v as TabId)}>
+  <Tabs value={activeTab} onChange={(v) => onTabChange(v as TabId)} borderVariant="secondary">
     <Tabs.Tab value="logs">Logs</Tabs.Tab>
     <Tabs.Tab value="conversation">Conversation</Tabs.Tab>
     <Tabs.Tab value="prompt">System Prompt</Tabs.Tab>

@@ -13,7 +13,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   Button, Text, Badge, Card, Heading,
   Input, Textarea, Select, Checkbox, Switch,
-  Alert, Divider, Show, useDisplayMode,
+  Alert, Divider, Show, useDisplayMode, Tabs,
   RadioGroup, Slider, TagInput, DatePicker, DateRangePicker,
   ToggleGroup, Menu, CodeBlock,
 } from "open-mcp-app-ui";
@@ -44,6 +44,7 @@ const SECTIONS = [
   { id: "form-controls", label: "Form Controls" },
   { id: "feedback", label: "Feedback & Overlays" },
   { id: "data-display", label: "Data Display" },
+  { id: "tabs", label: "Tabs" },
   { id: "data-table", label: "Data Table" },
   { id: "editor", label: "Editor" },
   { id: "charts", label: "Charts" },
@@ -243,6 +244,8 @@ export const ComponentsView = () => {
   const [toggleVal, setToggleVal] = useState("grid");
   const [menuCheck1, setMenuCheck1] = useState(true);
   const [menuCheck2, setMenuCheck2] = useState(false);
+  const [tabVal, setTabVal] = useState("overview");
+  const [tabVal2, setTabVal2] = useState("general");
 
   /**
    * Scrolls smoothly to a section when the nav select changes.
@@ -1377,8 +1380,9 @@ console.log(fibonacci(10));`}</CodeBlock>
           <DemoSection
             title="Card"
             description="Bordered content container with variant and padding options."
-            code={`<Card>Default card</Card>
-<Card variant="ghost" padding="lg">Ghost card</Card>
+            code={`<Card>Default card (primary border)</Card>
+<Card variant="secondary">Secondary border (subtler)</Card>
+<Card variant="ghost" padding="lg">Ghost card (no border)</Card>
 <Card padding="none">No padding</Card>`}
           >
             <VariationLabel>variant="default"</VariationLabel>
@@ -1388,6 +1392,16 @@ console.log(fibonacci(10));`}</CodeBlock>
               </Heading>
               <Text variant="secondary" size="sm">
                 Has border, shadow, and medium padding.
+              </Text>
+            </Card>
+
+            <VariationLabel>variant="secondary" (subtler border)</VariationLabel>
+            <Card variant="secondary">
+              <Heading level={4} size="sm">
+                Secondary Card
+              </Heading>
+              <Text variant="secondary" size="sm">
+                Lighter border for less visual weight.
               </Text>
             </Card>
 
@@ -1413,38 +1427,75 @@ console.log(fibonacci(10));`}</CodeBlock>
           {/* Divider */}
           <DemoSection
             title="Divider"
-            description="Horizontal separator line with configurable vertical spacing."
+            description="Horizontal separator line with configurable vertical spacing and border variant."
             code={`<Divider />
+<Divider variant="secondary" />
 <Divider spacing="none" />
 <Divider spacing="sm" />
 <Divider spacing="lg" />`}
           >
-            <VariationLabel>spacing="none"</VariationLabel>
-            <Text variant="secondary" size="sm">
-              Above
-            </Text>
-            <Divider spacing="none" />
-            <Text variant="secondary" size="sm">
-              Below — no margin
-            </Text>
-
-            <VariationLabel>spacing="sm"</VariationLabel>
+            <VariationLabel>variant="default" (primary border)</VariationLabel>
             <Text variant="secondary" size="sm">
               Above
             </Text>
             <Divider spacing="sm" />
             <Text variant="secondary" size="sm">
-              Below — small margin
+              Below — primary border
             </Text>
 
-            <VariationLabel>spacing="md" (default)</VariationLabel>
+            <VariationLabel>variant="secondary" (subtler border)</VariationLabel>
             <Text variant="secondary" size="sm">
               Above
             </Text>
-            <Divider spacing="md" />
+            <Divider spacing="sm" variant="secondary" />
             <Text variant="secondary" size="sm">
-              Below — medium margin
+              Below — secondary border
             </Text>
+
+            <VariationLabel>spacing="none" / "sm" / "md" / "lg"</VariationLabel>
+            <Divider spacing="none" />
+            <Divider spacing="sm" />
+            <Divider spacing="md" />
+            <Divider spacing="lg" />
+          </DemoSection>
+
+          {/* ================================================================= */}
+          {/* Tabs                                                              */}
+          {/* ================================================================= */}
+
+          <SectionAnchor id="tabs" />
+          <Heading level={2} size="md" className="mb-4 mt-6">
+            Tabs
+          </Heading>
+
+          <DemoSection
+            title="Tabs"
+            description="Underline-style tab navigation. Supports borderVariant for primary or secondary border style."
+            code={`<Tabs value={tab} onChange={setTab}>
+  <Tabs.Tab value="overview">Overview</Tabs.Tab>
+  <Tabs.Tab value="settings">Settings</Tabs.Tab>
+  <Tabs.Tab value="logs">Logs</Tabs.Tab>
+</Tabs>
+
+{/* Secondary border style */}
+<Tabs value={tab} onChange={setTab} borderVariant="secondary">
+  <Tabs.Tab value="general">General</Tabs.Tab>
+  <Tabs.Tab value="advanced">Advanced</Tabs.Tab>
+</Tabs>`}
+          >
+            <VariationLabel>Default (primary border)</VariationLabel>
+            <Tabs value={tabVal} onChange={setTabVal}>
+              <Tabs.Tab value="overview">Overview</Tabs.Tab>
+              <Tabs.Tab value="settings">Settings</Tabs.Tab>
+              <Tabs.Tab value="logs">Logs</Tabs.Tab>
+            </Tabs>
+
+            <VariationLabel>borderVariant="secondary" (subtler border)</VariationLabel>
+            <Tabs value={tabVal2} onChange={setTabVal2} borderVariant="secondary">
+              <Tabs.Tab value="general">General</Tabs.Tab>
+              <Tabs.Tab value="advanced">Advanced</Tabs.Tab>
+              <Tabs.Tab value="about">About</Tabs.Tab>
+            </Tabs>
           </DemoSection>
 
           {/* ================================================================= */}
@@ -1468,7 +1519,10 @@ const columns = [
   { accessorKey: "status", header: "Status" },
 ];
 
-<DataTable columns={columns} data={users} sortable />`}
+<DataTable columns={columns} data={users} sortable />
+
+// Subtler border style
+<DataTable columns={columns} data={users} sortable borderVariant="secondary" />`}
           >
             <VariationLabel>Sortable (click headers)</VariationLabel>
             <DataTable
@@ -1539,6 +1593,18 @@ const columns = [
               data={[]}
               emptyMessage="No users found"
             />
+
+            <VariationLabel>borderVariant="secondary" (subtler border)</VariationLabel>
+            <DataTable
+              columns={[
+                { accessorKey: "name", header: "Name" },
+                { accessorKey: "role", header: "Role" },
+                { accessorKey: "status", header: "Status" },
+              ]}
+              data={DEMO_TABLE_DATA}
+              sortable
+              borderVariant="secondary"
+            />
           </DemoSection>
 
           {/* ================================================================= */}
@@ -1553,7 +1619,7 @@ const columns = [
           {/* Basic Editor */}
           <DemoSection
             title="Editor"
-            description="Markdown + rich text editor built on Milkdown (ProseMirror + Remark). Separate import from open-mcp-app-ui/editor. Supports WYSIWYG, raw markdown, and split modes. No border by default — use `bordered` to add one."
+            description="Markdown + rich text editor built on Milkdown (ProseMirror + Remark). Separate import from open-mcp-app-ui/editor. Supports WYSIWYG and raw markdown modes. No border by default — use `bordered` to add one."
             code={`import { Editor } from "open-mcp-app-ui/editor";
 
 <Editor
@@ -1562,8 +1628,11 @@ const columns = [
   placeholder="Start writing..."
 />
 
-{/* With border and rounded corners */}
-<Editor value={markdown} onChange={setMarkdown} bordered />`}
+{/* With primary border */}
+<Editor value={markdown} onChange={setMarkdown} bordered />
+
+{/* With secondary (subtler) border */}
+<Editor value={markdown} onChange={setMarkdown} bordered="secondary" />`}
           >
             <VariationLabel>WYSIWYG with mode toggle (default, no border)</VariationLabel>
             <Editor
@@ -1574,11 +1643,19 @@ const columns = [
               maxHeight={400}
             />
 
-            <VariationLabel>Bordered</VariationLabel>
+            <VariationLabel>bordered (primary border)</VariationLabel>
             <Editor
               value=""
-              placeholder="Standalone editor with border..."
+              placeholder="Editor with primary border..."
               bordered
+              minHeight={150}
+            />
+
+            <VariationLabel>bordered="secondary" (subtler border)</VariationLabel>
+            <Editor
+              value=""
+              placeholder="Editor with secondary border..."
+              bordered="secondary"
               minHeight={150}
             />
 
@@ -1620,18 +1697,26 @@ const columns = [
   XAxis, YAxis, Tooltip, Legend, PolarGrid, PolarAngleAxis,
 } from "open-mcp-app-ui/charts";
 
-<LineChart data={data} height={250}>
+// borderVariant controls axis lines, tick marks, AND grid lines together
+<LineChart data={data} height={250} borderVariant="secondary">
   <XAxis dataKey="month" />
   <YAxis />
   <Tooltip />
   <Line dataKey="revenue" />
-  <Line dataKey="costs" />
+</LineChart>
+
+// "default" uses --color-border-primary (stronger)
+<LineChart data={data} height={250}>
+  <XAxis dataKey="month" />
+  <YAxis />
+  <Line dataKey="revenue" />
 </LineChart>`}
           >
-            <VariationLabel>Line Chart (multi-series)</VariationLabel>
+            <VariationLabel>Line Chart (multi-series, borderVariant="secondary")</VariationLabel>
             <LineChart
               data={CHART_DEMO_LINE}
               height={220}
+              borderVariant="secondary"
             >
               <XAxis dataKey="month" />
               <YAxis />
@@ -1641,16 +1726,16 @@ const columns = [
               <Line dataKey="costs" name="Costs" />
             </LineChart>
 
-            <VariationLabel>Bar Chart</VariationLabel>
-            <BarChart data={CHART_DEMO_BAR} height={220}>
+            <VariationLabel>Bar Chart (borderVariant="secondary")</VariationLabel>
+            <BarChart data={CHART_DEMO_BAR} height={220} borderVariant="secondary">
               <XAxis dataKey="category" />
               <YAxis />
               <Tooltip />
               <Bar dataKey="value" name="Sales" />
             </BarChart>
 
-            <VariationLabel>Area Chart</VariationLabel>
-            <AreaChart data={CHART_DEMO_LINE} height={220}>
+            <VariationLabel>Area Chart (borderVariant="secondary")</VariationLabel>
+            <AreaChart data={CHART_DEMO_LINE} height={220} borderVariant="secondary">
               <XAxis dataKey="month" />
               <YAxis />
               <Tooltip />
@@ -1670,8 +1755,8 @@ const columns = [
               <Pie data={CHART_DEMO_PIE} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} />
             </PieChart>
 
-            <VariationLabel>Scatter Chart</VariationLabel>
-            <ScatterChart height={220}>
+            <VariationLabel>Scatter Chart (borderVariant="secondary")</VariationLabel>
+            <ScatterChart height={220} borderVariant="secondary">
               <XAxis dataKey="x" name="Weight (kg)" type="number" />
               <YAxis dataKey="y" name="Height (cm)" type="number" />
               <Tooltip />
@@ -1686,8 +1771,8 @@ const columns = [
               <Radar dataKey="score" name="Score" />
             </RadarChart>
 
-            <VariationLabel>Composed Chart (Bar + Line)</VariationLabel>
-            <ComposedChart data={CHART_DEMO_LINE} height={220}>
+            <VariationLabel>Composed Chart (Bar + Line, borderVariant="secondary")</VariationLabel>
+            <ComposedChart data={CHART_DEMO_LINE} height={220} borderVariant="secondary">
               <XAxis dataKey="month" />
               <YAxis />
               <Tooltip />
@@ -1695,8 +1780,16 @@ const columns = [
               <Line dataKey="costs" name="Costs" />
             </ComposedChart>
 
+            <VariationLabel>Default axis style (borderVariant="default" — stronger borders)</VariationLabel>
+            <LineChart data={CHART_DEMO_LINE} height={220}>
+              <XAxis dataKey="month" />
+              <YAxis />
+              <Tooltip />
+              <Line dataKey="revenue" name="Revenue" />
+            </LineChart>
+
             <VariationLabel>Custom color palette</VariationLabel>
-            <BarChart data={CHART_DEMO_BAR} height={200} colorPalette={["#e74c3c", "#2ecc71", "#3498db"]}>
+            <BarChart data={CHART_DEMO_BAR} height={200} borderVariant="secondary" colorPalette={["#e74c3c", "#2ecc71", "#3498db"]}>
               <XAxis dataKey="category" />
               <YAxis />
               <Tooltip />

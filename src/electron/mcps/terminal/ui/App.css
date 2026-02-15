@@ -1,9 +1,12 @@
 /**
  * Terminal UI Styles
  *
- * Minimal styles for elements that can't be styled with Tailwind classes.
+ * The SDK's Tailwind CSS import is required so that @tailwindcss/postcss
+ * generates utility classes for this app's own source files.
  * Terminal always uses dark mode regardless of host theme.
  */
+
+@import "open-mcp-app/styles/tailwind.css";
 
 html,
 body,

@@ -41,8 +41,7 @@ import { ComponentsView } from "./ComponentsView.js";
  * Tool results from both UI-initiated calls (callTool) and agent-initiated
  * calls flow through onToolResult, which updates the correct tab's data.
  */
-const DevkitInner = () => {
-  const { callTool, onToolResult, isReady, hostContext } = useHost();
+const DevkitInner = () => {  const { callTool, onToolResult, isReady, hostContext } = useHost();
   const [activeTab, setActiveTab] = useState<TabId>("logs");
 
   // Data state per tab - persists across tab switches and refreshes

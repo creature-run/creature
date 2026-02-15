@@ -2,9 +2,7 @@
  * MCP CRM UI
  *
  * A data-intensive CRM explorer demonstrating:
- * - Data tables with sortable columns
- * - Search and filtering
- * - Pagination
+ * - DataTable with sortable columns, filtering, pagination
  * - Detail panels with related data
  *
  * Cross-Platform Compatibility:
@@ -20,20 +18,22 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import { HostProvider, useHost, type Environment } from "open-mcp-app/react";
 import {
-  MagnifyingGlass,
-  CaretUp,
-  CaretDown,
-  CaretLeft,
-  CaretRight,
-  Funnel,
   Database,
   Trash,
   User,
   Package,
   X,
 } from "@phosphor-icons/react";
-// Tailwind 4 integration - imports SDK theme mapping for host-provided variables
-import "open-mcp-app/styles/tailwind.css";
+import {
+  AppLayout,
+  Heading,
+  Text,
+  Button,
+  Badge,
+  Card,
+} from "open-mcp-app-ui";
+import { DataTable, type ColumnDef } from "open-mcp-app-ui/table";
+import "open-mcp-app-ui/styles.css";
 import "./styles.css";
 
 // =============================================================================
@@ -42,8 +42,6 @@ import "./styles.css";
 
 type CustomerStatus = "active" | "inactive" | "lead";
 type OrderStatus = "pending" | "processing" | "shipped" | "delivered" | "cancelled";
-type SortDirection = "asc" | "desc";
-type CustomerSortField = "name" | "email" | "company" | "status" | "createdAt";
 
 interface Customer {
   id: string;
@@ -84,8 +82,8 @@ interface Pagination {
 }
 
 interface SortConfig {
-  field: CustomerSortField;
-  direction: SortDirection;
+  field: string;
+  direction: "asc" | "desc";
 }
 
 interface Filters {
@@ -133,410 +131,182 @@ interface WidgetState {
 // Utility Functions
 // =============================================================================
 
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
-}
+/**
+ * Format cent values to dollar string.
+ */
+const formatCents = (cents: number): string => `$${(cents / 100).toFixed(2)}`;
 
-function formatDate(dateStr: string): string {
+/**
+ * Format ISO date string to human-readable short date.
+ */
+const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr);
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
-}
+};
 
-function getStatusColor(status: CustomerStatus | OrderStatus): string {
-  const colors: Record<string, string> = {
-    active: "var(--color-text-success, #22c55e)",
-    inactive: "var(--color-text-secondary)",
-    lead: "var(--color-text-warning, #f59e0b)",
-    pending: "var(--color-text-warning, #f59e0b)",
-    processing: "var(--color-ring-primary)",
-    shipped: "var(--color-text-info, #3b82f6)",
-    delivered: "var(--color-text-success, #22c55e)",
-    cancelled: "var(--color-text-danger, #ef4444)",
+/**
+ * Map status values to Badge component variants.
+ * Uses the semantic variant system from open-mcp-app-ui.
+ */
+const getStatusBadgeVariant = (status: CustomerStatus | OrderStatus): "success" | "warning" | "danger" | "info" | "secondary" => {
+  const variants: Record<string, "success" | "warning" | "danger" | "info" | "secondary"> = {
+    active: "success",
+    inactive: "secondary",
+    lead: "warning",
+    pending: "warning",
+    processing: "info",
+    shipped: "info",
+    delivered: "success",
+    cancelled: "danger",
   };
-  return colors[status] || "var(--color-text-secondary)";
-}
+  return variants[status] || "secondary";
+};
+
+// =============================================================================
+// Column Definitions
+// =============================================================================
+
+/**
+ * DataTable column definitions for the customer list.
+ * Each column uses an accessor key and optional custom cell renderer.
+ */
+const customerColumns: ColumnDef<Customer, unknown>[] = [
+  {
+    accessorKey: "name",
+    header: "Name",
+    cell: ({ getValue }) => (
+      <span className="font-medium">{getValue() as string}</span>
+    ),
+  },
+  {
+    accessorKey: "email",
+    header: "Email",
+    cell: ({ getValue }) => (
+      <span className="text-txt-secondary">{getValue() as string}</span>
+    ),
+  },
+  {
+    accessorKey: "company",
+    header: "Company",
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ getValue }) => {
+      const status = getValue() as CustomerStatus;
+      return <Badge variant={getStatusBadgeVariant(status)}>{status}</Badge>;
+    },
+  },
+  {
+    accessorKey: "orderCount",
+    header: "Orders",
+    cell: ({ getValue }) => (getValue() as number) ?? 0,
+  },
+  {
+    accessorKey: "totalSpentCents",
+    header: "Total",
+    cell: ({ getValue }) => formatCents((getValue() as number) ?? 0),
+  },
+];
 
 // =============================================================================
 // Components
 // =============================================================================
 
 /**
- * Search input with debouncing.
- */
-function SearchInput({
-  value,
-  onChange,
-  placeholder = "Search...",
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  const [localValue, setLocalValue] = useState(value);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
-
-  const handleChange = useCallback(
-    (newValue: string) => {
-      setLocalValue(newValue);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => onChange(newValue), 300);
-    },
-    [onChange]
-  );
-
-  return (
-    <div className="search-input flex items-center gap-2 bg-bg-secondary border border-bdr-secondary rounded-md py-1.5 px-2.5 flex-1 max-w-[280px] focus-within:border-ring-primary">
-      <MagnifyingGlass size={12} className="text-txt-tertiary shrink-0" />
-      <input
-        type="text"
-        value={localValue}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder={placeholder}
-        className="flex-1 bg-transparent border-none text-txt-primary text-sm outline-none min-w-0 placeholder:text-txt-secondary"
-      />
-      {localValue && (
-        <button
-          className="flex items-center justify-center bg-transparent border-none text-txt-secondary cursor-pointer p-0.5 rounded-sm hover:bg-bg-tertiary hover:text-txt-primary"
-          onClick={() => handleChange("")}
-        >
-          <X size={14} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-/**
- * Status filter dropdown.
- */
-function StatusFilter({
-  value,
-  onChange,
-}: {
-  value?: CustomerStatus;
-  onChange: (value?: CustomerStatus) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1.5 text-txt-secondary">
-      <Funnel size={16} />
-      <select
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value as CustomerStatus || undefined)}
-        className="bg-bg-secondary border border-bdr-secondary rounded-md text-txt-primary text-sm py-1.5 px-2 cursor-pointer focus:border-ring-primary focus:outline-none"
-      >
-        <option value="">All Status</option>
-        <option value="active">Active</option>
-        <option value="inactive">Inactive</option>
-        <option value="lead">Lead</option>
-      </select>
-    </div>
-  );
-}
-
-/**
- * Sortable column header.
- */
-function SortableHeader({
-  label,
-  field,
-  currentSort,
-  onSort,
-}: {
-  label: string;
-  field: CustomerSortField;
-  currentSort: SortConfig;
-  onSort: (field: CustomerSortField) => void;
-}) {
-  const isActive = currentSort.field === field;
-  const Icon = isActive && currentSort.direction === "asc" ? CaretUp : CaretDown;
-
-  return (
-    <th
-      className="text-left py-2.5 px-3 font-medium text-txt-secondary border-b border-bdr-secondary whitespace-nowrap cursor-pointer select-none hover:text-txt-primary"
-      onClick={() => onSort(field)}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <Icon
-          size={12}
-          weight={isActive ? "bold" : "regular"}
-          className={isActive ? "opacity-100 text-ring-primary" : "opacity-40"}
-        />
-      </span>
-    </th>
-  );
-}
-
-/**
- * Pagination controls.
- */
-function PaginationControls({
-  pagination,
-  onPageChange,
-}: {
-  pagination: Pagination;
-  onPageChange: (page: number) => void;
-}) {
-  const { page, totalPages, total } = pagination;
-
-  return (
-    <div className="flex items-center justify-between py-2.5 px-4 border-t border-bdr-secondary bg-bg-secondary shrink-0">
-      <span className="text-txt-secondary text-sm">
-        {total} total
-      </span>
-      <div className="flex items-center gap-2">
-        <button
-          disabled={page <= 1}
-          onClick={() => onPageChange(page - 1)}
-          title="Previous page"
-          className="flex items-center justify-center w-7 h-7 bg-bg-primary border border-bdr-secondary rounded-sm text-txt-primary cursor-pointer hover:border-ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <CaretLeft size={16} />
-        </button>
-        <span className="text-sm text-txt-secondary min-w-[60px] text-center">
-          {page} / {totalPages}
-        </span>
-        <button
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
-          title="Next page"
-          className="flex items-center justify-center w-7 h-7 bg-bg-primary border border-bdr-secondary rounded-sm text-txt-primary cursor-pointer hover:border-ring-primary disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <CaretRight size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Status badge.
- */
-function StatusBadge({ status }: { status: CustomerStatus | OrderStatus }) {
-  return (
-    <span className="text-xs font-medium capitalize" style={{ color: getStatusColor(status) }}>
-      {status}
-    </span>
-  );
-}
-
-/**
- * Customer table.
- */
-function CustomerTable({
-  customers,
-  sort,
-  selectedId,
-  onSort,
-  onSelect,
-  onSeed,
-  isSeeding,
-}: {
-  customers: Customer[];
-  sort: SortConfig;
-  selectedId?: string;
-  onSort: (field: CustomerSortField) => void;
-  onSelect: (customer: Customer) => void;
-  onSeed: () => void;
-  isSeeding: boolean;
-}) {
-  if (customers.length === 0) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center text-txt-secondary p-8 gap-3">
-        <User size={48} className="opacity-50" />
-        <p className="text-sm">No customers found</p>
-        <button
-          className="flex items-center gap-1.5 py-1.5 px-3 rounded-md text-sm font-medium cursor-pointer transition-opacity bg-bg-inverse border-none text-txt-inverse hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
-          onClick={onSeed}
-          disabled={isSeeding}
-        >
-          <Database size={16} />
-          {isSeeding ? "Seeding..." : "Seed Demo Data"}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 overflow-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead className="sticky top-0 bg-bg-secondary z-[1]">
-          <tr>
-            <SortableHeader label="Name" field="name" currentSort={sort} onSort={onSort} />
-            <SortableHeader label="Email" field="email" currentSort={sort} onSort={onSort} />
-            <SortableHeader label="Company" field="company" currentSort={sort} onSort={onSort} />
-            <SortableHeader label="Status" field="status" currentSort={sort} onSort={onSort} />
-            <th className="text-left py-2.5 px-3 font-medium text-txt-secondary border-b border-bdr-secondary whitespace-nowrap">Orders</th>
-            <th className="text-left py-2.5 px-3 font-medium text-txt-secondary border-b border-bdr-secondary whitespace-nowrap">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {customers.map((customer) => (
-            <tr
-              key={customer.id}
-              className={`cursor-pointer transition-colors hover:bg-bg-tertiary ${selectedId === customer.id ? "bg-bg-secondary" : ""}`}
-              onClick={() => onSelect(customer)}
-            >
-              <td className="py-2.5 px-3 border-b border-bdr-tertiary max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap font-medium">{customer.name}</td>
-              <td className="py-2.5 px-3 border-b border-bdr-tertiary max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap text-txt-secondary">{customer.email}</td>
-              <td className="py-2.5 px-3 border-b border-bdr-tertiary max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap">{customer.company}</td>
-              <td className="py-2.5 px-3 border-b border-bdr-tertiary"><StatusBadge status={customer.status} /></td>
-              <td className="py-2.5 px-3 border-b border-bdr-tertiary">{customer.orderCount ?? 0}</td>
-              <td className="py-2.5 px-3 border-b border-bdr-tertiary">{formatCents(customer.totalSpentCents ?? 0)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/**
  * Customer detail panel.
+ * Displays customer info, order stats, and order history.
  */
-function CustomerDetail({
+const CustomerDetail = ({
   data,
   onClose,
 }: {
   data: CustomerDetailData;
   onClose: () => void;
-}) {
+}) => {
   const { customer, orders, stats } = data;
 
   return (
     <div className="w-[40%] min-w-[300px] border-l border-bdr-secondary bg-bg-secondary flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b border-bdr-secondary shrink-0 shadow-md">
-        <h2 className="text-lg font-medium">{customer.name}</h2>
-        <button
-          className="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-sm text-txt-secondary cursor-pointer hover:bg-bg-tertiary hover:text-txt-primary"
-          onClick={onClose}
-        >
+      <div className="flex items-center justify-between p-4 border-b border-bdr-secondary shrink-0">
+        <Heading level={3} size="sm">{customer.name}</Heading>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           <X size={16} />
-        </button>
+        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto pb-10">
         <div className="p-4 border-b border-bdr-secondary">
           <div className="flex justify-between items-center py-1.5">
-            <span className="text-txt-secondary text-sm">Email</span>
-            <span className="text-sm">{customer.email}</span>
+            <Text size="sm" variant="secondary">Email</Text>
+            <Text size="sm">{customer.email}</Text>
           </div>
           <div className="flex justify-between items-center py-1.5">
-            <span className="text-txt-secondary text-sm">Company</span>
-            <span className="text-sm">{customer.company}</span>
+            <Text size="sm" variant="secondary">Company</Text>
+            <Text size="sm">{customer.company}</Text>
           </div>
           <div className="flex justify-between items-center py-1.5">
-            <span className="text-txt-secondary text-sm">Status</span>
-            <StatusBadge status={customer.status} />
+            <Text size="sm" variant="secondary">Status</Text>
+            <Badge variant={getStatusBadgeVariant(customer.status)}>{customer.status}</Badge>
           </div>
           <div className="flex justify-between items-center py-1.5">
-            <span className="text-txt-secondary text-sm">Customer Since</span>
-            <span className="text-sm">{formatDate(customer.createdAt)}</span>
+            <Text size="sm" variant="secondary">Customer Since</Text>
+            <Text size="sm">{formatDate(customer.createdAt)}</Text>
           </div>
         </div>
 
         <div className="flex gap-4 p-4 border-b border-bdr-secondary">
           <div className="flex-1 text-center">
-            <span className="block text-lg font-medium mb-1">{stats.orderCount}</span>
-            <span className="text-xs text-txt-secondary">Orders</span>
+            <Text as="span" className="block text-lg font-medium mb-1">{stats.orderCount}</Text>
+            <Text size="sm" variant="secondary">Orders</Text>
           </div>
           <div className="flex-1 text-center">
-            <span className="block text-lg font-medium mb-1">{stats.totalSpent}</span>
-            <span className="text-xs text-txt-secondary">Total Spent</span>
+            <Text as="span" className="block text-lg font-medium mb-1">{stats.totalSpent}</Text>
+            <Text size="sm" variant="secondary">Total Spent</Text>
           </div>
         </div>
 
-        <h3 className="py-4 px-4 pb-3 text-base font-medium text-txt-secondary">Order History</h3>
+        <Heading level={4} size="sm" className="py-4 px-4 pb-3" variant="secondary">Order History</Heading>
         {orders.length === 0 ? (
-          <div className="flex flex-col items-center justify-center text-txt-secondary p-4 gap-2">
-            <Package size={32} className="opacity-50" />
-            <p className="text-sm">No orders yet</p>
+          <div className="flex flex-col items-center justify-center p-4 gap-2">
+            <Package size={32} className="text-txt-tertiary opacity-50" />
+            <Text size="sm" variant="secondary">No orders yet</Text>
           </div>
         ) : (
           <div className="px-4 pb-4">
             {orders.map((order) => (
-              <div key={order.id} className="bg-bg-primary border border-bdr-secondary rounded-md p-3 mb-2">
+              <Card key={order.id} variant="secondary" padding="sm" className="mb-2">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="font-medium text-sm">{order.number}</span>
-                  <StatusBadge status={order.status} />
+                  <Text as="span" size="sm" className="font-medium">{order.number}</Text>
+                  <Badge variant={getStatusBadgeVariant(order.status)}>{order.status}</Badge>
                 </div>
-                <div className="flex justify-between text-xs text-txt-secondary">
-                  <span>{formatDate(order.createdAt)}</span>
-                  <span className="font-medium text-txt-primary">{formatCents(order.totalCents)}</span>
+                <div className="flex justify-between">
+                  <Text size="sm" variant="secondary">{formatDate(order.createdAt)}</Text>
+                  <Text size="sm" className="font-medium">{formatCents(order.totalCents)}</Text>
                 </div>
                 {order.items && order.items.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-bdr-tertiary">
+                  <div className="mt-2 pt-2 border-t border-bdr-secondary">
                     {order.items.map((item) => (
-                      <div key={item.id} className="flex items-center gap-2 text-xs py-1">
-                        <span className="flex-1 text-txt-secondary">{item.title}</span>
-                        <span className="text-txt-secondary">×{item.qty}</span>
-                        <span className="text-txt-primary">{formatCents(item.unitPriceCents * item.qty)}</span>
+                      <div key={item.id} className="flex items-center gap-2 py-1">
+                        <Text as="span" size="sm" variant="secondary" className="flex-1">{item.title}</Text>
+                        <Text as="span" size="sm" variant="secondary">&times;{item.qty}</Text>
+                        <Text as="span" size="sm">{formatCents(item.unitPriceCents * item.qty)}</Text>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </Card>
             ))}
           </div>
         )}
       </div>
     </div>
   );
-}
-
-/**
- * Top toolbar with search, filters, and actions.
- */
-function Toolbar({
-  filters,
-  onFilterChange,
-  onSeed,
-  onReset,
-  isSeeding,
-  hasData,
-}: {
-  filters: Filters;
-  onFilterChange: (filters: Filters) => void;
-  onSeed: () => void;
-  onReset: () => void;
-  isSeeding: boolean;
-  hasData: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 pt-0 pb-3 px-4 border-b border-bdr-secondary shrink-0">
-      <div className="flex items-center gap-2 flex-1">
-        <SearchInput
-          value={filters.query || ""}
-          onChange={(query) => onFilterChange({ ...filters, query: query || undefined })}
-          placeholder="Search customers..."
-        />
-        <StatusFilter
-          value={filters.status}
-          onChange={(status) => onFilterChange({ ...filters, status })}
-        />
-      </div>
-      <div className="flex items-center gap-2">
-        {hasData && (
-          <button
-            className="flex items-center gap-1.5 py-1.5 px-3 rounded-md text-sm font-medium cursor-pointer transition-opacity bg-transparent border border-bdr-primary text-txt-secondary hover:border-bdr-danger hover:text-txt-danger"
-            onClick={onReset}
-          >
-            <Trash size={16} />
-            Reset
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+};
 
 // =============================================================================
 // Main Component
@@ -554,13 +324,10 @@ function CrmApp() {
   const [listData, setListData] = useState<ListData | null>(null);
   const [customerDetail, setCustomerDetail] = useState<CustomerDetailData | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>();
-  const [filters, setFilters] = useState<Filters>({});
-  const [sort, setSort] = useState<SortConfig>({ field: "createdAt", direction: "desc" });
-  const [page, setPage] = useState(1);
   const [isSeeding, setIsSeeding] = useState(false);
   const hasInitiallyFetched = useRef(false);
 
-  const { callTool, isReady, log, exp_widgetState, onToolResult } = useHost();
+  const { callTool, isReady, log, exp_widgetState, onToolResult, hostContext } = useHost();
 
   // Widget state
   const [widgetState, setWidgetState] = exp_widgetState<WidgetState>();
@@ -574,26 +341,25 @@ function CrmApp() {
   // Restore state from widget state
   useEffect(() => {
     if (widgetState?.privateContent) {
-      const { listData: savedList, customerDetail: savedDetail, filters: savedFilters, sort: savedSort, page: savedPage } = widgetState.privateContent;
+      const { listData: savedList, customerDetail: savedDetail } = widgetState.privateContent;
       if (savedList) setListData(savedList);
       if (savedDetail) setCustomerDetail(savedDetail);
-      if (savedFilters) setFilters(savedFilters);
-      if (savedSort) setSort(savedSort);
-      if (savedPage) setPage(savedPage);
     }
   }, []);
 
-  // Fetch customers when ready or when filters/sort/page change
+  /**
+   * Fetch all customers from the server.
+   * Uses the maximum allowed pageSize (100) so DataTable can handle
+   * sorting/filtering client-side. Sufficient for demo data (~25 customers).
+   */
   const fetchCustomers = useCallback(async () => {
     await listCustomers({
-      query: filters.query,
-      status: filters.status,
-      sortField: sort.field,
-      sortDirection: sort.direction,
-      page,
-      pageSize: 20,
+      sortField: "createdAt",
+      sortDirection: "desc",
+      page: 1,
+      pageSize: 100,
     });
-  }, [listCustomers, filters, sort, page]);
+  }, [listCustomers]);
 
   // Initial fetch
   useEffect(() => {
@@ -603,19 +369,11 @@ function CrmApp() {
     }
   }, [isReady, fetchCustomers]);
 
-  // Refetch when filters/sort/page change
-  useEffect(() => {
-    if (hasInitiallyFetched.current) {
-      fetchCustomers();
-    }
-  }, [filters, sort, page]);
-
   // Handle list data updates
   useEffect(() => {
     if (listState.data) {
       setListData(listState.data);
 
-      // Save to widget state
       setWidgetState({
         modelContent: {
           totalCustomers: listState.data.summary.totalCustomers,
@@ -625,9 +383,9 @@ function CrmApp() {
         privateContent: {
           listData: listState.data,
           customerDetail: customerDetail ?? undefined,
-          filters,
-          sort,
-          page,
+          filters: {},
+          sort: { field: "createdAt", direction: "desc" },
+          page: 1,
         },
       });
     }
@@ -649,7 +407,7 @@ function CrmApp() {
     if (seedState.error) {
       setIsSeeding(false);
     }
-  }, [seedState.data, seedState.error]);
+  }, [seedState.data, seedState.error, fetchCustomers]);
 
   // Handle reset completion
   useEffect(() => {
@@ -659,7 +417,7 @@ function CrmApp() {
       setSelectedCustomerId(undefined);
       fetchCustomers();
     }
-  }, [resetState.data]);
+  }, [resetState.data, fetchCustomers]);
 
   // Subscribe to agent-initiated tool calls
   useEffect(() => {
@@ -683,109 +441,115 @@ function CrmApp() {
     });
   }, [onToolResult, fetchCustomers]);
 
-  // Handle customer selection
-  const handleSelectCustomer = useCallback(
-    async (customer: Customer) => {
-      setSelectedCustomerId(customer.id);
-      await getCustomer({ customerId: customer.id });
+  /**
+   * Handle customer row click — fetch detail data.
+   */
+  const handleRowClick = useCallback(
+    async ({ original }: { original: Customer; index: number }) => {
+      setSelectedCustomerId(original.id);
+      await getCustomer({ customerId: original.id });
     },
     [getCustomer]
   );
 
-  // Handle sort
-  const handleSort = useCallback((field: CustomerSortField) => {
-    setSort((prev) => ({
-      field,
-      direction: prev.field === field && prev.direction === "asc" ? "desc" : "asc",
-    }));
-    setPage(1);
-  }, []);
-
-  // Handle filter change
-  const handleFilterChange = useCallback((newFilters: Filters) => {
-    setFilters(newFilters);
-    setPage(1);
-  }, []);
-
-  // Handle seed
+  /**
+   * Seed demo data into the CRM.
+   */
   const handleSeed = useCallback(async () => {
     setIsSeeding(true);
     await seedData({});
   }, [seedData]);
 
-  // Handle reset
+  /**
+   * Reset all CRM data.
+   */
   const handleReset = useCallback(async () => {
     await resetData({ confirm: true });
   }, [resetData]);
 
-  // Handle close detail
+  /**
+   * Close the detail panel.
+   */
   const handleCloseDetail = useCallback(() => {
     setSelectedCustomerId(undefined);
     setCustomerDetail(null);
   }, []);
 
+  const customers = listData?.customers ?? [];
   const hasData = (listData?.summary.totalCustomers ?? 0) > 0;
 
+  /**
+   * Empty state shown when there are no customers.
+   * Includes a seed button for populating demo data.
+   */
+  const emptyState = (
+    <div className="flex flex-col items-center gap-3 py-8">
+      <User size={48} className="text-txt-tertiary opacity-50" />
+      <Text variant="secondary">No customers found</Text>
+      <Button
+        variant="primary"
+        size="md"
+        onClick={handleSeed}
+        disabled={isSeeding}
+        loading={isSeeding}
+      >
+        <Database size={16} />
+        {isSeeding ? "Seeding..." : "Seed Demo Data"}
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-bg-primary text-txt-primary">
-      <header className="flex items-center justify-between py-3 px-4 pb-2 shrink-0">
-        <h1 className="text-lg font-medium">CRM</h1>
-        {listData && (
-          <span className="text-txt-secondary text-sm">
-            {listData.summary.totalCustomers} customers · {listData.summary.totalOrders} orders
-          </span>
-        )}
-      </header>
+    <AppLayout displayMode={hostContext?.displayMode} noPadding className="h-full">
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* Header toolbar */}
+        <header className="flex items-center justify-between py-3 px-4 border-b border-bdr-secondary shrink-0">
+          <div className="flex items-center gap-3">
+            <Heading level={2} size="sm">CRM</Heading>
+            {listData && (
+              <Text size="sm" variant="secondary">
+                {listData.summary.totalCustomers} customers &middot; {listData.summary.totalOrders} orders
+              </Text>
+            )}
+          </div>
+          {hasData && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleReset}
+              className="text-txt-secondary hover:text-txt-danger"
+            >
+              <Trash size={16} />
+              Reset
+            </Button>
+          )}
+        </header>
 
-      <Toolbar
-        filters={filters}
-        onFilterChange={handleFilterChange}
-        onSeed={handleSeed}
-        onReset={handleReset}
-        isSeeding={isSeeding}
-        hasData={hasData}
-      />
-
-      <div className="flex flex-1 overflow-hidden">
-        <div className={`flex-1 flex flex-col overflow-hidden min-w-0 transition-opacity ${customerDetail ? "max-w-[60%] opacity-30" : ""}`}>
-          {listState.status === "loading" && !listData ? (
-            <div className="flex-1 flex items-center justify-center text-txt-secondary">Loading...</div>
-          ) : listData ? (
-            <>
-              <CustomerTable
-                customers={listData.customers}
-                sort={sort}
-                selectedId={selectedCustomerId}
-                onSort={handleSort}
-                onSelect={handleSelectCustomer}
-                onSeed={handleSeed}
-                isSeeding={isSeeding}
-              />
-              <PaginationControls
-                pagination={listData.pagination}
-                onPageChange={setPage}
-              />
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-txt-secondary p-8 gap-3">
-              <Database size={48} className="opacity-50" />
-              <p className="text-sm">No customers found</p>
-              <button
-                className="flex items-center gap-1.5 py-1.5 px-3 rounded-md text-sm font-medium cursor-pointer transition-opacity bg-bg-inverse border-none text-txt-inverse hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
-                onClick={handleSeed}
-                disabled={isSeeding}
-              >
-                <Database size={16} />
-                {isSeeding ? "Seeding..." : "Seed Demo Data"}
-              </button>
+        {/* Main content area */}
+        <div className="flex flex-1 overflow-hidden">
+          <div className={`flex-1 flex flex-col overflow-hidden min-w-0 transition-opacity ${customerDetail ? "max-w-[60%] opacity-30" : ""}`}>
+            <div className="px-4 py-3 flex-1 flex flex-col overflow-hidden">
+            <DataTable<Customer>
+              columns={customerColumns}
+              data={customers}
+              sortable
+              filterable
+              filterPlaceholder="Search customers..."
+              pageSize={20}
+              onRowClick={handleRowClick}
+              loading={listState.status === "loading" && !listData}
+              emptyMessage={emptyState}
+              stickyHeader
+              borderVariant="secondary"
+            />
             </div>
+          </div>
+
+          {customerDetail && (
+            <CustomerDetail data={customerDetail} onClose={handleCloseDetail} />
           )}
         </div>
-
-        {customerDetail && (
-          <CustomerDetail data={customerDetail} onClose={handleCloseDetail} />
-        )}
       </div>
-    </div>
+    </AppLayout>
   );
 }

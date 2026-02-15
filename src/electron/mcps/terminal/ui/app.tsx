@@ -3,8 +3,8 @@ import { useHost, useToolResult, useWebSocket } from "open-mcp-app/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-// Tailwind 4 integration - imports SDK theme mapping for host-provided variables
-import "open-mcp-app/styles/tailwind.css";
+import { Text } from "open-mcp-app-ui";
+import "open-mcp-app-ui/styles.css";
 import "@xterm/xterm/css/xterm.css";
 import "./fonts.css";
 import "./App.css";
@@ -436,8 +436,10 @@ export const App = () => {
     <div className="flex flex-col h-full w-full">
       <div ref={terminalRef} className="flex-1 p-2 min-h-0 w-full" />
       {!terminalData && (
-        <div className="flex items-center justify-center h-full w-full text-txt-secondary text-sm">
-          {isReady ? "Waiting for terminal..." : "Connecting..."}
+        <div className="flex items-center justify-center h-full w-full">
+          <Text size="sm" variant="secondary">
+            {isReady ? "Waiting for terminal..." : "Connecting..."}
+          </Text>
         </div>
       )}
     </div>

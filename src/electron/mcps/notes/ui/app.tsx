@@ -31,12 +31,12 @@
  * - types.ts: Type definitions
  */
 
-import { HostProvider } from "open-mcp-app/react";
+import { HostProvider, useHost } from "open-mcp-app/react";
+import { AppLayout } from "open-mcp-app-ui";
 import { NotesProvider, useNotesContext } from "./useNotes";
 import { ListView } from "./ListView";
 import { EditorView } from "./EditorView";
-// Tailwind 4 integration - imports SDK theme mapping for host-provided variables
-import "open-mcp-app/styles/tailwind.css";
+import "open-mcp-app-ui/styles.css";
 import "./styles.css";
 
 /**
@@ -67,13 +67,16 @@ export default function App() {
  */
 function NotesApp() {
   const { isReady, view, note } = useNotesContext();
+  const { hostContext } = useHost();
 
   // Show loading spinner until host is ready
   if (!isReady) {
     return (
-      <div className="flex items-center justify-center h-full w-full bg-bg-primary text-txt-primary">
-        <div className="w-6 h-6 border-2 border-bdr-secondary border-t-txt-primary rounded-full animate-spin" />
-      </div>
+      <AppLayout displayMode={hostContext?.displayMode} noPadding className="h-full">
+        <div className="flex items-center justify-center h-full w-full">
+          <div className="w-6 h-6 border-2 border-bdr-secondary border-t-txt-primary rounded-full animate-spin" />
+        </div>
+      </AppLayout>
     );
   }
 

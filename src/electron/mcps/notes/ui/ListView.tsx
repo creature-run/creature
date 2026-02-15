@@ -10,6 +10,14 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
+import { useHost } from "open-mcp-app/react";
+import {
+  AppLayout,
+  Heading,
+  Text,
+  Button,
+  Input,
+} from "open-mcp-app-ui";
 import { useNotesContext } from "./useNotes";
 
 /**
@@ -36,6 +44,7 @@ const formatRelativeTime = (dateStr: string): string => {
  */
 export function ListView() {
   const { notes, openNote, createNote, refreshList } = useNotesContext();
+  const { hostContext } = useHost();
   const [search, setSearch] = useState("");
 
   /**
@@ -59,67 +68,64 @@ export function ListView() {
   }, [notes, search]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-bg-primary text-txt-primary">
-      <header className="p-4 border-b border-bdr-secondary shrink-0">
-        <h1 className="text-lg font-medium mb-3">Notes</h1>
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <MagnifyingGlass
-              size={12}
-              weight="regular"
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-tertiary"
-            />
-            <input
-              type="text"
-              className="w-full py-2.5 pl-8 pr-3 bg-bg-secondary border border-bdr-secondary rounded-md text-sm text-txt-primary outline-none placeholder:text-txt-secondary"
-              placeholder="Search notes..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+    <AppLayout displayMode={hostContext?.displayMode} noPadding className="h-full">
+      <div className="flex flex-col h-full overflow-hidden">
+        <header className="p-4 border-b border-bdr-secondary shrink-0">
+          <Heading level={2} size="sm" className="mb-3">Notes</Heading>
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <MagnifyingGlass
+                size={12}
+                weight="regular"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-tertiary z-[1]"
+              />
+              <Input
+                type="text"
+                className="pl-8"
+                placeholder="Search notes..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                size="md"
+              />
+            </div>
+            <Button variant="primary" size="md" onClick={createNote}>
+              New Note
+            </Button>
           </div>
-          <button
-            className="bg-txt-primary text-txt-inverse border-none py-2.5 px-3 rounded-md text-sm font-medium cursor-pointer hover:opacity-90 shrink-0"
-            onClick={createNote}
-          >
-            New Note
-          </button>
-        </div>
-      </header>
+        </header>
 
-      {filteredNotes.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-txt-secondary p-8 text-center">
-          {notes.length === 0 ? (
-            <>
-              <p className="mb-4">No notes yet</p>
-              <button
-                className="bg-txt-primary text-txt-inverse border-none py-3 px-6 rounded-md text-base font-medium cursor-pointer hover:opacity-90"
-                onClick={createNote}
+        {filteredNotes.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-txt-secondary p-8 text-center">
+            {notes.length === 0 ? (
+              <>
+                <Text variant="secondary" className="mb-4">No notes yet</Text>
+                <Button variant="primary" size="lg" onClick={createNote}>
+                  Create your first note
+                </Button>
+              </>
+            ) : (
+              <Text variant="secondary">No notes match &ldquo;{search}&rdquo;</Text>
+            )}
+          </div>
+        ) : (
+          <ul className="flex-1 overflow-y-auto list-none m-0 p-0">
+            {filteredNotes.map((note) => (
+              <li
+                key={note.id}
+                className="flex justify-between items-center py-3 px-4 border-b border-bdr-secondary cursor-pointer hover:bg-bg-secondary"
+                onClick={() => openNote(note.id)}
               >
-                Create your first note
-              </button>
-            </>
-          ) : (
-            <p>No notes match "{search}"</p>
-          )}
-        </div>
-      ) : (
-        <ul className="flex-1 overflow-y-auto list-none m-0 p-0">
-          {filteredNotes.map((note) => (
-            <li
-              key={note.id}
-              className="flex justify-between items-center py-3 px-4 border-b border-bdr-tertiary cursor-pointer hover:bg-bg-secondary"
-              onClick={() => openNote(note.id)}
-            >
-              <span className="text-sm text-txt-primary flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                {note.title || "Untitled"}
-              </span>
-              <span className="text-xs text-txt-tertiary shrink-0 ml-3">
-                {formatRelativeTime(note.updatedAt)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+                <Text as="span" size="sm" className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {note.title || "Untitled"}
+                </Text>
+                <Text as="span" size="sm" variant="tertiary" className="shrink-0 ml-3">
+                  {formatRelativeTime(note.updatedAt)}
+                </Text>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AppLayout>
   );
 }

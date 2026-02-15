@@ -446,15 +446,20 @@ import { AppLayout, Show, Heading, Text, Button, Card } from "open-mcp-app-ui";
 </AppLayout>
 \`\`\`
 
-## Component Library (\`open-mcp-app-ui\`)
+## UI Components (\`open-mcp-app-ui\`)
 
-The project includes \`open-mcp-app-ui\`, a component library for MCP Apps. **Always use these components instead of writing raw HTML/Tailwind for standard UI elements.** They are pre-themed with spec CSS variables and adapt to display modes automatically.
-
-If you need a component that is not in this library, you may build it with raw Tailwind using spec variables, or use an external package. Prefer this library first — these components are tested and guaranteed to work correctly in MCP App sandboxes.
-
-**CRITICAL — Tabular / grid / list data:** Whenever data needs to be displayed in rows and columns, a table, a grid, or any structured list format, **always use \`<DataTable>\` from \`open-mcp-app-ui/table\`**. Do NOT build custom tables with raw \`<table>\`, \`<div>\` grids, or \`.map()\` loops for tabular data. \`DataTable\` handles theming, sorting, filtering, pagination, virtualization, and responsive behavior automatically. Even simple 2-column key-value displays benefit from \`DataTable\` — it is always the right choice for structured data.
+The project includes \`open-mcp-app-ui\`, a component library for MCP Apps. **Use these components when one exists for the use-case.** They are pre-themed with spec CSS variables and adapt to display modes automatically. When the library does not have a component for what you need, you may use raw Tailwind, other libraries, or custom components.
 
 **Before using components, call \`devkit_get_component_docs\` with a \`components\` array** to get exact props, types, and usage examples. Batch all the components you need in one call (e.g. \`{ components: ["Button", "Input", "Card", "Select"] }\`). Don't guess at props — the docs are concise and always up to date.
+
+### Design Rules
+
+- You SHOULD use \`open-mcp-app-ui\` components for all standard UI elements. They are pre-themed and tested for MCP App sandboxes. You MAY use other libraries, raw Tailwind, or custom components when the library does not have what you need.
+- You MUST ALWAYS use the secondary border style on all bordered components. The host is Creature, which uses the subtle secondary borders for framing. Use \`borderVariant="secondary"\` on \`<DataTable>\`, charts, and \`<Tabs>\`. Use \`variant="secondary"\` on \`<Card>\` and \`<Divider>\`. Use \`bordered="secondary"\` on \`<Editor>\`.
+- You MUST ALWAYS use the themed chart wrappers from \`open-mcp-app-ui/charts\` (\`LineChart\`, \`BarChart\`, \`AreaChart\`, etc.) — NEVER use raw Recharts components directly. The wrappers auto-apply axis line colors, tick mark colors, grid line colors, and tick label styles from CSS variables so charts match the host theme in both light and dark mode. Use gradient chart styles: area charts with \`type="monotone"\` for smooth curves, three-stop gradient fills (solid top fading to transparent bottom), dashed horizontal grid only (\`strokeDasharray="3 3"\`, no vertical lines), hollow active dots, \`fontSize: 11\` on axes. ALWAYS use the info color (\`var(--color-text-info)\`) as the primary series color for the first chart or any single-series chart.
+- You MUST ALWAYS wrap the app in \`<AppLayout>\` and use \`<Show>\` for display-mode-conditional rendering. NEVER skip \`<AppLayout>\`.
+- You MUST ALWAYS use \`<DataTable>\` for any tabular, grid, or structured list data. NEVER build tables with raw \`<table>\`, \`.map()\` + Cards, or custom div grids. DataTable provides sorting, filtering, pagination, and virtualization automatically.
+- You MUST ALWAYS keep icons inside buttons small. Use \`size={14}\` for small buttons and \`size={16}\` for default buttons. NEVER use large icons (20+) inside buttons.
 
 **Available components:**
 

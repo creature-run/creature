@@ -18,7 +18,7 @@
 
 import { useEffect, useCallback, useState, useRef, useMemo, createContext, useContext, type ReactNode } from "react";
 import { useHost, useViews, type Views } from "open-mcp-app/react";
-import type { MilkdownEditorRef } from "./MilkdownEditor";
+import type { EditorRef } from "open-mcp-app-ui/editor";
 import type { Note, NoteSummary, NoteData, NoteWidgetState, ViewType } from "./types";
 
 /**
@@ -47,8 +47,8 @@ export interface UseNotesReturn {
   isSaving: boolean;
   /** Timestamp of last successful save */
   lastSaved: Date | null;
-  /** Ref to Milkdown editor for imperative updates */
-  editorRef: React.RefObject<MilkdownEditorRef | null>;
+  /** Ref to the sdk-ui Editor for imperative updates */
+  editorRef: React.RefObject<EditorRef | null>;
   /** Update local draft state for the current note */
   updateDraft: (args: { noteId: string; title?: string; content?: string }) => void;
   /** Save a note with new title and content */
@@ -98,7 +98,7 @@ export const useNotes = (): UseNotesReturn => {
   const lastSaveSourceRef = useRef<"local" | null>(null);
   const lastOpenRefreshKeyRef = useRef<string | null>(null);
   const hasRestoredState = useRef(false);
-  const editorRef = useRef<MilkdownEditorRef>(null);
+  const editorRef = useRef<EditorRef>(null);
 
   // Get host APIs from context
   const {
@@ -157,14 +157,14 @@ export const useNotes = (): UseNotesReturn => {
         if (isExternalUpdate) {
           // External change - update editor
           setNote(noteData);
-          editorRef.current?.setContent(noteData.content);
+          editorRef.current?.setMarkdown(noteData.content);
           lastSavedContentRef.current = noteData.content;
           lastDraftContentRef.current = noteData.content;
           log.debug("Note updated externally", { id: noteData.id });
         } else if (hasContent) {
           // Content present - use server data and update editor
           setNote(noteData);
-          editorRef.current?.setContent(noteData.content);
+          editorRef.current?.setMarkdown(noteData.content);
           lastSavedContentRef.current = noteData.content;
           lastDraftContentRef.current = noteData.content;
         } else {
@@ -360,7 +360,7 @@ export const useNotes = (): UseNotesReturn => {
       // Imperatively update editor content if it's already mounted
       // This handles refresh cases where the editor mounts before restoration completes
       if (editorRef.current && lastNote.content !== undefined) {
-        editorRef.current.setContent(lastNote.content);
+        editorRef.current.setMarkdown(lastNote.content);
       }
       log.debug("Note restored from widget state", { id: lastNote.id });
     }
