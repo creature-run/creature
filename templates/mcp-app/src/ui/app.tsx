@@ -6,7 +6,7 @@
  */
 
 import { HostProvider, useHost } from "open-mcp-app/react";
-import { AppLayout, Heading, Text } from "open-mcp-app-ui";
+import { AppLayout, Text } from "open-mcp-app-ui";
 import "open-mcp-app-ui/styles.css";
 import "./styles.css";
 
@@ -36,7 +36,7 @@ const CreatureIcon = ({ size = 48, color }: { size?: number; color?: string }) =
  * Inner app content with access to SDK hooks.
  */
 function AppContent() {
-  const { hostContext } = useHost();
+  const { isReady, hostContext } = useHost();
 
   return (
     <AppLayout
@@ -56,7 +56,7 @@ function AppContent() {
 
 export default function App() {
   return (
-    <HostProvider name="__APP_NAME__" version="0.1.0">
+    <HostProvider name="__APP_NAME__" version="0.1.0" captureConsole>
       <AppContent />
     </HostProvider>
   );

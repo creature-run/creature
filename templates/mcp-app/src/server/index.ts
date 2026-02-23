@@ -5,6 +5,7 @@
  */
 
 import { createApp } from "open-mcp-app/server";
+import { z } from "zod";
 
 /**
  * Server port configuration.
@@ -25,6 +26,7 @@ const app = createApp({
   port: PORT,
   instructions: `Describe your MCP App and its tools here.
 Keep instructions concise — the UI communicates visually.`,
+  logToolCalls: true,
 });
 
 /**
@@ -47,6 +49,12 @@ app.resource({
 /**
  * Start the server.
  */
-app.start();
+const main = async () => {
+  await app.start();
+  console.log(`MCP App running on port ${PORT}`);
+};
 
-console.log(`MCP App running on port ${PORT}`);
+main().catch((err) => {
+  console.error("[__APP_NAME__] Failed to start:", err);
+  process.exit(1);
+});

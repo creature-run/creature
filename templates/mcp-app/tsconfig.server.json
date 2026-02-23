@@ -8,9 +8,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "outDir": "dist/server",
-    "rootDir": "src/server",
-    "declaration": false
+    "noEmit": true
   },
   "include": ["src/server/**/*"],
   "exclude": ["node_modules"]

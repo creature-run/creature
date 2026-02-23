@@ -8,13 +8,13 @@
     "dev:ui": "vite build --watch",
     "build": "npm run build:ui && npm run build:server",
     "build:ui": "vite build --mode production",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:server": "tsc --noEmit -p tsconfig.server.json",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/server/index.js"
+    "start": "tsx src/server/index.ts"
   },
   "dependencies": {
-    "open-mcp-app": "^0.0.7",
-    "open-mcp-app-ui": "^0.0.9",
+    "open-mcp-app": "^0.0.10",
+    "open-mcp-app-ui": "^0.0.10",
     "nanoid": "^5.0.0",
     "zod": "^3.22.0"
   },
